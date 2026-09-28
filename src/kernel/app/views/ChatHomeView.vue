@@ -2,7 +2,7 @@
 // 对话 tab = 纯 AI 对话域(chatbox)落地视图(spec v1.1 §02 图 A)。
 // M0 只落空态品牌时刻;会话列表与新建对话随 M2/M3 内核器官(会话存储 + LLM 管线)落地,
 // 卡会话永不进本列表(双域独立,spec §01)。
-import LineCat from '@/kernel/design/assets/LineCat.vue'
+import MintCat from '@/kernel/design/assets/MintCat.vue'
 </script>
 
 <template>
@@ -22,7 +22,7 @@ import LineCat from '@/kernel/design/assets/LineCat.vue'
     </header>
 
     <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 pb-16 text-center">
-      <LineCat class="h-24 w-24 text-primary" />
+      <MintCat class="h-24 w-24 text-ink" />
       <p class="text-sm text-ink-2">
         开始第一段对话
       </p>
