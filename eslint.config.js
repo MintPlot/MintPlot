@@ -53,7 +53,8 @@ export default tseslint.config(
       ],
     },
   },
-  // 2) plugins 禁 import kernel 内部符号(M1 契约包就位后收紧为「仅 contracts/public-api」)
+  // 2) plugins 禁 import kernel 内部符号;公开面唯一入口 = @contracts 契约包
+  //    (M1 契约真源就位;barrel-only 深路径禁令随 M2 首个真实插件落地时一并测试)
   {
     files: ['src/plugins/**/*.{ts,vue}'],
     rules: {
@@ -64,7 +65,25 @@ export default tseslint.config(
             {
               group: ['@/kernel', '@/kernel/**', '**/kernel', '**/kernel/**'],
               message:
-                '红线(章程 §3.5.4):插件只走公开插件 API,禁 import kernel 内部符号。',
+                '红线(章程 §3.5.4):插件只走公开插件 API(@contracts),禁 import kernel 内部符号。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // 2b) contracts 是依赖图叶子:契约包禁 import src/**(内核实现契约,契约不依赖内核)
+  {
+    files: ['contracts/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@', '@/**', '**/src', '**/src/**', '../*', '../**'],
+              message:
+                '契约真源(contracts/):框架无关、零内核依赖。内核与插件依赖契约,契约不反依赖。',
             },
           ],
         },
@@ -73,7 +92,7 @@ export default tseslint.config(
   },
   // 3) RP 血统残留字符串禁入(改名纪律 §04):sta1n / rp_hub_ / RPH
   {
-    files: ['src/**/*.{ts,vue}'],
+    files: ['src/**/*.{ts,vue}', 'contracts/**/*.ts', 'tests/**/*.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',

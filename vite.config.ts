@@ -7,9 +7,12 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [vue()],
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-    },
+    alias: [
+      // Order matters: the trailing-slash entry must win for deep imports.
+      { find: '@contracts/', replacement: fileURLToPath(new URL('./contracts/', import.meta.url)) },
+      { find: '@contracts', replacement: fileURLToPath(new URL('./contracts/index.ts', import.meta.url)) },
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+    ],
   },
   test: {
     environment: 'jsdom',

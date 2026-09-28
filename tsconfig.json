@@ -16,8 +16,10 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@contracts": ["./contracts/index.ts"],
+      "@contracts/*": ["./contracts/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "contracts/**/*.ts", "tests/**/*.ts", "vite.config.ts"]
 }
