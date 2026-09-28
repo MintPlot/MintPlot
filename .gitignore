@@ -1,6 +1,7 @@
 # Node / Vite
 node_modules/
 dist/
+coverage/
 *.local
 
 # 环境变量

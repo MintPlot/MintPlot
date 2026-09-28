@@ -1,0 +1,21 @@
+# CI 在首次推送放行后生效;此前以本地全绿纪律保证(M0 清单 §05 / M0-a)
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  web:
+    name: lint + test + build (web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
