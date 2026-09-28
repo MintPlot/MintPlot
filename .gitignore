@@ -26,3 +26,4 @@ keystore.properties
 .vscode/
 .DS_Store
 Thumbs.db
+android/keystores/

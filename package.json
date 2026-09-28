@@ -12,9 +12,13 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/core": "^7.6.9",
     "vue": "^3.5.43"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.9",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.3",
     "@vitejs/plugin-vue": "^6.0.9",

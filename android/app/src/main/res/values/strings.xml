@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MintPlot</string>
+    <string name="title_activity_main">MintPlot</string>
+    <string name="package_name">com.mintplot.app</string>
+    <string name="custom_url_scheme">com.mintplot.app</string>
+</resources>
