@@ -1,60 +1,91 @@
 <script setup lang="ts">
-// M0-c · token 自检面板(临时):明暗切换目检载体,M0-d 壳骨架落地后移除
-import LineCat from '@/kernel/design/assets/LineCat.vue'
-import { useMpTheme } from '@/kernel/design/theme'
+import { computed, onUnmounted, ref } from 'vue'
+import IconCharacters from '@/kernel/app/assets/tab-icons/IconCharacters.vue'
+import IconChat from '@/kernel/app/assets/tab-icons/IconChat.vue'
+import IconSettings from '@/kernel/app/assets/tab-icons/IconSettings.vue'
+import IconTools from '@/kernel/app/assets/tab-icons/IconTools.vue'
+import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
+import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
+import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
+import SettingsPlaceholderView from '@/kernel/app/views/SettingsPlaceholderView.vue'
 
-const { theme, toggleTheme } = useMpTheme()
+// 四 tab 信息架构(spec v1.1 §02)经注册表注册 —— tab 栏是投影,不是硬编码;
+// M2+ 起角色卡工坊(角色 tab,首页级)与插件聚合视图走同一条入驻路。
+const disposers = [
+  registerTab({ id: 'chat', title: '对话', icon: IconChat, component: ChatHomeView, order: 10 }),
+  registerTab({
+    id: 'characters',
+    title: '角色',
+    icon: IconCharacters,
+    component: PlaceholderView,
+    props: {
+      title: '角色',
+      note: '角色卡工坊 · 内置插件(首页级视图,M2+ 入驻):导卡 → 进卡 → 在卡内长出剧情',
+    },
+    order: 20,
+  }),
+  registerTab({
+    id: 'tools',
+    title: '工具',
+    icon: IconTools,
+    component: PlaceholderView,
+    props: {
+      title: '工具',
+      note: '插件视图聚合页(M2+ 随插件运行时入驻):提示词工程 · 记忆与数据 · 扩展 · 社区内容',
+    },
+    order: 30,
+  }),
+  registerTab({
+    id: 'settings',
+    title: '设置',
+    icon: IconSettings,
+    component: SettingsPlaceholderView,
+    order: 40,
+  }),
+]
+onUnmounted(() => {
+  disposers.forEach((dispose) => dispose())
+})
+
+const tabs = useTabProjection()
+const activeId = ref(tabs.value[0]?.id ?? '')
+const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? tabs.value[0])
 </script>
 
 <template>
-  <main class="min-h-dvh bg-bg px-5 py-10 text-ink">
-    <section class="mx-auto flex max-w-md flex-col gap-5 rounded-panel border border-line bg-card p-6">
-      <div class="flex items-center justify-between">
-        <span class="font-mono text-xs tracking-widest text-accent">M0-c · TOKEN 自检</span>
+  <div class="flex h-dvh flex-col bg-bg text-ink">
+    <div class="min-h-0 flex-1">
+      <component
+        :is="activeTab.component"
+        v-bind="activeTab.props"
+      />
+    </div>
+
+    <nav
+      class="shrink-0 border-t border-line bg-card"
+      aria-label="主导航"
+    >
+      <div class="mx-auto flex max-w-xl pb-[env(safe-area-inset-bottom)]">
         <button
+          v-for="tab in tabs"
+          :key="tab.id"
           type="button"
-          class="min-h-[44px] rounded-input border border-line-strong bg-card px-4 text-sm text-ink-2"
-          @click="toggleTheme"
+          class="relative flex min-h-[44px] flex-1 flex-col items-center justify-end gap-0.5 pb-1.5 pt-2 text-xs"
+          :class="tab.id === activeId ? 'text-primary' : 'text-ink-3'"
+          :aria-current="tab.id === activeId ? 'page' : undefined"
+          @click="activeId = tab.id"
         >
-          {{ theme === 'dark' ? '夜航墨绿' : '明' }}
+          <component
+            :is="tab.icon"
+            class="h-6 w-6"
+          />
+          <span>{{ tab.title }}</span>
+          <span
+            v-if="tab.id === activeId"
+            class="absolute inset-x-7 top-0 h-0.5 rounded-full bg-primary"
+          />
         </button>
       </div>
-
-      <div class="h-16 rounded-card bg-gradient-to-br from-mint-300 via-teal-400 to-cyan-500" />
-      <h1 class="text-2xl">
-        MintPlot
-      </h1>
-      <p class="text-sm text-ink-2">
-        酿一壶自己的剧情 — 薄荷 / 手作 / 墨水
-      </p>
-      <p class="font-mono text-xs text-ink-3">
-        v1.0.0-alpha · code 1 · 数字与计数统一 mono
-      </p>
-
-      <div class="flex flex-wrap gap-3">
-        <button
-          type="button"
-          class="min-h-[44px] rounded-action bg-gradient-to-br from-primary to-primary-pressed px-5 text-sm font-semibold text-on-primary"
-        >
-          开始对话
-        </button>
-        <button
-          type="button"
-          class="min-h-[44px] rounded-action bg-accent-wash px-5 text-sm font-semibold text-accent"
-        >
-          导入角色卡
-        </button>
-      </div>
-
-      <div class="h-px bg-line" />
-      <div class="mp-glass rounded-card px-4 py-3 text-xs text-ink-2">
-        玻璃只给固定 chrome(顶栏 / 输入坞 / 遮罩 / 抽屉),气泡一律实心卡 + hairline
-      </div>
-
-      <LineCat class="h-20 w-20 self-center text-primary" />
-      <p class="self-center text-sm text-ink-2">
-        开始第一段对话
-      </p>
-    </section>
-  </main>
+    </nav>
+  </div>
 </template>

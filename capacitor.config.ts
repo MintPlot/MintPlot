@@ -8,6 +8,10 @@ const config: CapacitorConfig = {
   appId: 'com.mintplot.app',
   appName: 'MintPlot',
   webDir: 'dist',
+  // Android 15+ 强制 edge-to-edge:由 Capacitor 对 WebView 避让系统栏(仅目标 SDK 35+ 生效)
+  android: {
+    adjustMarginsForEdgeToEdge: 'auto',
+  },
 }
 
 export default config
