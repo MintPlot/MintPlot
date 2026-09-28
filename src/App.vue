@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
 import IconChat from '@/kernel/app/assets/tab-icons/IconChat.vue'
-import IconSliders from '@/kernel/app/assets/tab-icons/IconSliders.vue'
+import IconBars from '@/kernel/app/assets/tab-icons/IconBars.vue'
 import IconUser from '@/kernel/app/assets/tab-icons/IconUser.vue'
 import IconWrench from '@/kernel/app/assets/tab-icons/IconWrench.vue'
 import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
@@ -9,8 +9,9 @@ import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
 import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
 import SettingsPlaceholderView from '@/kernel/app/views/SettingsPlaceholderView.vue'
 
-// 四 tab 信息架构(spec v1.1 §02)经注册表注册 —— tab 栏是投影,不是硬编码;
-// M2+ 起角色卡工坊(角色 tab,首页级)与插件聚合视图走同一条入驻路。
+// Four-tab IA (spec v1.1 §02) registered through the view registry — the tab bar is a
+// projection of the registry, not hardcoded; from M2+ the card workshop (characters tab,
+// home-level) and plugin aggregate views land through the same path.
 const disposers = [
   registerTab({ id: 'chat', title: '对话', icon: IconChat, component: ChatHomeView, order: 10 }),
   registerTab({
@@ -38,7 +39,7 @@ const disposers = [
   registerTab({
     id: 'settings',
     title: '设置',
-    icon: IconSliders,
+    icon: IconBars,
     component: SettingsPlaceholderView,
     order: 40,
   }),
