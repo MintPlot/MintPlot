@@ -1,13 +1,7 @@
+/* token 真源在前(自定义属性不受 preflight 影响),base 在 @layer base 内落在 preflight 之后 */
+@import './kernel/design/tokens.css';
+@import './kernel/design/base.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-html,
-body,
-#app {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-}

@@ -6,7 +6,7 @@ import vueParser from 'vue-eslint-parser'
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'android/**'],
+    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'android/**', 'documents/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

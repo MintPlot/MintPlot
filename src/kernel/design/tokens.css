@@ -1,0 +1,76 @@
+/*
+ * MintPlot 设计 token(M0-c · 薄荷出生)
+ * 唯一依据:documents/design/mintplot-design-language-v1.html —— 不自创色值。
+ * 纪律:壳内零硬编码色值;色值以 RGB 三元组存放,供 Tailwind <alpha-value> 透明度调制。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ── 品牌色阶(§02 色板,自图标渐变取样;渐变端点 #8DEAC4 → #1FB2CF 锁死)── */
+  --mp-mint-100: 230 251 241; /* #E6FBF1 wash:页面洗色 / 输入底 */
+  --mp-mint-200: 196 242 222; /* #C4F2DE */
+  --mp-mint-300: 141 234 196; /* #8DEAC4 surface:浅底色块 / 空态插画 */
+  --mp-mint-400: 92 221 180;  /* #5CDDB4 夜航 accent */
+  --mp-teal-400: 74 211 198;  /* #4AD3C6 渐变中点 */
+  --mp-teal-500: 43 179 155;  /* #2BB39B primary:主操作 / 链接 / 选中态 */
+  --mp-teal-600: 31 143 134;  /* #1F8F86 pressed:hover / 按下 / 强调边 */
+  --mp-teal-700: 27 111 112;  /* #1B6F70 明主题文本强调 */
+  --mp-cyan-500: 31 178 207;  /* #1FB2CF 渐变端点 */
+
+  /* ── 表面 / 墨色 · 明主题 ── */
+  --mp-c-bg: 250 250 247;     /* #FAFAF7 */
+  --mp-c-card: 255 255 255;
+  --mp-c-ink: 23 35 31;       /* Ink 900 #17231F 暖墨绿黑,不用纯黑 */
+  --mp-c-ink-2: 76 91 85;     /* #4C5B55 */
+  --mp-c-ink-3: 138 151 143;  /* #8A978F */
+
+  /* ── 语义映射 ── */
+  --mp-c-primary: 43 179 155;         /* Mint 500 */
+  --mp-c-primary-pressed: 31 143 134; /* Mint 600 */
+  --mp-c-accent: 27 111 112;          /* 明主题文本强调 = teal-700 */
+  --mp-c-on-primary: 255 255 255;     /* 主按钮上的文字,双主题恒白(白线语言) */
+
+  /* ── 复合 token(hairline / 洗色 / 玻璃,§03 §05)── */
+  --mp-line: rgba(23, 35, 31, 0.1);        /* 默认边 1px @10% ink */
+  --mp-line-strong: rgba(23, 35, 31, 0.18);
+  --mp-accent-wash: rgba(43, 179, 155, 0.09);
+  --mp-danger: #c4443a;                    /* §06 危险 = 降饱和红,永远不做实心大块 */
+  --mp-danger-wash: #fff1f0;
+  --mp-glass-bg: rgba(255, 255, 255, 0.62);      /* §05 薄荷玻璃配方 */
+  --mp-glass-border: rgba(255, 255, 255, 0.7);
+  --mp-glass-solid: rgba(255, 255, 255, 0.85);   /* @supports 降级为实色 */
+
+  /* ── 形状(§03 圆角尺度:像猫一样圆)── */
+  --mp-radius-input: 10px;                  /* 输入框 / 小按钮 */
+  --mp-radius-card: 14px;                   /* 卡片 / 消息泡 */
+  --mp-radius-panel: 20px;                  /* 面板 / 弹层 */
+  --mp-radius-action: 28px;                 /* 主按钮 / 头像位 */
+  --mp-radius-bubble-user: 16px 16px 4px 16px;  /* 消息泡不对称圆角,方向感来自圆角 */
+  --mp-radius-bubble-ai: 16px 16px 16px 4px;
+
+  /* ── 字体(§04)── */
+  --mp-font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+  --mp-font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* ── 夜航墨绿(§06:底色走墨绿黑 #101D1A,不用纯黑灰;白线语言在深色下更出味)── */
+.dark {
+  color-scheme: dark;
+
+  --mp-c-bg: 16 29 26;        /* #101D1A */
+  --mp-c-card: 16 29 26;      /* 深色卡片与底同色,分层靠白线 hairline(白线语言) */
+  --mp-c-ink: 220 231 226;    /* #DCE7E2 */
+  --mp-c-ink-2: 159 179 171;  /* #9FB3AB */
+  --mp-c-ink-3: 111 133 122;  /* #6F857A(规格文档夜航 chrome 同源) */
+
+  --mp-c-accent: 92 221 180;  /* 深色文本强调 = Mint 400,保持可见 */
+
+  --mp-line: rgba(220, 231, 226, 0.1);   /* 深底上用白线:亮墨 @10% */
+  --mp-line-strong: rgba(220, 231, 226, 0.18);
+  --mp-accent-wash: rgba(92, 221, 180, 0.12);
+  --mp-danger-wash: rgba(196, 68, 58, 0.14);
+  --mp-glass-bg: rgba(16, 29, 26, 0.55);         /* 深色玻璃底改墨绿黑 55%(§05) */
+  --mp-glass-border: rgba(220, 231, 226, 0.16);
+  --mp-glass-solid: rgba(16, 29, 26, 0.85);
+}

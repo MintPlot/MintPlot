@@ -1,0 +1,69 @@
+/* 基础 reset + 字体栈(M0-c)。置于 @layer base,落在 Tailwind preflight 之后。 */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  * {
+    margin: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    background: rgb(var(--mp-c-bg));
+    color: rgb(var(--mp-c-ink));
+    font-family: var(--mp-font-sans);
+    line-height: 1.65; /* §04:行高放宽,楼层沉浸感的主要来源 */
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 640; /* §04:标题字重升到 640 级 */
+    line-height: 1.3;
+  }
+
+  button {
+    font-family: inherit;
+    color: inherit;
+  }
+
+  /* §03:交互焦点 = 2px Mint 500 描边 + 3px 30% 光晕 */
+  :focus-visible {
+    outline: 2px solid rgb(var(--mp-c-primary));
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px rgb(var(--mp-c-primary) / 0.3);
+  }
+}
+
+/* §05 薄荷玻璃:只给固定 chrome 层(顶栏 / 输入区 / 遮罩 / 抽屉),滚动内容区保持实心。 */
+@layer components {
+  .mp-glass {
+    background: var(--mp-glass-bg);
+    -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    backdrop-filter: blur(14px) saturate(1.5);
+    border: 1px solid var(--mp-glass-border);
+  }
+
+  @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
+    .mp-glass {
+      background: var(--mp-glass-solid);
+    }
+  }
+}

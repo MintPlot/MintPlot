@@ -3,7 +3,62 @@ export default {
   content: ['./index.html', './src/**/*.{vue,ts}'],
   darkMode: 'class',
   theme: {
-    extend: {},
+    extend: {
+      // 主色替换 = 换表操作(设计语言 §02):token 真源在 kernel/design/tokens.css
+      colors: {
+        bg: 'rgb(var(--mp-c-bg) / <alpha-value>)',
+        card: 'rgb(var(--mp-c-card) / <alpha-value>)',
+        ink: {
+          DEFAULT: 'rgb(var(--mp-c-ink) / <alpha-value>)',
+          2: 'rgb(var(--mp-c-ink-2) / <alpha-value>)',
+          3: 'rgb(var(--mp-c-ink-3) / <alpha-value>)',
+        },
+        primary: {
+          DEFAULT: 'rgb(var(--mp-c-primary) / <alpha-value>)',
+          pressed: 'rgb(var(--mp-c-primary-pressed) / <alpha-value>)',
+        },
+        accent: {
+          DEFAULT: 'rgb(var(--mp-c-accent) / <alpha-value>)',
+          wash: 'var(--mp-accent-wash)',
+        },
+        'on-primary': 'rgb(var(--mp-c-on-primary) / <alpha-value>)',
+        line: {
+          DEFAULT: 'var(--mp-line)',
+          strong: 'var(--mp-line-strong)',
+        },
+        danger: {
+          DEFAULT: 'var(--mp-danger)',
+          wash: 'var(--mp-danger-wash)',
+        },
+        mint: {
+          100: 'rgb(var(--mp-mint-100) / <alpha-value>)',
+          200: 'rgb(var(--mp-mint-200) / <alpha-value>)',
+          300: 'rgb(var(--mp-mint-300) / <alpha-value>)',
+          400: 'rgb(var(--mp-mint-400) / <alpha-value>)',
+        },
+        teal: {
+          400: 'rgb(var(--mp-teal-400) / <alpha-value>)',
+          500: 'rgb(var(--mp-teal-500) / <alpha-value>)',
+          600: 'rgb(var(--mp-teal-600) / <alpha-value>)',
+          700: 'rgb(var(--mp-teal-700) / <alpha-value>)',
+        },
+        cyan: {
+          500: 'rgb(var(--mp-cyan-500) / <alpha-value>)',
+        },
+      },
+      borderRadius: {
+        input: 'var(--mp-radius-input)',
+        card: 'var(--mp-radius-card)',
+        panel: 'var(--mp-radius-panel)',
+        action: 'var(--mp-radius-action)',
+        'bubble-user': 'var(--mp-radius-bubble-user)',
+        'bubble-ai': 'var(--mp-radius-bubble-ai)',
+      },
+      fontFamily: {
+        sans: 'var(--mp-font-sans)',
+        mono: 'var(--mp-font-mono)',
+      },
+    },
   },
   plugins: [],
 }
