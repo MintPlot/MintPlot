@@ -1,4 +1,5 @@
 # CI 在首次推送放行后生效;此前以本地全绿纪律保证(M0 清单 §05 / M0-a)
+# M1 起:契约声明产出(build:contracts)随 web 任务;新增 Android debug APK 构建任务(M1 判据)
 name: CI
 
 on:
@@ -7,7 +8,7 @@ on:
 
 jobs:
   web:
-    name: lint + test + build (web)
+    name: lint + test + contracts + build (web)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,3 +20,27 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run build:contracts
+
+  android:
+    name: build APK (android debug)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Capacitor 7 requires JDK 21 (M0-b environment fact)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - run: chmod +x android/gradlew && android/gradlew -p android assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
