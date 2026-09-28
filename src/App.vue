@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
-import IconCharacters from '@/kernel/app/assets/tab-icons/IconCharacters.vue'
 import IconChat from '@/kernel/app/assets/tab-icons/IconChat.vue'
-import IconSettings from '@/kernel/app/assets/tab-icons/IconSettings.vue'
-import IconTools from '@/kernel/app/assets/tab-icons/IconTools.vue'
+import IconSliders from '@/kernel/app/assets/tab-icons/IconSliders.vue'
+import IconUser from '@/kernel/app/assets/tab-icons/IconUser.vue'
+import IconWrench from '@/kernel/app/assets/tab-icons/IconWrench.vue'
 import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
 import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
 import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
@@ -16,7 +16,7 @@ const disposers = [
   registerTab({
     id: 'characters',
     title: '角色',
-    icon: IconCharacters,
+    icon: IconUser,
     component: PlaceholderView,
     props: {
       title: '角色',
@@ -27,7 +27,7 @@ const disposers = [
   registerTab({
     id: 'tools',
     title: '工具',
-    icon: IconTools,
+    icon: IconWrench,
     component: PlaceholderView,
     props: {
       title: '工具',
@@ -38,7 +38,7 @@ const disposers = [
   registerTab({
     id: 'settings',
     title: '设置',
-    icon: IconSettings,
+    icon: IconSliders,
     component: SettingsPlaceholderView,
     order: 40,
   }),
