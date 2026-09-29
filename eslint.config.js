@@ -54,7 +54,8 @@ export default tseslint.config(
     },
   },
   // 2) plugins 禁 import kernel 内部符号;公开面唯一入口 = @contracts 契约包
-  //    (M1 契约真源就位;barrel-only 深路径禁令随 M2 首个真实插件落地时一并测试)
+  //    barrel-only(ADR-001 R-05):深路径(@contracts/xxx)与相对路径绕行同禁,
+  //    M2 随首个真实插件落地加测(tests/lint/red-lines.spec.ts)。
   {
     files: ['src/plugins/**/*.{ts,vue}'],
     rules: {
@@ -66,6 +67,18 @@ export default tseslint.config(
               group: ['@/kernel', '@/kernel/**', '**/kernel', '**/kernel/**'],
               message:
                 '红线(章程 §3.5.4):插件只走公开插件 API(@contracts),禁 import kernel 内部符号。',
+            },
+            {
+              group: [
+                '@contracts/*',
+                '@contracts/**',
+                '@/contracts',
+                '@/contracts/**',
+                '**/contracts',
+                '**/contracts/**',
+              ],
+              message:
+                'barrel-only(ADR-001 R-05):插件唯一入口 = @contracts(barrel);深路径/相对路径绕行禁行。',
             },
           ],
         },

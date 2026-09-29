@@ -13,6 +13,7 @@
  */
 
 import type { VariableSetEventPayload } from './variables'
+import type { SessionKind } from './session-kind'
 
 // ── Domain B · realtime pipeline hooks (R-08, waterfall semantics) ──────────
 // Waterfall: a listener receives (payload, next); it may transform and call
@@ -65,6 +66,10 @@ export interface SessionEventBase {
   ts: number
   /** Emitting plugin id — every persisted fact is attributable (audit). */
   pluginId: string
+  /** Session the fact belongs to — domain A ledgers are per-session (M2 envelope). */
+  sessionId: string
+  /** Domain of the session — kind-scoped subscription first-class (spec v1.2 §03). */
+  sessionKind: SessionKind
 }
 
 export interface MessageAppendedEvent extends SessionEventBase {

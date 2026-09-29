@@ -5,9 +5,13 @@ import IconBars from '@/kernel/app/assets/tab-icons/IconBars.vue'
 import IconUser from '@/kernel/app/assets/tab-icons/IconUser.vue'
 import IconWrench from '@/kernel/app/assets/tab-icons/IconWrench.vue'
 import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
+import { registerSettingsSection } from '@/kernel/app/settings-registry'
 import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
 import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
-import SettingsPlaceholderView from '@/kernel/app/views/SettingsPlaceholderView.vue'
+import SettingsView from '@/kernel/app/views/SettingsView.vue'
+import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
+import PluginManagerSection from '@/kernel/app/sections/PluginManagerSection.vue'
+import ToastHost from '@/kernel/ui/ToastHost.vue'
 
 // Four-tab IA (spec v1.1 §02) registered through the view registry — the tab bar is a
 // projection of the registry, not hardcoded; from M2+ the card workshop (characters tab,
@@ -40,10 +44,18 @@ const disposers = [
     id: 'settings',
     title: '设置',
     icon: IconBars,
-    component: SettingsPlaceholderView,
+    component: SettingsView,
     order: 40,
   }),
 ]
+
+// Kernel-owned settings sections — the settings page is a registry projection;
+// plugin sections join through the runtime (settings.section permission).
+disposers.push(
+  registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: PluginManagerSection }, 10),
+  registerSettingsSection('kernel', { id: 'appearance', title: '外观', component: AppearanceSection }, 80),
+)
+
 onUnmounted(() => {
   disposers.forEach((dispose) => dispose())
 })
@@ -88,5 +100,7 @@ const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.va
         </button>
       </div>
     </nav>
+
+    <ToastHost />
   </div>
 </template>

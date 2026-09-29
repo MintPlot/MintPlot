@@ -90,6 +90,8 @@ export interface HookRegistration {
 export interface SessionEventFilter {
   types?: readonly SessionEventType[]
   sessions?: readonly SessionKind[]
+  /** Narrow to specific sessions; omitted = all sessions of the given kinds. */
+  sessionIds?: readonly string[]
 }
 
 export interface SessionEventApi {
@@ -154,6 +156,22 @@ export interface PluginUi {
 }
 
 /**
+ * Read-only platform projection (M2): which runtime kind the app is on and
+ * the app identity values (M0-b three parameters). Auto-granted — version
+ * metadata is benign; no device capability gating before a real need lands.
+ */
+export interface AppPlatformInfo {
+  platform: 'android' | 'ios' | 'web'
+  versionName: string
+  buildType: 'dev' | 'release'
+}
+
+export interface PluginPlatform {
+  readonly kind: 'native' | 'web'
+  getAppInfo(): Promise<AppPlatformInfo>
+}
+
+/**
  * Read-only diagnostics projection for the owning plugin (request journal
  * excerpts, hook invocations, quota state). Shape is draft until the M2
  * runtime defines the journal surface; `pluginId` is the one stable anchor.
@@ -185,6 +203,8 @@ export interface PluginContext extends HookRegistration, SessionEventApi {
   readonly storage: PluginStorage
   /** Permission: secrets.read.<key> per loan. */
   readonly secrets: PluginSecrets
+  /** Auto-granted: app identity + runtime-kind projection (M2). */
+  readonly platform: PluginPlatform
   readonly on: PluginTransientBus['on']
   readonly ui: PluginUi
   readonly diag: PluginDiagnostics

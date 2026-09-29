@@ -8,6 +8,7 @@
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "resolveJsonModule": true,
     "noEmit": true,
     "jsx": "preserve",
     "strict": true,
