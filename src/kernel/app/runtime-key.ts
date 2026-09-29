@@ -6,8 +6,16 @@
 import type { InjectionKey } from 'vue'
 import type { PluginRuntime } from '@/kernel/runtime/runtime'
 import type { KvStore } from '@/kernel/store/kv-store'
+import type { TransientBus } from '@/kernel/runtime/event-bus'
 
 export const PLUGIN_RUNTIME_KEY: InjectionKey<PluginRuntime> = Symbol('plugin-runtime')
 
 /** Kernel root KV — the plugin manager persists enable/disable preferences here. */
 export const PLUGIN_SETTINGS_STORE_KEY: InjectionKey<KvStore> = Symbol('plugin-settings-store')
+
+/**
+ * Transient bus — the runtime is framework-agnostic (plain Maps), so shell
+ * components that project runtime state subscribe to `plugin.state.changed`
+ * and re-render on their own reactivity.
+ */
+export const PLUGIN_BUS_KEY: InjectionKey<TransientBus> = Symbol('plugin-bus')

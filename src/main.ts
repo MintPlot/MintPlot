@@ -3,7 +3,7 @@ import './main.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
 import { createKernel } from '@/kernel/bootstrap'
-import { PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
+import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 
 initMpTheme()
@@ -31,4 +31,5 @@ void bootPlugins()
 const app = createApp(App)
 app.provide(PLUGIN_RUNTIME_KEY, kernel.runtime)
 app.provide(PLUGIN_SETTINGS_STORE_KEY, kernel.storage)
+app.provide(PLUGIN_BUS_KEY, kernel.services.bus)
 app.mount('#app')

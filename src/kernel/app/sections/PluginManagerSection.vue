@@ -1,14 +1,30 @@
 <script setup lang="ts">
 // 插件管理分区(M2 walking skeleton):插件启停真实生效 —— 开关直接驱动
 // runtime activate/deactivate,偏好持久化在内核 KV(plugin-states)。
-import { computed, inject, ref } from 'vue'
-import { PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
+// runtime 是框架无关的(纯 Map),状态投影经瞬态总线 plugin.state.changed
+// 驱动本组件重渲染。
+import { computed, inject, onUnmounted, ref } from 'vue'
+import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import type { PluginStateProjection } from '@/kernel/runtime/runtime'
 
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
 const store = inject(PLUGIN_SETTINGS_STORE_KEY, null)
+const bus = inject(PLUGIN_BUS_KEY, null)
 
-const items = computed(() => runtime?.projection() ?? [])
+// Re-render trigger: bumped on every runtime state broadcast.
+const revision = ref(0)
+let unsubscribe: (() => void) | null = null
+if (bus) {
+  unsubscribe = bus.on('plugin.state.changed', () => {
+    revision.value += 1
+  })
+}
+onUnmounted(() => unsubscribe?.())
+
+const items = computed(() => {
+  void revision.value
+  return runtime?.projection() ?? []
+})
 const busy = ref<string | null>(null)
 const error = ref('')
 
