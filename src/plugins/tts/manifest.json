@@ -1,0 +1,32 @@
+{
+  "id": "tts",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "permissions": [
+    "seam.provide.tts.engine",
+    "settings.section",
+    "secrets.read.ttsCloudApiKey"
+  ],
+  "extensionPoints": {
+    "provide": ["tts.engine"],
+    "settingsScope": [
+      "ttsEnabled",
+      "ttsAutoPlay",
+      "ttsService",
+      "ttsVoice",
+      "ttsCloudProviderId",
+      "ttsCloudBaseUrl",
+      "ttsCloudModel",
+      "ttsCloudVoice",
+      "ttsCloudApiKey",
+      "ttsCloudSpeed",
+      "ttsRate",
+      "ttsPitch",
+      "ttsDialogueOnly",
+      "ttsSkipActions",
+      "ttsMaxChars"
+    ],
+    "settings": [{ "id": "tts", "title": "语音设置" }]
+  }
+}

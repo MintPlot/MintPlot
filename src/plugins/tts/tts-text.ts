@@ -1,0 +1,151 @@
+/**
+ * tts-text — ported from the decoupling-line tts organ (baseline main
+ * 81ef0b8, originally src/modules/tts-text.mjs). Speak-text extraction
+ * (strip CoT/HTML/markdown, optional dialogue-only, length cap) and
+ * sentence-bounded chunking for cloud synthesis. Typed port, logic unchanged.
+ */
+
+const cotPattern = /<(think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi
+const sysTailPattern = /\n\n\[系统指令:\s*([\s\S]*?)\]\s*$/
+const htmlDocPattern = /(<!doctype html>|<html\b[^>]*>)/i
+const htmlBlockStartPattern = /^\s*<(!doctype|html|head|body|div|span|section|article|aside|header|footer|nav|main|form|fieldset|ul|ol|li|table|style|script|template|button|input|select|textarea|canvas|video|audio|figure|dialog|details|summary|img|svg|p|h[1-6]|hr|blockquote|pre|a)\b/i
+const codeFencePattern = /```[^\n`]*\n?[\s\S]*?```/g
+const codeFenceTildePattern = /~~~[^\n~]*\n?[\s\S]*?~~~/g
+const inlineCodePattern = /`([^`]+)`/g
+const actionLinePattern = /^\s*\*[^*\n]+\*\s*$/gm
+const quotePattern = /「([^」\n]*)」|『([^』\n]*)』|“([^”\n]*)”|"([^"\n]*)"/g
+
+const splitMain = (text: unknown): string => {
+  const main = String(text ?? '').replace(cotPattern, '')
+  return main.replace(sysTailPattern, '')
+}
+
+const stripHtmlCards = (text: unknown): string => {
+  let result = String(text ?? '')
+  const docMatch = result.match(htmlDocPattern)
+  if (docMatch && docMatch.index !== undefined) {
+    const start = docMatch.index
+    const closeTag = '</html>'
+    const closeIndex = result.toLowerCase().lastIndexOf(closeTag)
+    const end = closeIndex !== -1 && closeIndex > start ? closeIndex + closeTag.length : result.length
+    result = `${result.slice(0, start)}\n${result.slice(end)}`
+  }
+  const trimmed = result.trim()
+  if (!trimmed) return ''
+  if (htmlBlockStartPattern.test(trimmed)) return ''
+  return result
+}
+
+const stripMarkdown = (text: unknown): string => {
+  let out = String(text ?? '')
+  out = out.replace(/!\[([^\]]*)\]\([^)]*\)/g, ' ')
+  out = out.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  out = out.replace(/^#{1,6}\s+/gm, '')
+  out = out.replace(/^>\s?/gm, '')
+  out = out.replace(/^(\s*)([-*+]|\d+[.)])\s+/gm, '$1')
+  out = out.replace(/^\s*[-*_]{3,}\s*$/gm, ' ')
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1')
+  out = out.replace(/__([^_]+)__/g, '$1')
+  out = out.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1$2')
+  out = out.replace(/(^|\s)_([^_\n]+)_(?=\s|$)/g, '$1$2')
+  out = out.replace(/~~([^~]+)~~/g, '$1')
+  out = out.replace(/<[^>]*>/g, ' ')
+  out = out.replace(/^\s*\|?[\s:|-]+\|?\s*$/gm, ' ')
+  out = out.replace(/\|/g, ' ')
+  out = out.replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+  return out
+}
+
+const extractQuotes = (text: string): string => {
+  const parts: string[] = []
+  let match: RegExpExecArray | null
+  quotePattern.lastIndex = 0
+  while ((match = quotePattern.exec(text)) !== null) {
+    const quote = match[1] || match[2] || match[3] || match[4]
+    if (quote && quote.trim()) parts.push(quote.trim())
+  }
+  return parts.join(' ')
+}
+
+const truncate = (text: string, maxChars: number): string => {
+  const max = Math.max(1, Number(maxChars) || 2000)
+  if (text.length <= max) return text
+  const slice = text.slice(0, max)
+  const boundary = Math.max(
+    slice.lastIndexOf('。'), slice.lastIndexOf('！'), slice.lastIndexOf('？'),
+    slice.lastIndexOf('!'), slice.lastIndexOf('?'), slice.lastIndexOf('.'),
+    slice.lastIndexOf('\n'),
+  )
+  return boundary > max * 0.5 ? slice.slice(0, boundary + 1) : slice
+}
+
+export interface ExtractSpeakTextOptions {
+  dialogueOnly?: boolean
+  skipActions?: boolean
+  maxChars?: number
+}
+
+const extractSpeakText = (content: unknown, options: ExtractSpeakTextOptions = {}): string => {
+  const maxChars = Number(options.maxChars) || 2000
+  const skipActions = !!options.skipActions
+  const dialogueOnly = !!options.dialogueOnly
+
+  let text = splitMain(content)
+  text = text.replace(codeFencePattern, ' ').replace(codeFenceTildePattern, ' ')
+  text = stripHtmlCards(text)
+  if (!text.trim()) return ''
+
+  text = text.replace(inlineCodePattern, '$1')
+  if (skipActions) text = text.replace(actionLinePattern, ' ')
+  if (dialogueOnly) text = extractQuotes(text)
+  text = stripMarkdown(text)
+  text = text.replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  return truncate(text, maxChars)
+}
+
+/**
+ * Split ready-to-speak text into sentence-bounded chunks for cloud
+ * synthesis. Sentence punctuation (plus newlines) is the preferred cut
+ * point; trailing closing quotes/brackets stay attached to the sentence
+ * they close. Oversized sentences without any boundary are hard-split at
+ * maxChars so every chunk fits one request. Returns [] for empty input.
+ */
+const splitSpeechChunks = (text: unknown, maxChars = 200): string[] => {
+  const max = Math.max(1, Number(maxChars) || 200)
+  const source = String(text ?? '').trim()
+  if (!source) return []
+  if (source.length <= max) return [source]
+
+  const boundary = new Set(['。', '！', '？', '；', '!', '?', ';', '\n'])
+  const closer = new Set(['」', '』', '”', '’', '"', ')', '）', ']', '】', '》', '…'])
+  const chunks: string[] = []
+  let start = 0
+  while (start < source.length) {
+    if (source.length - start <= max) {
+      const rest = source.slice(start).trim()
+      if (rest) chunks.push(rest)
+      break
+    }
+    let cut = -1
+    for (let index = start + max; index > start + Math.floor(max * 0.5); index -= 1) {
+      if (boundary.has(source[index - 1] ?? '') || (closer.has(source[index - 1] ?? '') && index >= 2)) {
+        cut = index
+        break
+      }
+    }
+    if (cut === -1) cut = start + max
+    const piece = source.slice(start, cut).trim()
+    if (piece) chunks.push(piece)
+    start = cut
+  }
+  return chunks
+}
+
+const exports = Object.freeze({ extractSpeakText, splitSpeechChunks })
+export default exports
