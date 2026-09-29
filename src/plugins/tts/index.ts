@@ -34,9 +34,9 @@ export default definePlugin({
       id: 'tts',
       title: '语音设置',
       component: TtsSettings,
-      // Plugin feature surface: renders on the tools tab's plugin territory
-      // (M3-f IA), not on the user-configuration settings tab.
-      placement: 'tools',
+      // Plugin feature surface (M3-h IA): renders inside the tts accordion
+      // entry on the tools tab, not on the user-configuration settings tab.
+      placement: 'plugin',
     })
 
     const service = createTtsService(ctx)

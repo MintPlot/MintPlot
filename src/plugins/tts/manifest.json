@@ -3,13 +3,19 @@
   "version": "1.0.0",
   "entry": "./index.ts",
   "activation": "lazy",
+  "display": {
+    "name": "语音朗读",
+    "description": "用系统或云端语音引擎朗读角色回复"
+  },
   "permissions": [
     "seam.provide.tts.engine",
     "settings.section",
     "secrets.read.ttsCloudApiKey"
   ],
   "extensionPoints": {
-    "provide": ["tts.engine"],
+    "provide": [
+      "tts.engine"
+    ],
     "settingsScope": [
       "ttsEnabled",
       "ttsAutoPlay",
@@ -27,6 +33,11 @@
       "ttsSkipActions",
       "ttsMaxChars"
     ],
-    "settings": [{ "id": "tts", "title": "语音设置" }]
+    "settings": [
+      {
+        "id": "tts",
+        "title": "语音设置"
+      }
+    ]
   }
 }

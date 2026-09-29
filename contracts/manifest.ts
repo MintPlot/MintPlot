@@ -53,6 +53,27 @@ export interface InputActionDeclaration {
   id: string
 }
 
+/**
+ * Plugin display card (M3-h IA): the user-facing identity of a plugin in the
+ * tools tab. Required — the accordion row shows these two lines; id/version
+ * stay technical anchors (storage prefixes, attribution) surfaced in the
+ * expanded detail. Chinese copy per the language rule.
+ */
+export interface PluginDisplay {
+  /** Chinese display name, e.g. 语音朗读. */
+  readonly name: string
+  /** One-line description shown under the name. */
+  readonly description: string
+}
+
+/**
+ * Tools-tab grouping override (M3-h IA). Omitted = follow provenance:
+ * build-time bundled plugins group under 系统插件, externally installed ones
+ * (M4+) under 扩展插件. A declaration wins over the provenance default —
+ * e.g. a bundled plugin may present itself as an extension.
+ */
+export type PluginCategory = 'system' | 'extension'
+
 export interface PluginManifest {
   /** `^[a-z][a-z0-9-]*$`, repo-unique, immutable; see RESERVED_PLUGIN_IDS. */
   readonly id: string
@@ -62,6 +83,10 @@ export interface PluginManifest {
   readonly entry: string
   /** eager only for chat-main-path dependencies (R-12); everything else lazy. */
   readonly activation: 'eager' | 'lazy'
+  /** Tools-tab display card (M3-h). */
+  readonly display: PluginDisplay
+  /** Grouping override (M3-h); omitted = provenance default (bundled → system). */
+  readonly category?: PluginCategory
   /** Session kinds this plugin mounts into; omitted = both domains. */
   readonly sessions?: readonly SessionKind[]
   /** Static declaration, default deny-all, user-visible (R-11). */
@@ -121,6 +146,22 @@ export function validateManifest(input: unknown): ManifestValidationResult {
     errors.push(error('activation', 'must be "eager" or "lazy"'))
   }
 
+  // Display card (M3-h): required — the tools-tab accordion renders it.
+  if (
+    !isRecord(input.display) ||
+    typeof input.display.name !== 'string' || input.display.name.trim() === '' ||
+    typeof input.display.description !== 'string' || input.display.description.trim() === ''
+  ) {
+    errors.push(error('display', 'required: { name, description } with non-empty strings'))
+  }
+
+  if (
+    input.category !== undefined &&
+    input.category !== 'system' && input.category !== 'extension'
+  ) {
+    errors.push(error('category', 'must be "system" or "extension"'))
+  }
+
   const permissions: string[] = []
   if (input.permissions !== undefined) {
     if (!Array.isArray(input.permissions) || input.permissions.some((p) => typeof p !== 'string')) {
@@ -163,7 +204,9 @@ export function validateManifest(input: unknown): ManifestValidationResult {
     version: input.version as string,
     entry: input.entry as string,
     activation: input.activation as 'eager' | 'lazy',
+    display: input.display as PluginDisplay,
     permissions,
+    ...(input.category !== undefined ? { category: input.category as PluginCategory } : {}),
     ...(sessions !== undefined ? { sessions } : {}),
     ...(extensionPoints !== undefined ? { extensionPoints } : {}),
   }

@@ -26,6 +26,10 @@ export default definePlugin({
       id: 'update-checker',
       title: '关于与更新',
       component: UpdateCheckerSection,
+      // Panel placement declared 'settings': its function belongs on the
+      // settings tab, not inside the plugin entry (M3-h plugin shape rule —
+      // the three built-ins demonstrate the three surfaces).
+      placement: 'settings',
     })
 
     ctx.onDeactivate(() => {

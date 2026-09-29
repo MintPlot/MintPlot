@@ -34,13 +34,22 @@ import type { KernelServices } from '@/kernel/runtime/context'
 export interface PluginRecord {
   readonly definition: PluginDefinition
   readonly manifest: PluginManifest
+  /** Provenance (M3-h): bundled = build-time registry, installed = M4+ external. */
+  readonly origin: PluginOrigin
   state: PluginRuntimeState
 }
+
+/** Where a plugin came from — the grouping default when the manifest omits category. */
+export type PluginOrigin = 'bundled' | 'installed'
 
 export interface PluginStateProjection {
   readonly id: string
   readonly version: string
   readonly activation: 'eager' | 'lazy'
+  /** Tools-tab card (M3-h): required in the manifest since M3-h. */
+  readonly display: { name: string; description: string }
+  /** Effective grouping: manifest declaration wins, else provenance default. */
+  readonly category: 'system' | 'extension'
   readonly state: PluginRuntimeState
   readonly permissions: readonly string[]
   readonly sessions: readonly string[] | undefined
@@ -67,8 +76,9 @@ export class PluginActivationError extends Error {
 }
 
 export interface PluginRuntime {
-  /** Load a definition (build-time registry step); validates the manifest. */
-  load(definition: PluginDefinition): void
+  /** Load a definition (build-time registry step); validates the manifest.
+   *  Origin defaults to 'bundled'; the M4+ external loader passes 'installed'. */
+  load(definition: PluginDefinition, origin?: PluginOrigin): void
   /** Activate the only registration window; rolls back fully on failure. */
   activate(id: string): MaybePromise<void>
   /** Drain the bag LIFO, run the plugin's own deactivate, broadcast the state. */
@@ -114,12 +124,12 @@ export function createPluginRuntime(services: KernelServices): PluginRuntime {
   }
 
   return {
-    load(definition) {
+    load(definition, origin = 'bundled') {
       const id = definition.manifest.id
       const validated = validateManifest(definition.manifest)
       if (!validated.ok) throw new PluginLoadError(id, validated.errors)
       if (records.has(id)) throw new Error(`[runtime] plugin id "${id}" already loaded (ids are repo-unique, R-03)`)
-      records.set(id, { definition, manifest: validated.manifest, state: 'registered' })
+      records.set(id, { definition, manifest: validated.manifest, origin, state: 'registered' })
       broadcast(id, 'registered')
     },
 
@@ -200,6 +210,8 @@ export function createPluginRuntime(services: KernelServices): PluginRuntime {
           id: entry.manifest.id,
           version: entry.manifest.version,
           activation: entry.manifest.activation,
+          display: entry.manifest.display,
+          category: entry.manifest.category ?? (entry.origin === 'bundled' ? 'system' : 'extension'),
           state: entry.state,
           permissions: entry.manifest.permissions,
           sessions: entry.manifest.sessions,

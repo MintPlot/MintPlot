@@ -85,6 +85,7 @@ describe('ADR-004 absorption · manifest settingsScope validation', () => {
   it('accepts a string list and rejects non-strings or empty keys', () => {
     const ok = validateManifest({
       id: 'scoped', version: '1.0.0', entry: './index.ts', activation: 'lazy',
+      display: { name: '名·scoped', description: 'scoped 简介' },
       permissions: ['settings.section'],
       extensionPoints: { settingsScope: ['ttsService', 'ttsRate'] },
     })
@@ -93,6 +94,7 @@ describe('ADR-004 absorption · manifest settingsScope validation', () => {
 
     const bad = validateManifest({
       id: 'scoped', version: '1.0.0', entry: './index.ts', activation: 'lazy',
+      display: { name: '名·scoped', description: 'scoped 简介' },
       permissions: [],
       extensionPoints: { settingsScope: ['ok', ''] },
     })

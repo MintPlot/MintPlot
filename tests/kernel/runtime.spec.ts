@@ -63,6 +63,7 @@ function makeDefinition(id: string, override: Partial<PluginDefinition> = {}): P
       version: '1.0.0',
       entry: './index.ts',
       activation: 'lazy',
+      display: { name: `名·${id}`, description: `${id} 简介` },
       permissions: ['view.register', 'settings.section', 'session.event.read'],
       extensionPoints: { settings: [{ id: 'main', title: id }] },
     },
@@ -92,6 +93,7 @@ describe('plugin runtime · lifecycle (R-04)', () => {
         version: 'not-semver',
         entry: './index.ts',
         activation: 'lazy',
+        display: { name: '名·bad', description: '坏样子' },
         permissions: [],
       },
       activate: () => {},
@@ -306,6 +308,7 @@ describe('plugin runtime · registration surfaces', () => {
         version: '1.0.0',
         entry: './index.ts',
         activation: 'lazy',
+        display: { name: '名·panel', description: 'panel 简介' },
         permissions: ['card.panel.section'],
       },
       activate: (ctx) => {
@@ -338,6 +341,7 @@ describe('plugin runtime · registration surfaces', () => {
         version: '1.0.0',
         entry: './index.ts',
         activation: 'lazy',
+        display: { name: '名·hookful', description: 'hookful 简介' },
         permissions: ['hook.prompt.worldinfo', 'hook.prompt.memory'],
       },
       activate: (ctx) => {
@@ -364,6 +368,7 @@ describe('plugin runtime · seams and bus', () => {
         version: '1.0.0',
         entry: './index.ts',
         activation: 'lazy',
+        display: { name: '名·seamy', description: 'seamy 简介' },
         permissions: ['seam.provide.tts.engine'],
       },
       activate: (ctx) => {
@@ -431,6 +436,7 @@ describe('plugin runtime · session events (domain A)', () => {
         version: '1.0.0',
         entry: './index.ts',
         activation: 'lazy',
+        display: { name: '名·emitter-ok', description: 'emitter-ok 简介' },
         permissions: ['session.event.emit.message.appended'],
       },
       activate: async (ctx) => {
@@ -486,5 +492,44 @@ describe('plugin runtime · session events (domain A)', () => {
       kind: 'message.appended', floor: 2, role: 'user', content: 'miss-revoked',
     })
     expect(received).toHaveLength(1)
+  })
+
+  it('projection carries the display card and the effective grouping (M3-h)', () => {
+    const { services } = makeServices()
+    const runtime = createPluginRuntime(services)
+
+    // Bundled default → system; declared category wins over provenance;
+    // installed origin → extension.
+    runtime.load(makeDefinition('bundled-a'))
+    runtime.load(makeDefinition('declared-ext', {
+      manifest: {
+        id: 'declared-ext',
+        version: '1.0.0',
+        entry: './index.ts',
+        activation: 'lazy',
+        display: { name: '名·扩展化', description: '声明覆盖来源' },
+        category: 'extension',
+        permissions: [],
+      },
+    }))
+    const installed = makeDefinition('installed-a', {
+      manifest: {
+        id: 'installed-a',
+        version: '1.0.0',
+        entry: './index.ts',
+        activation: 'lazy',
+        display: { name: '名·外装', description: '外部安装' },
+        permissions: [],
+      },
+    })
+    runtime.load(installed, 'installed')
+
+    const byId = new Map(runtime.projection().map((entry) => [entry.id, entry]))
+    expect(byId.get('bundled-a')).toMatchObject({
+      display: { name: '名·bundled-a', description: 'bundled-a 简介' },
+      category: 'system',
+    })
+    expect(byId.get('declared-ext')).toMatchObject({ category: 'extension' })
+    expect(byId.get('installed-a')).toMatchObject({ category: 'extension' })
   })
 })

@@ -3,8 +3,19 @@
   "version": "1.0.0",
   "entry": "./index.ts",
   "activation": "lazy",
-  "permissions": ["settings.section"],
+  "display": {
+    "name": "检查更新",
+    "description": "检查 MintPlot 新版本并提示安装"
+  },
+  "permissions": [
+    "settings.section"
+  ],
   "extensionPoints": {
-    "settings": [{ "id": "update-checker", "title": "关于与更新" }]
+    "settings": [
+      {
+        "id": "update-checker",
+        "title": "关于与更新"
+      }
+    ]
   }
 }

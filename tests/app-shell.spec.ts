@@ -16,7 +16,11 @@ describe('M0-d 壳骨架', () => {
     expect(wrapper.text()).toContain('导入角色卡')
 
     await tabButtons[2]!.trigger('click')
+    // M3-h IA:工具页两大折叠区(独立挂载下无插件运行时 → 展开插件区显示未接入)。
     expect(wrapper.text()).toContain('插件')
+    expect(wrapper.text()).not.toContain('用量统计')
+    await wrapper.findAll('button').find((button) => button.text().includes('插件'))!.trigger('click')
+    expect(wrapper.text()).toContain('插件运行时未接入')
 
     await tabButtons[3]!.trigger('click')
     // M3-f IA:设置页 = 用户设定 / API 连接与服务 / 通用设置(关于与更新随

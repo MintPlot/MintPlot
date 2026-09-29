@@ -14,7 +14,6 @@ import ToolsView from '@/kernel/app/views/ToolsView.vue'
 import SettingsView from '@/kernel/app/views/SettingsView.vue'
 import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
-import PluginManagerSection from '@/kernel/app/sections/PluginManagerSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 
@@ -46,16 +45,14 @@ const disposers = [
   }),
 ]
 
-// Kernel-owned settings sections — the settings page is a registry projection;
-// plugin sections join through the runtime (settings.section permission). M3-f
-// IA: the settings tab keeps user-facing configuration only (用户设定 / API 连接
-// 与服务 / 通用设置 / 关于与更新); plugin management and plugin feature sections
-// declare placement 'tools' and surface on the tools tab.
+// Kernel-owned settings sections (M3-h): the settings page is a registry
+// projection; kernel page sections declare placement 'settings' explicitly —
+// the panel default is a plugin's own tools-tab entry. The plugin area (entry
+// rows + switches) lives on the tools tab, not in this registry.
 disposers.push(
-  registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection }, 10),
-  registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection }, 20),
-  registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection }, 30),
-  registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: PluginManagerSection, placement: 'tools' }, 10),
+  registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection, placement: 'settings' }, 10),
+  registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection, placement: 'settings' }, 20),
+  registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
 )
 
 onUnmounted(() => {

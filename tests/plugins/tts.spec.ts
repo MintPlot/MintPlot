@@ -123,6 +123,7 @@ describe('tts · full lifecycle through the runtime', () => {
     const rogue = {
       manifest: {
         id: 'rogue-scope', version: '1.0.0', entry: './index.ts', activation: 'lazy' as const,
+        display: { name: '名·rogue', description: '越权探针' },
         permissions: [],
         extensionPoints: { settingsScope: ['someOtherKey'] },
       },

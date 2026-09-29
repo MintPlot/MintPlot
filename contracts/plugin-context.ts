@@ -30,20 +30,22 @@ export interface ViewSpec {
 }
 
 /**
- * Host shell placement of a settings section (MP IA addition, M3-f): the
- * settings tab owns user-facing configuration, the tools tab is plugin
- * territory. Default 'settings' keeps every pre-existing registration where
- * it was; plugin feature surfaces (TTS voice settings and the like) declare
- * 'tools' so they group with the plugin's other surfaces.
+ * Host shell placement of a plugin panel (M3-h IA, the plugin shape rule):
+ * the entry row + enable switch live FIXED in the tools-tab plugin area;
+ * where the panel itself renders is the plugin's declaration —
+ *   'plugin'   (default) inside the plugin's own accordion entry on the
+ *              tools tab;
+ *   'settings' the settings tab (for panels whose function belongs there,
+ *              e.g. update-checker's 关于与更新).
  */
-export type SettingsSectionPlacement = 'settings' | 'tools'
+export type SettingsSectionPlacement = 'settings' | 'plugin'
 
 /** A section registered into the kernel settings page. */
 export interface SettingsSectionSpec {
   id: string
   title: string
   component: Component
-  /** Tab the section surfaces in (MP); omitted = settings tab. */
+  /** Panel placement (MP); omitted = the plugin's own entry. */
   placement?: SettingsSectionPlacement
 }
 

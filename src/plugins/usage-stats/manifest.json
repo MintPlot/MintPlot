@@ -3,8 +3,16 @@
   "version": "1.0.0",
   "entry": "./index.ts",
   "activation": "lazy",
-  "permissions": ["view.register"],
+  "display": {
+    "name": "用量统计",
+    "description": "API 用量与 token 账本"
+  },
+  "permissions": [
+    "view.register"
+  ],
   "extensionPoints": {
-    "views": ["usage"]
+    "views": [
+      "usage"
+    ]
   }
 }

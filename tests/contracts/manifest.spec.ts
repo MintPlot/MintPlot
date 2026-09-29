@@ -3,12 +3,13 @@ import { RESERVED_PLUGIN_IDS, definePlugin, validateManifest } from '../../contr
 import type { PluginDefinition } from '../../contracts/lifecycle'
 import type { PluginContext } from '../../contracts/plugin-context'
 
-/** ADR-001 appendix A: the TTS plugin manifest, verbatim shape. */
+/** ADR-001 appendix A: the TTS plugin manifest, verbatim shape (plus the M3-h display card). */
 const ttsManifest = {
   id: 'tts',
   version: '1.0.0',
   entry: './index.ts',
   activation: 'lazy',
+  display: { name: '语音朗读', description: '用语音引擎朗读角色回复' },
   permissions: [
     'seam.provide.tts.engine',
     'settings.section',
@@ -82,6 +83,27 @@ describe('validateManifest', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.errors.some((e) => e.path === 'activation')).toBe(true)
+  })
+
+  it('requires the display card with non-empty name and description (M3-h)', () => {
+    const badDisplays: unknown[] = [undefined, {}, { name: '语音朗读' }, { name: '', description: 'x' }, { name: '语音朗读', description: '   ' }]
+    for (const display of badDisplays) {
+      const result = validateManifest({ ...ttsManifest, display })
+      expect(result.ok).toBe(false)
+      if (result.ok) continue
+      expect(result.errors.some((e) => e.path === 'display')).toBe(true)
+    }
+    expect(validateManifest({ ...ttsManifest, display: { name: '语音朗读', description: '朗读' } }).ok).toBe(true)
+  })
+
+  it('category is optional and validated against the two-value catalog (M3-h)', () => {
+    expect(validateManifest(ttsManifest).ok).toBe(true)
+    expect(validateManifest({ ...ttsManifest, category: 'system' }).ok).toBe(true)
+    expect(validateManifest({ ...ttsManifest, category: 'extension' }).ok).toBe(true)
+    const bad = validateManifest({ ...ttsManifest, category: 'builtin' })
+    expect(bad.ok).toBe(false)
+    if (bad.ok) return
+    expect(bad.errors.some((e) => e.path === 'category')).toBe(true)
   })
 
   it('rejects unknown permission ids', () => {

@@ -5,10 +5,10 @@
  * settings sink and are namespaced `<pluginId>:<id>`. Everything registered
  * is reversible (deactivate removes the section).
  *
- * Each section carries a placement (M3-f IA): 'settings' (default) renders on
- * the settings tab, 'tools' renders on the tools tab's plugin territory —
- * plugin feature surfaces register 'tools' so the settings page stays
- * user-configuration only.
+ * Each section carries a placement (M3-h plugin shape rule): 'plugin'
+ * (default) renders inside its own plugin's accordion entry on the tools
+ * tab; 'settings' renders on the settings tab for panels whose function
+ * belongs there. Kernel-owned page sections declare 'settings' explicitly.
  */
 
 import { computed, ref } from 'vue'
@@ -37,7 +37,7 @@ export function registerSettingsSection(source: string, spec: SettingsSectionSpe
   }
   sections.value = [
     ...sections.value,
-    { id, title: spec.title, component: spec.component, placement: spec.placement ?? 'settings', order, source },
+    { id, title: spec.title, component: spec.component, placement: spec.placement ?? 'plugin', order, source },
   ]
   return () => {
     sections.value = sections.value.filter((section) => section.id !== id)
@@ -57,9 +57,22 @@ export function useSettingsProjection(): ComputedRef<SettingsSectionDescriptor[]
   return byPlacement('settings')
 }
 
-/** Tools-page projection for plugin feature sections (M3-f). */
-export function useToolsSectionProjection(): ComputedRef<SettingsSectionDescriptor[]> {
-  return byPlacement('tools')
+/**
+ * Plugin-entry projection (M3-h): placement-'plugin' sections grouped by
+ * owning plugin id — the tools tab renders each group inside that plugin's
+ * accordion entry.
+ */
+export function usePluginConfigSections(): ComputedRef<Map<string, SettingsSectionDescriptor[]>> {
+  return computed(() => {
+    const grouped = new Map<string, SettingsSectionDescriptor[]>()
+    for (const section of sections.value) {
+      if (section.placement !== 'plugin') continue
+      const list = grouped.get(section.source) ?? []
+      list.push(section)
+      grouped.set(section.source, list)
+    }
+    return grouped
+  })
 }
 
 /** Registry observation for tests and diagnostics. */
