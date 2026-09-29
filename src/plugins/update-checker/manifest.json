@@ -1,0 +1,10 @@
+{
+  "id": "update-checker",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "permissions": ["settings.section"],
+  "extensionPoints": {
+    "settings": [{ "id": "update-checker", "title": "关于与更新" }]
+  }
+}
