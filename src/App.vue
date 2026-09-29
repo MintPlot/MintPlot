@@ -6,9 +6,12 @@ import IconUser from '@/kernel/app/assets/tab-icons/IconUser.vue'
 import IconWrench from '@/kernel/app/assets/tab-icons/IconWrench.vue'
 import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
 import { registerSettingsSection } from '@/kernel/app/settings-registry'
+import { useChatRoute } from '@/kernel/app/chat-router'
 import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
+import ChatSessionView from '@/kernel/app/views/ChatSessionView.vue'
 import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
 import SettingsView from '@/kernel/app/views/SettingsView.vue'
+import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import PluginManagerSection from '@/kernel/app/sections/PluginManagerSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
@@ -53,6 +56,7 @@ const disposers = [
 // plugin sections join through the runtime (settings.section permission).
 disposers.push(
   registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: PluginManagerSection }, 10),
+  registerSettingsSection('kernel', { id: 'api', title: '模型与 API', component: ApiConfigSection }, 20),
   registerSettingsSection('kernel', { id: 'appearance', title: '外观', component: AppearanceSection }, 80),
 )
 
@@ -63,6 +67,12 @@ onUnmounted(() => {
 const tabs = useTabProjection()
 const activeId = ref(tabs.value[0]?.id ?? '')
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? tabs.value[0])
+
+// Full-screen chat page: the tab bar hides while a conversation is open.
+const chatRoute = useChatRoute()
+const chatConversationId = computed(() =>
+  chatRoute.value.view === 'chat' ? chatRoute.value.conversationId : '',
+)
 </script>
 
 <template>
@@ -75,6 +85,7 @@ const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.va
     </div>
 
     <nav
+      v-show="!chatConversationId"
       class="shrink-0 border-t border-line bg-card"
       aria-label="主导航"
     >
@@ -100,6 +111,12 @@ const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.va
         </button>
       </div>
     </nav>
+
+    <ChatSessionView
+      v-if="chatConversationId"
+      :key="chatConversationId"
+      :conversation-id="chatConversationId"
+    />
 
     <ToastHost />
   </div>

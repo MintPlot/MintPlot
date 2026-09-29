@@ -9,8 +9,6 @@ import { createTransientBus } from '@/kernel/runtime/event-bus'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createHookRegistry } from '@/kernel/runtime/hooks'
 import { createKvStore, createMemoryEngine, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel/store/kv-store'
-import { createStorageRepository } from '@/kernel/store/storage-repository'
-import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
 import { createSecretsVault } from '@/kernel/secrets/vault'
@@ -19,6 +17,7 @@ import { uiService } from '@/kernel/ui/toasts'
 import { pluginViewsSink } from '@/kernel/app/plugin-views'
 import { settingsSink } from '@/kernel/app/settings-registry'
 import { cardPanelsSink, inputActionsSink } from '@/kernel/app/registration-sinks'
+import { createMemorySettingsState } from '../helpers/memory-settings'
 
 // Ported from the decoupling line's tts organ contract tests (baseline
 // 81ef0b8, the ADR-001 Phase 1 pilot): manifest gate, seam dual-provider
@@ -28,10 +27,9 @@ function makeServices(): KernelServices {
   const seams = createSeamRegistry((seamId, providerPluginId) => {
     bus.emit('seam.provider.changed', { seamId, providerPluginId })
   })
-  const repository = createStorageRepository(createMemoryEngine())
   return {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
-    settings: createSettingsState(repository),
+    settings: createMemorySettingsState(),
     session: createSessionProjection(),
     ledger: createSessionLedger(),
     bus,

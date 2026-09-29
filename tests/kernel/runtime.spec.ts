@@ -17,6 +17,7 @@ import { pluginViewsSink, getRegisteredPluginViews } from '@/kernel/app/plugin-v
 import { getRegisteredSettingsSections, settingsSink } from '@/kernel/app/settings-registry'
 import { definePlugin } from '@contracts'
 import type { PluginDefinition, SessionEvent } from '@contracts'
+import { createMemorySettingsState } from '../helpers/memory-settings'
 
 // The services bundle below mirrors the bootstrap wiring so the tests exercise
 // the real integration (real sinks, real bus, real ledger) — not test doubles.
@@ -29,9 +30,7 @@ function makeServices() {
   })
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
-    settings: {
-      scope: (keys) => Object.fromEntries(keys.map((key) => [key, undefined])),
-    },
+    settings: createMemorySettingsState(),
     session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null },
     ledger: createSessionLedger(),
     bus,

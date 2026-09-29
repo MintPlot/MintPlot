@@ -19,7 +19,6 @@ import type {
   PluginPlatform,
   PluginSeams,
   PluginSession,
-  PluginSettingsScope,
   PluginUi,
   SessionEvent,
   SessionEventFilter,
@@ -31,6 +30,7 @@ import type {
 import { createDisposerBag } from '@contracts'
 import type { DisposerBag } from '@contracts'
 import type { KvStore } from '@/kernel/store/kv-store'
+import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { SessionLedger } from '@/kernel/sessions/session-ledger'
 import type { TransientBus } from '@/kernel/runtime/event-bus'
 import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
@@ -58,14 +58,11 @@ export interface UiService {
   progress(owner: string): { close(): void }
 }
 
-/** Settings scope sink — the kernel settings state enforces nothing here; the
- *  runtime checks the manifest whitelist before delegating (ADR-004). */
-export type SettingsScopeSink = PluginSettingsScope
-
 /** Everything the kernel hands the runtime; all of it is plugin-safe surface. */
 export interface KernelServices {
   readonly storage: KvStore
-  readonly settings: SettingsScopeSink
+  /** Full settings state (kernel-side; the ctx face narrows to the scope). */
+  readonly settings: SettingsState
   readonly session: PluginSession
   readonly ledger: SessionLedger
   readonly bus: TransientBus

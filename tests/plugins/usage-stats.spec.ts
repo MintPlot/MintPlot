@@ -13,8 +13,9 @@ import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSecretsVault } from '@/kernel/secrets/vault'
 import { createPlatformCapability } from '@/kernel/app/platform'
 import { uiService } from '@/kernel/ui/toasts'
-import { pluginViewsSink, getRegisteredPluginViews } from '@/kernel/app/plugin-views'
+import { getRegisteredPluginViews, pluginViewsSink } from '@/kernel/app/plugin-views'
 import { settingsSink } from '@/kernel/app/settings-registry'
+import { createMemorySettingsState } from '../helpers/memory-settings'
 
 // Ported from the decoupling line's usage-stats-contract tests (baseline
 // 81ef0b8): mock ctx, zero network, behavior locked. MP adaptations: the
@@ -26,7 +27,7 @@ function makeServices(characterName = 'TestChar', confirmProbe?: { calls: { titl
   })
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
-    settings: { scope: (keys) => Object.fromEntries(keys.map((key) => [key, undefined])) },
+    settings: createMemorySettingsState(),
     session: { getCharacterName: () => characterName, getCharacterVoice: () => '', getMessageAt: () => null },
     ledger: createSessionLedger(),
     bus,
@@ -137,6 +138,7 @@ describe('usage-stats · service behavior (ported, mock ctx)', () => {
     expect(refusedProbe.calls).toHaveLength(1)
     expect(refusedProbe.calls[0]!.message).toMatch(/无法撤销/)
     expect(refused.tokenUsageHistory.value).toHaveLength(1)
+    await runtime.deactivate('usage-stats')
 
     // Accepted path.
     const acceptedProbe: { calls: { title: string; message?: string }[]; answer: boolean } = { calls: [], answer: true }

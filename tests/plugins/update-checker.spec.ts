@@ -16,6 +16,7 @@ import { createSecretsVault } from '@/kernel/secrets/vault'
 import { createPlatformCapability } from '@/kernel/app/platform'
 import { uiService } from '@/kernel/ui/toasts'
 import { getRegisteredSettingsSections, settingsSink } from '@/kernel/app/settings-registry'
+import { createMemorySettingsState } from '../helpers/memory-settings'
 
 function makeServices(): KernelServices {
   const bus = createTransientBus()
@@ -24,9 +25,7 @@ function makeServices(): KernelServices {
   })
   return {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
-    settings: {
-      scope: (keys) => Object.fromEntries(keys.map((key) => [key, undefined])),
-    },
+    settings: createMemorySettingsState(),
     session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null },
     ledger: createSessionLedger(),
     bus,
