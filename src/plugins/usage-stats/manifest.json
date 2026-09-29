@@ -1,0 +1,10 @@
+{
+  "id": "usage-stats",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "permissions": ["view.register"],
+  "extensionPoints": {
+    "views": ["usage"]
+  }
+}

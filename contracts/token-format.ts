@@ -15,8 +15,10 @@ export const formatTokenUsageTime = (timestamp: number): string =>
 export const formatTokenAggregate = (value: number, reports: number): string =>
   reports > 0 && value > 0 ? `${Number((value / 1000000).toFixed(2))}M` : '0'
 
-export const formatTokenCount = (value: number): string =>
-  Number.isFinite(value) ? value.toLocaleString() : '0'
+/** RP semantics: providers omit fields, so the input is nullable — anything
+ *  non-finite renders as '0'. */
+export const formatTokenCount = (value: number | null | undefined): string =>
+  Number.isFinite(value) ? (value as number).toLocaleString() : '0'
 
 /** Compact "7.18k"-style token counts for the inline usage bar. */
 export const formatLatestTokenCount = (value: number): string => {

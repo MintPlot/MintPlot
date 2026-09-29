@@ -203,7 +203,8 @@ function validateExtensionPoints(
 
   const provide = validateStringList(raw, 'provide', 'extensionPoints.provide', PUBLIC_SEAM_IDS, errors)
   const hooks = validateStringList(raw, 'hooks', 'extensionPoints.hooks', PIPELINE_POINTS, errors)
-  validateStringList(raw, 'views', 'extensionPoints.views', undefined, errors)
+  const views = validateStringList(raw, 'views', 'extensionPoints.views', undefined, errors)
+  if (views.length > 0) result.views = views
 
   if (raw.settings !== undefined) {
     if (
