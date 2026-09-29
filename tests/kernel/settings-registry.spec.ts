@@ -4,6 +4,7 @@ import {
   registerSettingsSection,
   settingsSink,
   useSettingsProjection,
+  useToolsSectionProjection,
 } from '@/kernel/app/settings-registry'
 
 const FakeComponent = () => null
@@ -49,5 +50,23 @@ describe('kernel/app/settings-registry (M2)', () => {
 
     dispose()
     expect(getRegisteredSettingsSections().some((section) => section.id === 'some-plugin:main')).toBe(false)
+  })
+
+  it('placement routes sections to the settings vs tools projections (M3-f IA)', () => {
+    const disposers = [
+      registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: FakeComponent }, 10),
+      registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: FakeComponent, placement: 'tools' }, 10),
+      settingsSink.registerSection('tts', { id: 'tts', title: '语音设置', component: FakeComponent, placement: 'tools' }),
+    ]
+
+    // Omitted placement defaults to the settings tab; the projections partition.
+    expect(useSettingsProjection().value.map((section) => section.id)).toEqual(['kernel:persona'])
+    expect(useToolsSectionProjection().value.map((section) => section.id)).toEqual([
+      'kernel:plugins',
+      'tts:tts',
+    ])
+
+    disposers.forEach((dispose) => dispose())
+    expect(getRegisteredSettingsSections()).toHaveLength(0)
   })
 })

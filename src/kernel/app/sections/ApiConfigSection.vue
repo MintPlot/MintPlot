@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 模型与 API 配置分区(M3,内核自有):OpenAI 兼容 provider 三键 —— Base URL /
+// API 连接与服务分区(M3,内核自有):OpenAI 兼容 provider 三键 —— Base URL /
 // API Key / 模型。apiKey 走设置仓秘密通道(落盘抽取,回读回填);这是
 // ctx.settings.scope 的宿主侧同款投影(内核分区直接用设置仓)。
 import { inject, onMounted, ref } from 'vue'

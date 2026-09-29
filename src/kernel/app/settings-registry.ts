@@ -4,11 +4,16 @@
  * with source 'kernel'; plugin sections arrive through the runtime's
  * settings sink and are namespaced `<pluginId>:<id>`. Everything registered
  * is reversible (deactivate removes the section).
+ *
+ * Each section carries a placement (M3-f IA): 'settings' (default) renders on
+ * the settings tab, 'tools' renders on the tools tab's plugin territory —
+ * plugin feature surfaces register 'tools' so the settings page stays
+ * user-configuration only.
  */
 
 import { computed, ref } from 'vue'
 import type { ComputedRef } from 'vue'
-import type { SettingsSectionSpec } from '@contracts'
+import type { SettingsSectionPlacement, SettingsSectionSpec } from '@contracts'
 import type { SettingsSink } from '@/kernel/runtime/context'
 
 export interface SettingsSectionDescriptor {
@@ -16,6 +21,8 @@ export interface SettingsSectionDescriptor {
   readonly id: string
   readonly title: string
   readonly component: SettingsSectionSpec['component']
+  /** Tab the section surfaces on (spec.placement, default 'settings'). */
+  readonly placement: SettingsSectionPlacement
   /** Sort key, ascending; ties keep registration order. */
   readonly order: number
   readonly source: string
@@ -30,7 +37,7 @@ export function registerSettingsSection(source: string, spec: SettingsSectionSpe
   }
   sections.value = [
     ...sections.value,
-    { id, title: spec.title, component: spec.component, order, source },
+    { id, title: spec.title, component: spec.component, placement: spec.placement ?? 'settings', order, source },
   ]
   return () => {
     sections.value = sections.value.filter((section) => section.id !== id)
@@ -42,9 +49,17 @@ export const settingsSink: SettingsSink = {
   registerSection: (pluginId, spec) => registerSettingsSection(pluginId, spec),
 }
 
-/** Settings-page projection: order ascending, stable on ties. */
+const byPlacement = (placement: SettingsSectionPlacement): ComputedRef<SettingsSectionDescriptor[]> =>
+  computed(() => sections.value.filter((section) => section.placement === placement).sort((a, b) => a.order - b.order))
+
+/** Settings-page projection: placement 'settings', order ascending, stable on ties. */
 export function useSettingsProjection(): ComputedRef<SettingsSectionDescriptor[]> {
-  return computed(() => [...sections.value].sort((a, b) => a.order - b.order))
+  return byPlacement('settings')
+}
+
+/** Tools-page projection for plugin feature sections (M3-f). */
+export function useToolsSectionProjection(): ComputedRef<SettingsSectionDescriptor[]> {
+  return byPlacement('tools')
 }
 
 /** Registry observation for tests and diagnostics. */

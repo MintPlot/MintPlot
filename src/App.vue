@@ -9,38 +9,32 @@ import { registerSettingsSection } from '@/kernel/app/settings-registry'
 import { useChatRoute } from '@/kernel/app/chat-router'
 import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
 import ChatSessionView from '@/kernel/app/views/ChatSessionView.vue'
-import PlaceholderView from '@/kernel/app/views/PlaceholderView.vue'
+import CharactersView from '@/kernel/app/views/CharactersView.vue'
+import ToolsView from '@/kernel/app/views/ToolsView.vue'
 import SettingsView from '@/kernel/app/views/SettingsView.vue'
 import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import PluginManagerSection from '@/kernel/app/sections/PluginManagerSection.vue'
+import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 
-// Four-tab IA (spec v1.1 §02) registered through the view registry — the tab bar is a
-// projection of the registry, not hardcoded; from M2+ the card workshop (characters tab,
-// home-level) and plugin aggregate views land through the same path.
+// Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
+// projection of the registry, not hardcoded; from M2+ the card workshop (characters tab)
+// and plugin aggregate views land through the same path.
 const disposers = [
   registerTab({ id: 'chat', title: '对话', icon: IconChat, component: ChatHomeView, order: 10 }),
   registerTab({
     id: 'characters',
     title: '角色',
     icon: IconUser,
-    component: PlaceholderView,
-    props: {
-      title: '角色',
-      note: '角色卡工坊 · 内置插件(首页级视图,M2+ 入驻):导卡 → 进卡 → 在卡内长出剧情',
-    },
+    component: CharactersView,
     order: 20,
   }),
   registerTab({
     id: 'tools',
     title: '工具',
     icon: IconWrench,
-    component: PlaceholderView,
-    props: {
-      title: '工具',
-      note: '插件视图聚合页(M2+ 随插件运行时入驻):提示词工程 · 记忆与数据 · 扩展 · 社区内容',
-    },
+    component: ToolsView,
     order: 30,
   }),
   registerTab({
@@ -53,11 +47,15 @@ const disposers = [
 ]
 
 // Kernel-owned settings sections — the settings page is a registry projection;
-// plugin sections join through the runtime (settings.section permission).
+// plugin sections join through the runtime (settings.section permission). M3-f
+// IA: the settings tab keeps user-facing configuration only (用户设定 / API 连接
+// 与服务 / 通用设置 / 关于与更新); plugin management and plugin feature sections
+// declare placement 'tools' and surface on the tools tab.
 disposers.push(
-  registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: PluginManagerSection }, 10),
-  registerSettingsSection('kernel', { id: 'api', title: '模型与 API', component: ApiConfigSection }, 20),
-  registerSettingsSection('kernel', { id: 'appearance', title: '外观', component: AppearanceSection }, 80),
+  registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection }, 10),
+  registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection }, 20),
+  registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection }, 30),
+  registerSettingsSection('kernel', { id: 'plugins', title: '插件', component: PluginManagerSection, placement: 'tools' }, 10),
 )
 
 onUnmounted(() => {

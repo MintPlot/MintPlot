@@ -29,11 +29,22 @@ export interface ViewSpec {
   component: Component
 }
 
+/**
+ * Host shell placement of a settings section (MP IA addition, M3-f): the
+ * settings tab owns user-facing configuration, the tools tab is plugin
+ * territory. Default 'settings' keeps every pre-existing registration where
+ * it was; plugin feature surfaces (TTS voice settings and the like) declare
+ * 'tools' so they group with the plugin's other surfaces.
+ */
+export type SettingsSectionPlacement = 'settings' | 'tools'
+
 /** A section registered into the kernel settings page. */
 export interface SettingsSectionSpec {
   id: string
   title: string
   component: Component
+  /** Tab the section surfaces in (MP); omitted = settings tab. */
+  placement?: SettingsSectionPlacement
 }
 
 /**

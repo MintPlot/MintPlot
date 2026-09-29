@@ -1,14 +1,18 @@
 /**
- * Shell injection keys for kernel-owned surfaces consumed by the chatbox UI
+ * Shell injection keys for kernel-owned surfaces consumed by the tab views
  * (kernel components — plugins never receive these directly).
  */
 
 import type { InjectionKey } from 'vue'
 import type { ChatboxStore } from '@/kernel/sessions/chatbox-store'
+import type { CharacterStore } from '@/kernel/characters/character-store'
 import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
+
+/** Character card library access for the characters tab (M3-f). */
+export const CHARACTER_STORE_KEY: InjectionKey<CharacterStore> = Symbol('character-store')
 
 /** Seam registry access for the chat page's provider resolution. */
 export const SEAM_REGISTRY_KEY: InjectionKey<SeamRegistry> = Symbol('seam-registry')

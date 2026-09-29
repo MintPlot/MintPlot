@@ -5,7 +5,8 @@
  * `<pluginId>:<id>`; deactivation revokes the view.
  */
 
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import type { ComputedRef } from 'vue'
 import type { ViewSpec } from '@contracts'
 import type { ViewSink } from '@/kernel/runtime/context'
 
@@ -37,4 +38,9 @@ export const pluginViewsSink: ViewSink = {
 
 export function getRegisteredPluginViews(): readonly PluginViewDescriptor[] {
   return views.value
+}
+
+/** Reactive projection for the tools-tab aggregate (follows register/revoke). */
+export function usePluginViewsProjection(): ComputedRef<PluginViewDescriptor[]> {
+  return computed(() => [...views.value])
 }
