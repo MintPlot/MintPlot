@@ -134,6 +134,8 @@ export interface PluginTransientBus {
 
 export interface ToastOptions {
   durationMs?: number
+  /** Visual tone; hosts map it to their toast styling (ADR-004: absorbed). */
+  tone?: 'info' | 'success' | 'error'
 }
 
 export interface ConfirmOptions {
@@ -172,6 +174,54 @@ export interface PluginPlatform {
 }
 
 /**
+ * Host settings projection (ADR-004, absorbed from the RP frozen surface):
+ * a reactive, writable record limited to the keys the plugin declared in its
+ * manifest (`extensionPoints.settingsScope`). Reading or writing an
+ * undeclared key is rejected by the runtime (default deny-all discipline).
+ * Values persist in the host settings store; secret-shaped fields are
+ * extracted to the secret channel by the storage layer, never by plugins.
+ */
+export interface PluginSettingsScope {
+  scope(keys: readonly string[]): Record<string, unknown>
+}
+
+/**
+ * Read-only session projection (ADR-004, minimal absorption): what TTS-style
+ * consumers need about the current session. Card-domain values ('' / null on
+ * chatbox); the host's real card-domain implementation lands with the
+ * card-workshop port — until then the host ships stubs.
+ */
+export interface SessionMessageRef {
+  readonly id: string
+  readonly content: string
+}
+
+export interface PluginSession {
+  getCharacterName(): string
+  getCharacterVoice(): string
+  getMessageAt(index: number): SessionMessageRef | null
+}
+
+/** A resolved seam provider as consumers see it. */
+export interface SeamResolveResult<T = unknown> {
+  /** Registered provider id ('system' / 'cloud' / …; plugin-chosen). */
+  readonly providerId: string
+  /** Plugin id that registered this provider (attribution). */
+  readonly pluginId: string
+  readonly implementation: T
+}
+
+/**
+ * Seam consumer surface (ADR-004, absorbed): resolve by provider id or get
+ * the latest registered provider; list the registered provider ids. Implicit
+ * (auto-granted) — providing is permission-gated, consuming is not.
+ */
+export interface PluginSeams {
+  resolve<T = unknown>(seamId: string, providerId?: string): SeamResolveResult<T> | null
+  listProviders(seamId: string): readonly string[]
+}
+
+/**
  * Read-only diagnostics projection for the owning plugin (request journal
  * excerpts, hook invocations, quota state). Shape is draft until the M2
  * runtime defines the journal surface; `pluginId` is the one stable anchor.
@@ -196,11 +246,20 @@ export interface PluginContext extends HookRegistration, SessionEventApi {
   registerInputAction(spec: InputActionSpec): Disposer
   /** Reserved (variables plugin). Permission: card.panel.section. */
   registerCardPanelSection(spec: CardPanelSectionSpec): Disposer
-  /** Permission: seam.provide.<seamId>. Removal falls consumers back to the default implementation. */
-  registerSeamProvider(seamId: string, implementation: unknown): Disposer
+  /** Permission: seam.provide.<seamId>. Optional provider id distinguishes
+   *  multiple providers of one seam ('system' / 'cloud' / …). Removal falls
+   *  consumers back to the default implementation. */
+  registerSeamProvider(seamId: string, implementation: unknown, providerId?: string): Disposer
 
   /** Implicit (no declaration); data survives deactivation, user-clearable. */
   readonly storage: PluginStorage
+  /** Whitelist projection over host settings (keys must be declared in the
+   *  manifest's extensionPoints.settingsScope). */
+  readonly settings: PluginSettingsScope
+  /** Read-only session projection (card-domain values; stubs on chatbox). */
+  readonly session: PluginSession
+  /** Seam consumer surface (resolve / listProviders). */
+  readonly seams: PluginSeams
   /** Permission: secrets.read.<key> per loan. */
   readonly secrets: PluginSecrets
   /** Auto-granted: app identity + runtime-kind projection (M2). */

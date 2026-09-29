@@ -39,6 +39,9 @@ export interface PluginExtensionPoints {
   settings?: readonly SettingsDeclaration[]
   /** Input-dock action ids this plugin registers. */
   inputActions?: readonly InputActionDeclaration[]
+  /** Host settings keys this plugin may read/write via ctx.settings.scope
+   *  (ADR-004); scope() rejects undeclared keys at runtime. */
+  settingsScope?: readonly string[]
 }
 
 export interface SettingsDeclaration {
@@ -229,6 +232,17 @@ function validateExtensionPoints(
       result.inputActions = (raw.inputActions as InputActionDeclaration[]).map((item) => ({
         id: item.id,
       }))
+    }
+  }
+
+  if (raw.settingsScope !== undefined) {
+    if (
+      !Array.isArray(raw.settingsScope) ||
+      raw.settingsScope.some((item) => typeof item !== 'string' || item.length === 0)
+    ) {
+      errors.push(error('extensionPoints.settingsScope', 'must be an array of non-empty setting key strings'))
+    } else {
+      result.settingsScope = raw.settingsScope as string[]
     }
   }
 

@@ -36,7 +36,7 @@ function push(owner: string, message: string, tone: MpToast['tone'], durationMs:
 
 export const uiService: UiService = {
   toast(owner, message, options) {
-    push(owner, message, 'info', options?.durationMs ?? 3000)
+    push(owner, message, options?.tone ?? 'info', options?.durationMs ?? 3000)
   },
   async confirm(_owner, options) {
     const prompt = [options.title, options.message].filter(Boolean).join('\n\n')

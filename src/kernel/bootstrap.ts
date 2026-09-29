@@ -14,7 +14,10 @@ import type { KernelServices } from '@/kernel/runtime/context'
 import { createKvStore, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel/store/kv-store'
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
 import type { KvStore } from '@/kernel/store/kv-store'
+import { createStorageRepository } from '@/kernel/store/storage-repository'
+import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
+import { createSessionProjection } from '@/kernel/sessions/session-projection'
 import { createSecretsVault } from '@/kernel/secrets/vault'
 import { createPlatformCapability } from '@/kernel/app/platform'
 import { uiService } from '@/kernel/ui/toasts'
@@ -35,10 +38,15 @@ export function createKernel(): MpKernel {
   const seams = createSeamRegistry((seamId, providerPluginId) => {
     bus.emit('seam.provider.changed', { seamId, providerPluginId })
   })
+  // The raw engine hosts the ADR-003 key layout directly (mp_settings,
+  // chat:<kind>:<id>); the repository adds secret extraction on top.
+  const repository = createStorageRepository(createDefaultEngine())
   const services: KernelServices = {
     // ADR-003 default engine ladder: bare idb -> localStorage session fallback,
-    // under MP's mp_ data prefix.
+    // under MP's mp_ data prefix (plugin namespaces).
     storage: createKvStore(createPrefixedEngine(createDefaultEngine(), MP_STORAGE_PREFIX)),
+    settings: createSettingsState(repository),
+    session: createSessionProjection(),
     ledger: createSessionLedger(),
     bus,
     seams,
@@ -47,7 +55,7 @@ export function createKernel(): MpKernel {
     platform: createPlatformCapability(),
     ui: uiService,
     views: pluginViewsSink,
-    settings: settingsSink,
+    settingsSink,
     inputActions: inputActionsSink,
     cardPanels: cardPanelsSink,
   }

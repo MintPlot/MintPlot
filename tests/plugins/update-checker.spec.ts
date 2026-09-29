@@ -24,6 +24,10 @@ function makeServices(): KernelServices {
   })
   return {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
+    settings: {
+      scope: (keys) => Object.fromEntries(keys.map((key) => [key, undefined])),
+    },
+    session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null },
     ledger: createSessionLedger(),
     bus,
     seams,
@@ -32,7 +36,7 @@ function makeServices(): KernelServices {
     platform: createPlatformCapability(),
     ui: uiService,
     views: { registerView: () => () => {} },
-    settings: settingsSink,
+    settingsSink,
     inputActions: { registerAction: () => () => {} },
     cardPanels: { registerSection: () => () => {} },
   }

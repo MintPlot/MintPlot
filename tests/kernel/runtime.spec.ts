@@ -29,6 +29,10 @@ function makeServices() {
   })
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
+    settings: {
+      scope: (keys) => Object.fromEntries(keys.map((key) => [key, undefined])),
+    },
+    session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null },
     ledger: createSessionLedger(),
     bus,
     seams,
@@ -42,7 +46,7 @@ function makeServices() {
     },
     ui: uiService,
     views: pluginViewsSink,
-    settings: settingsSink,
+    settingsSink,
     inputActions: inputActionsSink,
     cardPanels: cardPanelsSink,
   }

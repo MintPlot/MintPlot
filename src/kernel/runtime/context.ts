@@ -17,6 +17,9 @@ import type {
   PluginContext,
   PluginManifest,
   PluginPlatform,
+  PluginSeams,
+  PluginSession,
+  PluginSettingsScope,
   PluginUi,
   SessionEvent,
   SessionEventFilter,
@@ -50,14 +53,20 @@ export interface CardPanelSink {
 
 /** UI affordances issued per plugin (ownership tracked for deactivate cleanup). */
 export interface UiService {
-  toast(owner: string, message: string, options?: { durationMs?: number }): void
+  toast(owner: string, message: string, options?: { durationMs?: number; tone?: 'info' | 'success' | 'error' }): void
   confirm(owner: string, options: { title: string; message?: string; confirmLabel?: string; cancelLabel?: string }): Promise<boolean>
   progress(owner: string): { close(): void }
 }
 
+/** Settings scope sink — the kernel settings state enforces nothing here; the
+ *  runtime checks the manifest whitelist before delegating (ADR-004). */
+export type SettingsScopeSink = PluginSettingsScope
+
 /** Everything the kernel hands the runtime; all of it is plugin-safe surface. */
 export interface KernelServices {
   readonly storage: KvStore
+  readonly settings: SettingsScopeSink
+  readonly session: PluginSession
   readonly ledger: SessionLedger
   readonly bus: TransientBus
   readonly seams: SeamRegistry
@@ -66,7 +75,7 @@ export interface KernelServices {
   readonly platform: PluginPlatform
   readonly ui: UiService
   readonly views: ViewSink
-  readonly settings: SettingsSink
+  readonly settingsSink: SettingsSink
   readonly inputActions: InputActionSink
   readonly cardPanels: CardPanelSink
 }
@@ -155,7 +164,7 @@ export function createPluginContext(
 
     registerSettingsSection(spec) {
       requirePermission('registerSettingsSection', 'settings.section')
-      return viaSink(services.settings.registerSection(pluginId, spec))
+      return viaSink(services.settingsSink.registerSection(pluginId, spec))
     },
 
     registerInputAction(spec) {
@@ -168,9 +177,9 @@ export function createPluginContext(
       return viaSink(services.cardPanels.registerSection(pluginId, spec))
     },
 
-    registerSeamProvider(seamId, implementation) {
+    registerSeamProvider(seamId, implementation, providerId) {
       requirePermission('registerSeamProvider', `seam.provide.${seamId}`)
-      return viaSink(services.seams.register(pluginId, seamId, implementation))
+      return viaSink(services.seams.register(pluginId, seamId, implementation, providerId))
     },
 
     registerHook(point, handler, options) {
@@ -198,6 +207,30 @@ export function createPluginContext(
         return all.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length))
       },
     },
+
+    settings: {
+      // Whitelist enforcement (ADR-004): only manifest-declared keys pass;
+      // undeclared keys are denied and journaled (default deny-all discipline).
+      scope: (keys) => {
+        const declared = manifest.extensionPoints?.settingsScope
+        if (declared === undefined) {
+          deny('settings.scope', 'extensionPoints.settingsScope (no keys declared)')
+        }
+        for (const key of keys) {
+          if (!(declared as readonly string[]).includes(key)) {
+            deny('settings.scope', `settings key "${key}" not declared in extensionPoints.settingsScope`)
+          }
+        }
+        return services.settings.scope(keys)
+      },
+    },
+
+    session: services.session,
+
+    seams: {
+      resolve: <T = unknown>(seamId: string, providerId?: string) => services.seams.resolve<T>(seamId, providerId),
+      listProviders: (seamId: string) => services.seams.listProviders(seamId),
+    } satisfies PluginSeams,
 
     secrets: {
       use: async <T>(key: string, fn: (secret: string) => MaybePromise<T>) => {
