@@ -10,7 +10,7 @@
  * plugin key reads `mp_plug:<id>:<key>` at rest.
  */
 
-/** Storage-agnostic engine seam — the ADR-003 (bare idb) landing surface. */
+/** Storage-agnostic engine seam — ADR-003 (bare idb) implements this. */
 export interface KvEngine {
   get(key: string): Promise<string | null>
   set(key: string, json: string): Promise<void>
@@ -143,13 +143,4 @@ export function createKvStore(engine: KvEngine): KvStore {
       return engine.keys()
     },
   }
-}
-
-/**
- * Default kernel store: `mp_`-prefixed over the best available engine.
- * Native channels (secure secrets, SQLite) arrive with the M3 shell work —
- * the engine seam above is their landing surface.
- */
-export function createDefaultKvStore(): KvStore {
-  return createKvStore(createPrefixedEngine(createLocalStorageEngine(), MP_STORAGE_PREFIX))
 }

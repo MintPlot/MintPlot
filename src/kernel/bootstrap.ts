@@ -11,7 +11,8 @@ import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createHookRegistry } from '@/kernel/runtime/hooks'
 import type { PluginRuntime } from '@/kernel/runtime/runtime'
 import type { KernelServices } from '@/kernel/runtime/context'
-import { createDefaultKvStore } from '@/kernel/store/kv-store'
+import { createKvStore, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel/store/kv-store'
+import { createDefaultEngine } from '@/kernel/store/idb-engine'
 import type { KvStore } from '@/kernel/store/kv-store'
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSecretsVault } from '@/kernel/secrets/vault'
@@ -35,7 +36,9 @@ export function createKernel(): MpKernel {
     bus.emit('seam.provider.changed', { seamId, providerPluginId })
   })
   const services: KernelServices = {
-    storage: createDefaultKvStore(),
+    // ADR-003 default engine ladder: bare idb -> localStorage session fallback,
+    // under MP's mp_ data prefix.
+    storage: createKvStore(createPrefixedEngine(createDefaultEngine(), MP_STORAGE_PREFIX)),
     ledger: createSessionLedger(),
     bus,
     seams,
