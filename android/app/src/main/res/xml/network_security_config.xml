@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 明文 HTTP 放行(局域网/自建中转站场景;https 云端不受影响)。M3 实测:
+     vivo WebView 对 usesCleartextTraffic 标记不生效,以 networkSecurityConfig
+     为准(优先级更高,是现代机制)。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
