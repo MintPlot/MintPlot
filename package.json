@@ -16,6 +16,9 @@
     "@capacitor/android": "^7.6.9",
     "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.6.9",
+    "dompurify": "^3.4.16",
+    "jquery": "^3.7.1",
+    "marked": "^18.0.14",
     "vue": "^3.5.43"
   },
   "devDependencies": {

@@ -20,6 +20,13 @@ import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
+// M3-n rich render: floors go through macro substitution + markdown/DOMPurify
+// (full HTML documents run in sandboxed executable frames); the lifecycle
+// module is a side-effect import (≤3 active frames red line).
+import '@/kernel/render/html-frame-lifecycle'
+import { replaceCardMacros } from '@/kernel/render/macros'
+import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
+import { startExecutableFrameHost } from '@/kernel/render/html-frame'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
@@ -58,6 +65,8 @@ const scrollToBottom = async (): Promise<void> => {
 }
 
 onMounted(async () => {
+  // Card-reported frame heights arrive via postMessage (idempotent install).
+  startExecutableFrameHost()
   if (isCardDomain.value) {
     if (!cardSessions || !characterStore) {
       loadError.value = '会话存储未接入'
@@ -93,6 +102,24 @@ const readUserInfo = (): { name: string; persona: string } => {
   return { name: String(scope?.userName ?? ''), persona: String(scope?.userPersona ?? '') }
 }
 
+// M3-n display-side macro context: the card domain resolves both macros, the
+// chatbox domain has no char ({{char}} stays literal — RP replaces {{user}}
+// only as well).
+const macroContext = computed(() => ({
+  charName: isCardDomain.value ? card.value?.name ?? '' : '',
+  userName: readUserInfo().name,
+}))
+
+const isStreamingFloor = (message: ChatboxMessage): boolean =>
+  streaming.value && message.role === 'assistant' && message === messages.value[messages.value.length - 1]
+
+/** v-html render for one floor; streaming floors bypass the LRU (content
+ *  changes every flush). */
+const renderFloor = (message: ChatboxMessage): string =>
+  renderMessageHtml(message.content, macroContext.value, !isStreamingFloor(message))
+
+const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
+
 const buildRequestMessages = (): LlmChatMessage[] => {
   const floors = messages.value
   const result: LlmChatMessage[] = []
@@ -108,7 +135,9 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   }
   for (const message of floors) {
     if (message.role === 'system') continue
-    result.push({ role: message.role, content: message.content })
+    // Macros resolve on the request path too (RP default script runs both
+    // sides); the stored history itself stays untouched.
+    result.push({ role: message.role, content: replaceCardMacros(message.content, macroContext.value) })
   }
   return result
 }
@@ -275,13 +304,22 @@ const restartSession = async (): Promise<void> => {
             :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
           >
             <div
-              class="max-w-[85%] whitespace-pre-wrap break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
-              :class="message.role === 'user'
-                ? 'rounded-bubble-user bg-primary text-on-primary'
-                : 'border border-line bg-card text-ink'"
+              class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
+              :class="[
+                message.role === 'user'
+                  ? 'rounded-bubble-user bg-primary text-on-primary'
+                  : 'border border-line bg-card text-ink',
+                floorUsesHtmlFrame(message) ? 'w-full max-w-none' : 'max-w-[85%]',
+              ]"
             >
-              {{ message.content }}<span
-                v-if="streaming && message === messages[messages.length - 1] && message.role === 'assistant'"
+              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline) -->
+              <div
+                class="markdown-body"
+                v-html="renderFloor(message)"
+              />
+              <!-- eslint-enable vue/no-v-html -->
+              <span
+                v-if="isStreamingFloor(message)"
                 class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
               />
             </div>
@@ -320,3 +358,70 @@ const restartSession = async (): Promise<void> => {
     </template>
   </div>
 </template>
+
+<style scoped>
+/* Minimal markdown presentation inside bubbles — Tailwind preflight strips
+ * the browser defaults marked output relies on (RP ships a markdown-body
+ * theme; this is the MP minimal equivalent). */
+.markdown-body :where(p) {
+  margin: 0.35em 0;
+}
+.markdown-body :where(> :first-child) {
+  margin-top: 0;
+}
+.markdown-body :where(> :last-child) {
+  margin-bottom: 0;
+}
+.markdown-body :where(h1, h2, h3, h4, h5, h6) {
+  font-weight: 700;
+  margin: 0.6em 0 0.25em;
+}
+.markdown-body :where(ul, ol) {
+  margin: 0.35em 0;
+  padding-left: 1.3em;
+  list-style: revert;
+}
+.markdown-body :where(code) {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.14);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+}
+.markdown-body :where(pre) {
+  margin: 0.4em 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.14);
+  overflow-x: auto;
+}
+.markdown-body :where(pre code) {
+  padding: 0;
+  background: transparent;
+}
+.markdown-body :where(blockquote) {
+  margin: 0.4em 0;
+  padding-left: 8px;
+  border-left: 3px solid rgba(127, 127, 127, 0.4);
+  opacity: 0.85;
+}
+.markdown-body :where(a) {
+  text-decoration: underline;
+}
+.markdown-body :where(img, video) {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-body :where(table) {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+.markdown-body :where(th, td) {
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  padding: 3px 8px;
+}
+.markdown-body :where(hr) {
+  border: none;
+  border-top: 1px solid rgba(127, 127, 127, 0.4);
+}
+</style>
