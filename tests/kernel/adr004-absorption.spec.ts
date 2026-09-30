@@ -147,6 +147,22 @@ describe('ADR-004 absorption · token-format (ported pure functions)', () => {
     })
     expect(gemini).toMatchObject({ inputTokens: 10, outputTokens: 5, totalTokens: 15 })
 
+    // The kernel llm pipeline's typed shape (camelCase) must normalize too —
+    // this is the M3-j fix: the chat page hands over StreamChatResult.usage.
+    const kernelTyped = normalizeApiUsage({
+      inputTokens: 30,
+      outputTokens: 7,
+      totalTokens: 37,
+      cacheReadTokens: 22,
+    })
+    expect(kernelTyped).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 7,
+      totalTokens: 37,
+      cacheReadTokens: 22,
+      reported: true,
+    })
+
     expect(normalizeApiUsage(null).reported).toBe(false)
   })
 })

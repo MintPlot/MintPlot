@@ -7,7 +7,9 @@
  *  - ui.confirm takes an options object; ui.toast takes {tone};
  *  - the shell projection (toggleMobileMenu) is NOT absorbed — MP's
  *    four-tab shell has no mobile menu, the header menu button is dropped;
- *  - record type via session projection (card-domain stub returns '').
+ *  - record type via session projection; since M3-j the kernel chat page
+ *    passes explicit meta (model / characterName / detail), which wins over
+ *    the live projection read.
  */
 
 import { computed, ref, watch } from 'vue'
@@ -98,7 +100,9 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
       type: meta.type || 'chat',
       model: String(meta.model || ''),
       detail: String(meta.detail || ''),
-      characterName: ctx.session.getCharacterName(),
+      // Explicit meta wins (kernel callers know their session); the live
+      // session projection stays the fallback for callers that don't say.
+      characterName: meta.characterName || ctx.session.getCharacterName(),
       ...normalized,
     })
     saveTokenUsageHistoryNow().catch((error) => console.error('[usage-stats] history save failed:', error))

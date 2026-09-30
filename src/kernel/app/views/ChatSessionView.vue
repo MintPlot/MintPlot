@@ -157,7 +157,15 @@ const send = async (): Promise<void> => {
     })
     assistantFloor.content = result.content
     if (result.usage) {
-      recordUsage?.(result.usage, { type: 'chat', model: 'default' })
+      // Attribution: the record must say which session it came from — the card
+      // domain names the card, the chatbox domain names the conversation.
+      recordUsage?.(result.usage, {
+        type: 'chat',
+        model: result.model ?? '',
+        ...(isCardDomain.value
+          ? { characterName: card.value?.name ?? '' }
+          : { detail: conversation.value?.title ?? '' }),
+      })
     }
   } catch (error) {
     if (!abortController.signal.aborted) {

@@ -113,6 +113,41 @@ describe('usage-stats · service behavior (ported, mock ctx)', () => {
     expect(getUsageStatsService()).toBeNull()
   })
 
+  it('explicit meta (model / characterName / detail) wins over the live projection', async () => {
+    const { service, runtime } = await activatePlugin('投影角色')
+    await flush()
+
+    // Kernel chat page shape (M3-j): typed camelCase usage + explicit meta.
+    service.recordApiUsage(
+      { inputTokens: 30, outputTokens: 7, totalTokens: 37, cacheReadTokens: null },
+      { type: 'chat', model: 'test-model', characterName: '星澜' },
+    )
+    service.recordApiUsage(
+      { inputTokens: 5, outputTokens: 2, totalTokens: 7, cacheReadTokens: null },
+      { type: 'chat', model: 'test-model', detail: '天空为什么是蓝的?' },
+    )
+    await flush()
+
+    // Newest first: the chatbox record keeps the projection fallback for
+    // characterName but carries the conversation title; the card record names
+    // the card explicitly. CamelCase usage must not normalize to zeros.
+    expect(service.tokenUsageHistory.value[0]).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 2,
+      model: 'test-model',
+      detail: '天空为什么是蓝的?',
+      characterName: '投影角色',
+    })
+    expect(service.tokenUsageHistory.value[1]).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 7,
+      characterName: '星澜',
+      detail: '',
+    })
+
+    await runtime.deactivate('usage-stats')
+  })
+
   it('register view joins the plugin view registry and revokes on deactivate', async () => {
     const { runtime } = await activatePlugin()
     expect(getRegisteredPluginViews().map((view) => view.id)).toContain('usage-stats:usage')

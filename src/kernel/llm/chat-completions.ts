@@ -24,11 +24,15 @@ export interface LlmUsage {
   inputTokens: number | null
   outputTokens: number | null
   totalTokens: number | null
+  /** Cached prompt tokens when the provider reports the detail block. */
+  cacheReadTokens: number | null
 }
 
 export interface StreamChatResult {
   content: string
   usage: LlmUsage | null
+  /** Model id as reported by the response, falling back to the request config. */
+  model: string
 }
 
 export interface StreamChatOptions {
@@ -88,11 +92,13 @@ function readSseStream(body: ReadableStream<Uint8Array>, onChunk: (payload: stri
 }
 
 interface ChatCompletionChunk {
+  model?: string
   choices?: { delta?: { content?: string } }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number } | null
   } | null
 }
 
@@ -112,6 +118,7 @@ export async function streamChatCompletion(
 
   let content = ''
   let usage: LlmUsage | null = null
+  let model = config.model.trim()
   try {
     const response = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -151,21 +158,23 @@ export async function streamChatCompletion(
         content += delta
         options.onDelta?.(delta)
       }
+      if (chunk.model) model = chunk.model
       if (chunk.usage) {
         usage = {
           inputTokens: chunk.usage.prompt_tokens ?? null,
           outputTokens: chunk.usage.completion_tokens ?? null,
           totalTokens: chunk.usage.total_tokens ?? null,
+          cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? null,
         }
       }
     })
-    return { content, usage }
+    return { content, usage, model }
   } catch (error) {
     if (error instanceof LlmRequestError) throw error
     if ((error as Error)?.name === 'AbortError') {
       // Distinguish the caller's abort (return partial) from the timeout.
       if (options.signal?.aborted) {
-        return { content, usage }
+        return { content, usage, model }
       }
       throw new LlmRequestError('请求超时')
     }

@@ -21,7 +21,7 @@ export interface LlmProvider {
       signal?: AbortSignal
       onDelta?: (delta: string) => void
     },
-  ): Promise<{ content: string; usage: LlmUsage | null }>
+  ): Promise<{ content: string; usage: LlmUsage | null; model?: string }>
   configured(): boolean
 }
 

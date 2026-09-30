@@ -6,7 +6,10 @@
  *
  * Usage records are normalized from the many provider shapes (OpenAI,
  * Gemini-style candidate counts, Anthropic cache fields) into one record with
- * `reported` telling whether the provider reported anything at all.
+ * `reported` telling whether the provider reported anything at all. The
+ * camelCase `inputTokens` / `outputTokens` / `totalTokens` / `cacheReadTokens`
+ * keys are the kernel llm pipeline's typed shape — accepted here so callers
+ * can hand over either the raw provider object or the typed result.
  */
 
 export const formatTokenUsageTime = (timestamp: number): string =>
@@ -70,6 +73,7 @@ export const normalizeApiUsage = (usage: unknown): NormalizedApiUsage => {
     source.cache_read_tokens,
     source.cachedContentTokenCount,
     source.cached_content_token_count,
+    source.cacheReadTokens,
   )
   const reportedCacheWriteTokens = readUsageNumber(
     promptDetails.cache_creation_tokens,
@@ -84,6 +88,7 @@ export const normalizeApiUsage = (usage: unknown): NormalizedApiUsage => {
     source.prompt_tokens,
     source.promptTokenCount,
     source.inputTokenCount,
+    source.inputTokens,
   )
   const nativeInputTokens = readUsageNumber(source.input_tokens)
   const inputTokens = promptTokens !== null
@@ -96,13 +101,14 @@ export const normalizeApiUsage = (usage: unknown): NormalizedApiUsage => {
     source.output_tokens,
     source.candidatesTokenCount,
     source.outputTokenCount,
+    source.outputTokens,
   )
   const reasoningTokens = readUsageNumber(
     completionDetails.reasoning_tokens,
     source.reasoning_tokens,
     source.thoughtsTokenCount,
   )
-  let totalTokens = readUsageNumber(source.total_tokens, source.totalTokenCount)
+  let totalTokens = readUsageNumber(source.total_tokens, source.totalTokenCount, source.totalTokens)
   if (totalTokens === null && (inputTokens !== null || outputTokens !== null)) {
     totalTokens = (inputTokens || 0) + (outputTokens || 0)
   }
