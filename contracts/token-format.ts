@@ -15,8 +15,15 @@
 export const formatTokenUsageTime = (timestamp: number): string =>
   new Date(timestamp).toLocaleString('zh-CN', { hour12: false })
 
-export const formatTokenAggregate = (value: number, reports: number): string =>
-  reports > 0 && value > 0 ? `${Number((value / 1000000).toFixed(2))}M` : '0'
+/** MP adaptation of the RP aggregate format: RP rendered everything on an
+ *  M-scale (cloud-model volumes); a local small model reads "0M" for weeks.
+ *  Scale-aware instead — raw count under 1k, then k, then M. */
+export const formatTokenAggregate = (value: number, reports: number): string => {
+  if (reports <= 0 || value <= 0) return '0'
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
+  if (value >= 1000) return `${Number((value / 1000).toFixed(2))}k`
+  return String(value)
+}
 
 /** RP semantics: providers omit fields, so the input is nullable — anything
  *  non-finite renders as '0'. */

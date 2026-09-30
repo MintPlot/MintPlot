@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { validateManifest } from '@contracts'
-import { getTokenUsageCategory, normalizeApiUsage, readUsageNumber } from '@contracts'
+import { formatTokenAggregate, getTokenUsageCategory, normalizeApiUsage, readUsageNumber } from '@contracts'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createSettingsState, SETTINGS_STORAGE_KEY } from '@/kernel/settings/settings-state'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
@@ -130,6 +130,16 @@ describe('ADR-004 absorption · token-format (ported pure functions)', () => {
 
     expect(readUsageNumber('120', 5)).toBe(120)
     expect(readUsageNumber(-1, 'abc')).toBeNull()
+  })
+
+  it('formats aggregates on a scale-aware ladder (MP adaptation)', () => {
+    // M3-k: a local small model must not read "0M" for weeks — raw counts
+    // and k-units until the M scale is actually reached.
+    expect(formatTokenAggregate(0, 0)).toBe('0')
+    expect(formatTokenAggregate(381, 2)).toBe('381')
+    expect(formatTokenAggregate(1440, 3)).toBe('1.44k')
+    expect(formatTokenAggregate(7_180_000, 40)).toBe('7.18M')
+    expect(formatTokenAggregate(500, 0)).toBe('0')
   })
 
   it('normalizes provider usage shapes into one record', () => {
