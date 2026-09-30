@@ -5,7 +5,9 @@
 
 import type { InjectionKey } from 'vue'
 import type { ChatboxStore } from '@/kernel/sessions/chatbox-store'
+import type { CardSessionStore } from '@/kernel/sessions/card-session-store'
 import type { CharacterStore } from '@/kernel/characters/character-store'
+import type { HostSessionProjection } from '@/kernel/sessions/session-projection'
 import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 
@@ -13,6 +15,15 @@ export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-sto
 
 /** Character card library access for the characters tab (M3-f). */
 export const CHARACTER_STORE_KEY: InjectionKey<CharacterStore> = Symbol('character-store')
+
+/** Card-domain session persistence, one session per card (M3-i). */
+export const CARD_SESSION_STORE_KEY: InjectionKey<CardSessionStore> = Symbol('card-session-store')
+
+/**
+ * Host session projection — the card session page activates card-domain
+ * values on mount (M3-i); TTS-style plugin consumers read them via ctx.
+ */
+export const SESSION_PROJECTION_KEY: InjectionKey<HostSessionProjection> = Symbol('session-projection')
 
 /** Seam registry access for the chat page's provider resolution. */
 export const SEAM_REGISTRY_KEY: InjectionKey<SeamRegistry> = Symbol('seam-registry')

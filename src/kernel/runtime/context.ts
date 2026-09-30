@@ -18,7 +18,6 @@ import type {
   PluginManifest,
   PluginPlatform,
   PluginSeams,
-  PluginSession,
   PluginUi,
   SessionEvent,
   SessionEventFilter,
@@ -32,6 +31,7 @@ import type { DisposerBag } from '@contracts'
 import type { KvStore } from '@/kernel/store/kv-store'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { SessionLedger } from '@/kernel/sessions/session-ledger'
+import type { HostSessionProjection } from '@/kernel/sessions/session-projection'
 import type { TransientBus } from '@/kernel/runtime/event-bus'
 import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
 import type { HookRegistry } from '@/kernel/runtime/hooks'
@@ -63,7 +63,8 @@ export interface KernelServices {
   readonly storage: KvStore
   /** Full settings state (kernel-side; the ctx face narrows to the scope). */
   readonly settings: SettingsState
-  readonly session: PluginSession
+  /** Host projection; the PluginSession face narrows it for plugins. */
+  readonly session: HostSessionProjection
   readonly ledger: SessionLedger
   readonly bus: TransientBus
   readonly seams: SeamRegistry

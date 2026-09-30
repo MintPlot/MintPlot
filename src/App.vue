@@ -64,10 +64,10 @@ const activeId = ref(tabs.value[0]?.id ?? '')
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? tabs.value[0])
 
 // Full-screen chat page: the tab bar hides while a conversation is open.
+// M3-i: the route kind picks the domain — one session-page skeleton serves
+// chatbox and card conversations alike.
 const chatRoute = useChatRoute()
-const chatConversationId = computed(() =>
-  chatRoute.value.view === 'chat' ? chatRoute.value.conversationId : '',
-)
+const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.value : null))
 </script>
 
 <template>
@@ -80,7 +80,7 @@ const chatConversationId = computed(() =>
     </div>
 
     <nav
-      v-show="!chatConversationId"
+      v-show="!chatOverlay"
       class="shrink-0 border-t border-line bg-card"
       aria-label="主导航"
     >
@@ -108,9 +108,10 @@ const chatConversationId = computed(() =>
     </nav>
 
     <ChatSessionView
-      v-if="chatConversationId"
-      :key="chatConversationId"
-      :conversation-id="chatConversationId"
+      v-if="chatOverlay"
+      :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
+      :domain="chatOverlay.kind"
+      :conversation-id="chatOverlay.conversationId"
     />
 
     <ToastHost />

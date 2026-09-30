@@ -1,17 +1,38 @@
 /**
- * Session projection host implementation (ADR-004 minimal absorption) —
- * card-domain values until the card-workshop port lands: chatbox sessions
- * have no character concept, so the stubs return empty/null. ADR-004 marks
- * this surface temporary; the real implementation reads the active card
- * session's character and messages.
+ * Session projection host implementation (ADR-004) — card-domain values are
+ * real as of M3-i: the card session page activates its card (name + live
+ * floors) on mount and clears it on unmount, so TTS-style consumers see the
+ * character being played. Chatbox sessions activate nothing (no character
+ * concept) and keep reading empties.
  */
 
-import type { PluginSession } from '@contracts'
+import type { PluginSession, SessionMessageRef } from '@contracts'
 
-export function createSessionProjection(): PluginSession {
+/** What the card session page projects while it is on screen. */
+export interface ActiveCardSessionProjection {
+  readonly cardId: string
+  readonly cardName: string
+  /** Live floor list — reads at call time see streaming content. */
+  readonly messages: readonly { readonly id: string; readonly content: string }[]
+}
+
+/** The host face: PluginSession plus the activation switch the shell owns. */
+export interface HostSessionProjection extends PluginSession {
+  setActiveCardSession(active: ActiveCardSessionProjection | null): void
+}
+
+export function createSessionProjection(): HostSessionProjection {
+  let active: ActiveCardSessionProjection | null = null
   return {
-    getCharacterName: () => '',
+    setActiveCardSession(next) {
+      active = next
+    },
+    getCharacterName: () => active?.cardName ?? '',
+    // Cards carry no voice field — TTS falls back to its configured default.
     getCharacterVoice: () => '',
-    getMessageAt: () => null,
+    getMessageAt(index: number): SessionMessageRef | null {
+      const message = active?.messages[index]
+      return message ? { id: message.id, content: message.content } : null
+    },
   }
 }

@@ -72,11 +72,30 @@ describe('ADR-004 absorption · settings scope (host settings state)', () => {
   })
 })
 
-describe('ADR-004 absorption · session projection stubs', () => {
-  it('returns card-domain empties until the card-workshop port lands', () => {
+describe('ADR-004 absorption · session projection (card-domain values real, M3-i)', () => {
+  it('returns empties with no active card session (chatbox domain)', () => {
     const session = createSessionProjection()
     expect(session.getCharacterName()).toBe('')
     expect(session.getCharacterVoice()).toBe('')
+    expect(session.getMessageAt(0)).toBeNull()
+  })
+
+  it('projects the active card session; clearing restores the empties', () => {
+    const session = createSessionProjection()
+    session.setActiveCardSession({
+      cardId: 'cc-1',
+      cardName: '星澜',
+      messages: [{ id: 'm1', content: '你好，旅人。' }],
+    })
+
+    expect(session.getCharacterName()).toBe('星澜')
+    // Cards carry no voice field — TTS falls back to its default.
+    expect(session.getCharacterVoice()).toBe('')
+    expect(session.getMessageAt(0)).toEqual({ id: 'm1', content: '你好，旅人。' })
+    expect(session.getMessageAt(5)).toBeNull()
+
+    session.setActiveCardSession(null)
+    expect(session.getCharacterName()).toBe('')
     expect(session.getMessageAt(0)).toBeNull()
   })
 })

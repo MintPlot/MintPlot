@@ -1,15 +1,17 @@
 <script setup lang="ts">
-// 角色 tab(M3-f):角色卡工坊第一块真实拼图 —— 导卡。PNG(chara/ccv3 tEXt
-// 文本块)或 JSON 文件 → 解析归一 → character store 落库;列表 = 库投影。
-// 进卡开剧情(chat:card:<id> 会话)随卡玩法批次接入。
+// 角色 tab(M3-f 导卡 + M3-i 进卡开玩):PNG(chara/ccv3 tEXt 文本块)或 JSON
+// 文件 → 解析归一 → character store 落库;列表 = 库投影,整行可点直接进入该卡
+// 的对话(D2,RP 式:无详情页无会话列表,进卡即接续);删除连带清掉该卡会话。
 import { inject, onMounted, ref } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
-import { CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
+import { CARD_SESSION_STORE_KEY, CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
+import { openConversation } from '@/kernel/app/chat-router'
 import { CharacterCardError, parseCharacterCardFile } from '@/kernel/characters/character-card'
 import type { CharacterCardSummary } from '@/kernel/characters/character-store'
 import { uiService } from '@/kernel/ui/toasts'
 
 const store = inject(CHARACTER_STORE_KEY, null)
+const cardSessions = inject(CARD_SESSION_STORE_KEY, null)
 
 const cards = ref<CharacterCardSummary[]>([])
 const loading = ref(false)
@@ -47,15 +49,21 @@ const importFile = async (event: Event): Promise<void> => {
   }
 }
 
+const openCard = (card: CharacterCardSummary): void => {
+  openConversation(card.id, 'card')
+}
+
 const removeCard = async (card: CharacterCardSummary): Promise<void> => {
   if (!store) return
   const confirmed = await uiService.confirm('shell', {
     title: '删除角色卡',
-    message: `确定删除「${card.name}」吗?`,
+    message: `确定删除「${card.name}」吗?它的会话记录将一并删除。`,
     confirmLabel: '删除',
   })
   if (!confirmed) return
   await store.remove(card.id)
+  // Cascade: the card's session dies with it (no orphan card sessions).
+  await cardSessions?.remove(card.id)
   await refresh()
 }
 
@@ -109,13 +117,19 @@ const snippetOf = (card: CharacterCardSummary): string =>
           :key="card.id"
           class="flex items-start gap-3 border-b border-line px-4 py-3"
         >
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-sm text-ink">{{ card.name }}</span>
-            <span class="mt-0.5 block truncate text-xs text-ink-3">{{ snippetOf(card) }}</span>
-          </span>
-          <span class="flex-shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-3">
-            {{ card.spec === 'v1' ? 'V1' : card.spec === 'chara_card_v3' ? 'V3' : 'V2' }}
-          </span>
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 items-start gap-3 text-left transition-colors active:bg-bg"
+            @click="openCard(card)"
+          >
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm text-ink">{{ card.name }}</span>
+              <span class="mt-0.5 block truncate text-xs text-ink-3">{{ snippetOf(card) }}</span>
+            </span>
+            <span class="flex-shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-3">
+              {{ card.spec === 'v1' ? 'V1' : card.spec === 'chara_card_v3' ? 'V3' : 'V2' }}
+            </span>
+          </button>
           <button
             type="button"
             class="flex-shrink-0 text-xs text-ink-3 active:text-danger"

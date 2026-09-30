@@ -28,7 +28,7 @@ function makeServices(characterName = 'TestChar', confirmProbe?: { calls: { titl
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
     settings: createMemorySettingsState(),
-    session: { getCharacterName: () => characterName, getCharacterVoice: () => '', getMessageAt: () => null },
+    session: { getCharacterName: () => characterName, getCharacterVoice: () => '', getMessageAt: () => null, setActiveCardSession: () => undefined },
     ledger: createSessionLedger(),
     bus,
     seams,

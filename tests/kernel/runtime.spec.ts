@@ -31,7 +31,7 @@ function makeServices() {
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
     settings: createMemorySettingsState(),
-    session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null },
+    session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null, setActiveCardSession: () => undefined },
     ledger: createSessionLedger(),
     bus,
     seams,

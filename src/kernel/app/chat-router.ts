@@ -1,7 +1,9 @@
 /**
  * Chat route (M3) — the conversation page is a full-screen overlay: entering
  * any chat page hides the tab bar (spec §02 进聊天页全屏沉浸). Module-level
- * route; the shell renders the overlay above the tab bar.
+ * route; the shell renders the overlay above the tab bar. M3-i: the route
+ * carries the session kind (chatbox | card) so the shell mounts the same
+ * session page skeleton in either domain.
  *
  * History integration (M3-f): opening a conversation pushes a history entry,
  * so the Android system back (gesture or button) drives the WebView one entry
@@ -12,8 +14,9 @@
 
 import { ref } from 'vue'
 import type { Ref } from 'vue'
+import type { SessionKind } from '@contracts'
 
-export type ChatRoute = { view: 'list' } | { view: 'chat'; conversationId: string }
+export type ChatRoute = { view: 'list' } | { view: 'chat'; kind: SessionKind; conversationId: string }
 
 const route = ref<ChatRoute>({ view: 'list' })
 
@@ -25,8 +28,18 @@ const HISTORY_KEY = 'mpChat'
 
 function routeFromHistoryState(state: unknown): ChatRoute {
   const flagged = state as { [HISTORY_KEY]?: unknown } | null
-  const id = flagged?.[HISTORY_KEY]
-  return typeof id === 'string' && id !== '' ? { view: 'chat', conversationId: id } : { view: 'list' }
+  const entry = flagged?.[HISTORY_KEY]
+  // Current shape: { kind, id }; legacy plain-string ids restore as chatbox.
+  if (typeof entry === 'string' && entry !== '') {
+    return { view: 'chat', kind: 'chatbox', conversationId: entry }
+  }
+  if (typeof entry === 'object' && entry !== null) {
+    const record = entry as { kind?: unknown; id?: unknown }
+    if (typeof record.id === 'string' && record.id !== '' && (record.kind === 'chatbox' || record.kind === 'card')) {
+      return { view: 'chat', kind: record.kind, conversationId: record.id }
+    }
+  }
+  return { view: 'list' }
 }
 
 const hasHistoryApi = typeof window !== 'undefined' && typeof window.history !== 'undefined'
@@ -39,10 +52,10 @@ if (hasHistoryApi) {
   })
 }
 
-export function openConversation(conversationId: string): void {
-  if (route.value.view === 'chat' && route.value.conversationId === conversationId) return
-  route.value = { view: 'chat', conversationId }
-  if (hasHistoryApi) window.history.pushState({ [HISTORY_KEY]: conversationId }, '')
+export function openConversation(conversationId: string, kind: SessionKind = 'chatbox'): void {
+  if (route.value.view === 'chat' && route.value.kind === kind && route.value.conversationId === conversationId) return
+  route.value = { view: 'chat', kind, conversationId }
+  if (hasHistoryApi) window.history.pushState({ [HISTORY_KEY]: { kind, id: conversationId } }, '')
 }
 
 export function closeConversation(): void {
