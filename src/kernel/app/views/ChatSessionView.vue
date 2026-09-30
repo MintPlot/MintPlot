@@ -37,6 +37,7 @@ const recordUsage = inject(USAGE_RECORDER_KEY, null)
 const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
 const card = ref<CharacterCard | null>(null)
+const cardCover = ref('')
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
@@ -67,6 +68,7 @@ onMounted(async () => {
       loadError.value = '角色卡不存在'
       return
     }
+    cardCover.value = (await characterStore.getCover(props.conversationId)) ?? ''
     // 进卡即接续:D3 每卡一会话,无历史则当场种下开场白首楼。
     cardSession.value = (await cardSessions.get(props.conversationId)) ?? (await cardSessions.create(card.value))
     // 卡域投影真实化(TTS 零改动生效):挂载即报卡名与实时楼层。
@@ -222,6 +224,18 @@ const restartSession = async (): Promise<void> => {
           />
         </svg>
       </button>
+      <img
+        v-if="isCardDomain && cardCover"
+        :src="cardCover"
+        alt=""
+        class="h-8 w-8 flex-shrink-0 rounded-full object-cover"
+      >
+      <span
+        v-else-if="isCardDomain"
+        class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-bg text-sm text-ink-2"
+      >
+        {{ title.slice(0, 1) }}
+      </span>
       <h1 class="min-w-0 flex-1 truncate py-3 text-base">
         {{ title }}
       </h1>

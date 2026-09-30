@@ -49,7 +49,9 @@ function decodeLatin1(bytes: Uint8Array): string {
   return out
 }
 
-function isPng(bytes: Uint8Array): boolean {
+/** PNG signature sniff — also the import-path cover decision (M3-m): a PNG
+ *  card file is its own cover artwork; JSON files carry no image. */
+export function isPngBytes(bytes: Uint8Array): boolean {
   return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)
 }
 
@@ -58,6 +60,18 @@ function decodeBase64Utf8(base64: string): string {
   const binary = atob(compact)
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
   return new TextDecoder('utf-8').decode(bytes)
+}
+
+/** Cover data URL (M3-m): the PNG card file itself becomes the `<img>` src.
+ *  Same chunked-encode lesson as {@link decodeLatin1} — a multi-MB cover as
+ *  one spread blows the call stack. */
+export function pngDataUrl(bytes: Uint8Array): string {
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let index = 0; index < bytes.length; index += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK))
+  }
+  return `data:image/png;base64,${btoa(binary)}`
 }
 
 /**
@@ -131,7 +145,7 @@ export function parseCharacterCardJson(raw: unknown): ParsedCharacterCard {
 
 /** Extracts the card from PNG tEXt chunks; ccv3 (v3) wins over chara (v1/v2). */
 export function parseCharacterCardFromPng(bytes: Uint8Array): ParsedCharacterCard {
-  if (!isPng(bytes)) throw new CharacterCardError('不是有效的 PNG 角色卡文件')
+  if (!isPngBytes(bytes)) throw new CharacterCardError('不是有效的 PNG 角色卡文件')
   const chunks = pngTextChunks(bytes)
   const decode = (keyword: string): ParsedCharacterCard | null => {
     const encoded = chunks.get(keyword)
@@ -152,7 +166,7 @@ export function parseCharacterCardFromPng(bytes: Uint8Array): ParsedCharacterCar
 
 /** File-entry parser: sniffs PNG by signature, falls back to raw JSON text. */
 export function parseCharacterCardFile(bytes: Uint8Array): ParsedCharacterCard {
-  if (isPng(bytes)) return parseCharacterCardFromPng(bytes)
+  if (isPngBytes(bytes)) return parseCharacterCardFromPng(bytes)
   try {
     return parseCharacterCardJson(JSON.parse(new TextDecoder('utf-8').decode(bytes)))
   } catch (error) {

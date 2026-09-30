@@ -92,15 +92,15 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     const stored = await characterStore.import(CARD)
     await flushPromises()
 
-    // 角色 tab:行内可见名字与简介(description 给人看)。
+    // 角色 tab:封面网格露出卡名(M3-m 网格化后简介不再进列表)。
     const tabs = wrapper.findAll('nav button')
     await tabs[1]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('星澜')
-    expect(wrapper.text()).toContain('给用户看的简介')
+    expect(wrapper.find('button[aria-label="进入「星澜」的对话"]').exists()).toBe(true)
 
-    // 整行可点 → 直接进入该卡会话(D2)。
-    await wrapper.findAll('ul li button')[0]!.trigger('click')
+    // 点卡 → 直接进入该卡会话(D2)。
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
     await flushPromises()
     await nextTick()
 
@@ -181,7 +181,8 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    await wrapper.findAll('button').find((button) => button.text() === '删除')!.trigger('click')
+    // M3-m 网格:删除收进封面格右上角 ✕ 角标(aria-label 携带卡名)。
+    await wrapper.find('button[aria-label="删除角色卡「星澜」"]').trigger('click')
     await flushPromises()
     confirmSpy.mockRestore()
 

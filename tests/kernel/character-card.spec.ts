@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   CharacterCardError,
+  isPngBytes,
   parseCharacterCardFile,
   parseCharacterCardFromPng,
   parseCharacterCardJson,
+  pngDataUrl,
 } from '@/kernel/characters/character-card'
 
 /** Builds a minimal PNG (signature + IHDR + tEXt chunks + IEND); CRC bytes stay zero. */
@@ -106,5 +108,23 @@ describe('kernel/characters · character card parsing (M3-f)', () => {
   it('non-object bodies fail cleanly; a non-object data wrapper falls through to v1 rules', () => {
     expect(() => parseCharacterCardJson('nope')).toThrow('不是对象')
     expect(() => parseCharacterCardJson({ spec: 'chara_card_v2', data: 'flat string' })).toThrow('缺少 name 字段')
+  })
+
+  it('isPngBytes sniffs the signature for the import-path cover decision (M3-m)', () => {
+    expect(isPngBytes(buildPng([]))).toBe(true)
+    expect(isPngBytes(new TextEncoder().encode('{"name":"x"}'))).toBe(false)
+    expect(isPngBytes(new Uint8Array(0))).toBe(false)
+  })
+
+  it('pngDataUrl round-trips bytes, chunked beyond the call-stack-safe spread size (M3-m)', () => {
+    const bytes = new Uint8Array(100_000)
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251
+    const url = pngDataUrl(bytes)
+    expect(url.startsWith('data:image/png;base64,')).toBe(true)
+    const decoded = atob(url.slice(url.indexOf(',') + 1))
+    expect(decoded.length).toBe(bytes.length)
+    for (let index = 0; index < bytes.length; index += 1) {
+      expect(decoded.charCodeAt(index)).toBe(bytes[index]!)
+    }
   })
 })
