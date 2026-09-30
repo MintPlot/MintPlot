@@ -125,9 +125,9 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(session.messages[2]).toMatchObject({ content: '（测试回复）' })
     expect(await chatboxStore.list()).toEqual([])
 
-    // 用量归属(M3-j):卡域记录卡名,模型名来自 provider 应答,无会话标题。
+    // 用量归属(M3-j/l):卡域 type='card' 记卡名,模型名来自 provider 应答。
     expect(usageCalls).toHaveLength(1)
-    expect(usageCalls[0]!.meta).toEqual({ type: 'chat', model: 'test-model', characterName: '星澜' })
+    expect(usageCalls[0]!.meta).toEqual({ type: 'card', model: 'test-model', characterName: '星澜' })
     expect(usageCalls[0]!.usage).toMatchObject({ inputTokens: 30, outputTokens: 7 })
 
     // 清空重开:取消不动,确认后回到仅剩开场白首楼(D3)。

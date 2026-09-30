@@ -157,10 +157,11 @@ const send = async (): Promise<void> => {
     })
     assistantFloor.content = result.content
     if (result.usage) {
-      // Attribution: the record must say which session it came from — the card
-      // domain names the card, the chatbox domain names the conversation.
+      // Attribution: the record must say which session it came from — the
+      // card domain types itself 'card' (labeled 角色卡 in the ledger) and
+      // names the card; the chatbox domain names the conversation.
       recordUsage?.(result.usage, {
-        type: 'chat',
+        type: isCardDomain.value ? 'card' : 'chat',
         model: result.model ?? '',
         ...(isCardDomain.value
           ? { characterName: card.value?.name ?? '' }
