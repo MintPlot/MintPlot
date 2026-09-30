@@ -8,6 +8,7 @@ import { createDefaultEngine } from '@/kernel/store/idb-engine'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
+import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
@@ -18,6 +19,7 @@ import {
   SESSION_PROJECTION_KEY,
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
+  VARIABLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
@@ -41,6 +43,9 @@ const chatboxStore = createChatboxStore(createStorageRepository(createDefaultEng
 // and its one-session-per-card conversation store (M3-i, `chat:card:*` keys).
 const characterStore = createCharacterStore(createStorageRepository(createDefaultEngine()))
 const cardSessionStore = createCardSessionStore(createStorageRepository(createDefaultEngine()))
+// Card-session variables ledger (M3-q, `variables:card:*` keys) — card domain
+// only; the chatbox domain never sees variables (review Q4 isolation).
+const variableStore = createVariableStore(createStorageRepository(createDefaultEngine()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -74,6 +79,7 @@ app.provide(PLUGIN_BUS_KEY, kernel.services.bus)
 app.provide(CHATBOX_STORE_KEY, chatboxStore)
 app.provide(CHARACTER_STORE_KEY, characterStore)
 app.provide(CARD_SESSION_STORE_KEY, cardSessionStore)
+app.provide(VARIABLE_STORE_KEY, variableStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)

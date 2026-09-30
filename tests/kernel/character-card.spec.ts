@@ -127,4 +127,18 @@ describe('kernel/characters · character card parsing (M3-f)', () => {
       expect(decoded.charCodeAt(index)).toBe(bytes[index]!)
     }
   })
+
+  it('passes the card extensions object through verbatim (M3-q, D8)', () => {
+    const extensions = {
+      mp_variables: [{ name: '好感度', value: 10, description: '当前好感' }],
+      character_book: { entries: [] },
+    }
+    const card = parseCharacterCardJson({ spec: 'chara_card_v2', data: { name: '星澜', extensions } })
+    expect(card.extensions).toEqual(extensions)
+  })
+
+  it('leaves extensions undefined on cards without the field (pre-M3-q records)', () => {
+    expect(parseCharacterCardJson({ name: '星澜' }).extensions).toBeUndefined()
+    expect(parseCharacterCardJson({ name: '星澜', extensions: 'not-an-object' }).extensions).toBeUndefined()
+  })
 })

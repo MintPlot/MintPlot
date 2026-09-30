@@ -6,6 +6,7 @@
 // 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
 // (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
 import { computed, inject, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import type { VariableState } from '@contracts'
 import {
   CARD_SESSION_STORE_KEY,
   CHATBOX_STORE_KEY,
@@ -14,6 +15,7 @@ import {
   SESSION_PROJECTION_KEY,
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
+  VARIABLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
@@ -30,6 +32,19 @@ import { startExecutableFrameHost } from '@/kernel/render/html-frame'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
+// M3-q variables: tag-block parsing/ledger on the card domain only — the
+// request path expands {{getvar}} + appends the [Variables] section, the
+// display path strips blocks into the floor capsule.
+import {
+  expandGetvarMacros,
+  parseVariableUpdates,
+  readCardVariableDefaults,
+  renderVariablesSection,
+  stripVariableBlocks,
+} from '@/kernel/variables/variable-engine'
+import type { ParsedVariableUpdate } from '@/kernel/variables/variable-engine'
+import type { VariableSnapshot } from '@/kernel/variables/variable-store'
+import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -40,6 +55,7 @@ const settingsState = inject(SETTINGS_STATE_KEY, null)
 const projection = inject(SESSION_PROJECTION_KEY, null)
 const seams = inject(SEAM_REGISTRY_KEY, null)
 const recordUsage = inject(USAGE_RECORDER_KEY, null)
+const variableStore = inject(VARIABLE_STORE_KEY, null)
 
 const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
@@ -49,6 +65,9 @@ const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+const variableState = ref<Record<string, VariableState>>({})
+const showVariables = ref(false)
+const capsuleOpenId = ref<string | null>(null)
 let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
@@ -82,6 +101,9 @@ onMounted(async () => {
     cardSession.value = (await cardSessions.get(props.conversationId)) ?? (await cardSessions.create(card.value))
     // 卡域投影真实化(TTS 零改动生效):挂载即报卡名与实时楼层。
     projection?.setActiveCardSession({ cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages })
+    // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)。
+    const variableSnapshot = await variableStore?.ensure(card.value.id, readCardVariableDefaults(card.value.extensions))
+    if (variableSnapshot) variableState.value = variableSnapshot.state
   } else {
     if (!store) {
       loadError.value = '会话存储未接入'
@@ -114,32 +136,70 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
   streaming.value && message.role === 'assistant' && message === messages.value[messages.value.length - 1]
 
 /** v-html render for one floor; streaming floors bypass the LRU (content
- *  changes every flush). */
+ *  changes every flush). The card domain strips variable tag blocks first —
+ *  a display projection only, the stored floor keeps them verbatim (review
+ *  Q1 落库纪律). */
 const renderFloor = (message: ChatboxMessage): string =>
-  renderMessageHtml(message.content, macroContext.value, !isStreamingFloor(message))
+  renderMessageHtml(
+    isCardDomain.value ? stripVariableBlocks(message.content) : message.content,
+    macroContext.value,
+    !isStreamingFloor(message),
+  )
 
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
+
+// M3-q request-side expansion chain (card domain): {{getvar}} → char/user
+// macros. The chatbox domain keeps the M3-n macro pass only — variables
+// never enter it (review Q4), so {{getvar}} stays literal there.
+const expandRequestText = (text: string): string => {
+  const withVariables = isCardDomain.value
+    ? expandGetvarMacros(text, (name) => variableState.value[name]?.value)
+    : text
+  return replaceCardMacros(withVariables, macroContext.value)
+}
 
 const buildRequestMessages = (): LlmChatMessage[] => {
   const floors = messages.value
   const result: LlmChatMessage[] = []
-  const systemPrompt = isCardDomain.value && card.value
+  let systemPrompt = isCardDomain.value && card.value
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
+  // M3-q: the variables artifact section rides the system-prompt tail (review
+  // Q5 compact line form); an empty state injects nothing.
+  if (isCardDomain.value) {
+    const variablesSection = renderVariablesSection(variableState.value)
+    if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
+  }
   if (systemPrompt.trim()) {
-    result.push({ role: 'system', content: systemPrompt })
+    result.push({ role: 'system', content: expandRequestText(systemPrompt) })
   }
   // RP 开场白保险:历史首楼不再是开场白时,请求里补注入(历史本身不改写)。
   if (isCardDomain.value && card.value && greetingFloorMissing(floors, card.value.firstMes)) {
-    result.push({ role: 'assistant', content: card.value.firstMes })
+    result.push({ role: 'assistant', content: expandRequestText(card.value.firstMes) })
   }
   for (const message of floors) {
     if (message.role === 'system') continue
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
-    result.push({ role: message.role, content: replaceCardMacros(message.content, macroContext.value) })
+    result.push({ role: message.role, content: expandRequestText(message.content) })
   }
   return result
+}
+
+// Floor capsule (review Q6): AI floors that shipped variable tag blocks show
+// 「⚙ 变量 ×N」; tapping toggles the per-name detail. Derived from the stored
+// content at render time — no extra state to keep consistent.
+const floorVariableUpdates = (message: ChatboxMessage): ParsedVariableUpdate[] =>
+  isCardDomain.value && message.role === 'assistant' ? parseVariableUpdates(message.content).updates : []
+
+const toggleCapsule = (messageId: string): void => {
+  capsuleOpenId.value = capsuleOpenId.value === messageId ? null : messageId
+}
+
+const capsuleDelta = (update: ParsedVariableUpdate): string => (update.raw === null ? '已删除' : String(update.raw))
+
+const onVariablesChanged = (snapshot: VariableSnapshot): void => {
+  variableState.value = snapshot.state
 }
 
 const persistSession = async (): Promise<void> => {
@@ -199,6 +259,20 @@ const send = async (): Promise<void> => {
           : { detail: conversation.value?.title ?? '' }),
       })
     }
+    if (isCardDomain.value && card.value && assistantFloor.content) {
+      // M3-q: the reply's variable tag blocks become ledger events
+      // (source=ai, floor-attributed); malformed blocks were ignored by the
+      // parser. A storage failure must never fail the finished floor.
+      try {
+        const { updates } = parseVariableUpdates(assistantFloor.content)
+        if (updates.length > 0) {
+          const snapshot = await variableStore?.apply(card.value.id, updates, { source: 'ai', messageId: assistantFloor.id })
+          if (snapshot) variableState.value = snapshot.state
+        }
+      } catch (error) {
+        console.error('[variables] failed to record AI-side updates:', error)
+      }
+    }
   } catch (error) {
     if (!abortController.signal.aborted) {
       assistantFloor.content = `「请求失败」${(error as Error)?.message || '未知错误'}`
@@ -226,6 +300,9 @@ const restartSession = async (): Promise<void> => {
   if (!confirmed) return
   stopStreaming()
   cardSession.value = await cardSessions.reset(card.value)
+  // M3-q: 清空重开 resets the variables ledger to a fresh card-default seed.
+  const variableSnapshot = await variableStore?.reset(card.value.id, readCardVariableDefaults(card.value.extensions))
+  if (variableSnapshot) variableState.value = variableSnapshot.state
   await scrollToBottom()
 }
 </script>
@@ -268,6 +345,14 @@ const restartSession = async (): Promise<void> => {
       <h1 class="min-w-0 flex-1 truncate py-3 text-base">
         {{ title }}
       </h1>
+      <button
+        v-if="isCardDomain"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showVariables = true"
+      >
+        变量
+      </button>
       <button
         v-if="isCardDomain"
         type="button"
@@ -318,6 +403,25 @@ const restartSession = async (): Promise<void> => {
                 v-html="renderFloor(message)"
               />
               <!-- eslint-enable vue/no-v-html -->
+              <button
+                v-if="floorVariableUpdates(message).length > 0"
+                type="button"
+                class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg px-2 py-0.5 text-[10px] text-ink-2"
+                @click="toggleCapsule(message.id)"
+              >
+                ⚙ 变量 ×{{ floorVariableUpdates(message).length }}
+              </button>
+              <div
+                v-if="capsuleOpenId === message.id"
+                class="mt-1 rounded-input border border-line bg-bg px-2 py-1 text-[10px] text-ink-2"
+              >
+                <div
+                  v-for="update in floorVariableUpdates(message)"
+                  :key="update.name"
+                >
+                  {{ update.name }} → {{ capsuleDelta(update) }}
+                </div>
+              </div>
               <span
                 v-if="isStreamingFloor(message)"
                 class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
@@ -356,6 +460,13 @@ const restartSession = async (): Promise<void> => {
         </div>
       </footer>
     </template>
+
+    <VariablesSheet
+      v-if="isCardDomain && showVariables && card"
+      :card-id="card.id"
+      @changed="onVariablesChanged"
+      @close="showVariables = false"
+    />
   </div>
 </template>
 

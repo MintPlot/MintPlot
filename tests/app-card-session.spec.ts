@@ -10,15 +10,18 @@ import {
   SESSION_PROJECTION_KEY,
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
+  VARIABLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
+import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
+import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 
@@ -39,15 +42,22 @@ const CARD: Omit<CharacterCard, 'id' | 'importedAt'> = {
   spec: 'v1',
 }
 
-/** A provider that answers instantly — the seam is what the page streams through. */
+/** A provider that answers instantly — the seam is what the page streams
+ *  through; requests are captured and the reply text is settable per test. */
+const streamCalls: Array<readonly LlmChatMessage[]> = []
+let nextReply = '（测试回复）'
+
 const fakeProvider: LlmProvider = {
   providerId: 'openai-compatible',
   configured: () => true,
-  stream: async () => ({
-    content: '（测试回复）',
-    usage: { inputTokens: 30, outputTokens: 7, totalTokens: 37, cacheReadTokens: null },
-    model: 'test-model',
-  }),
+  stream: async (messages) => {
+    streamCalls.push(messages)
+    return {
+      content: nextReply,
+      usage: { inputTokens: 30, outputTokens: 7, totalTokens: 37, cacheReadTokens: null },
+      model: 'test-model',
+    }
+  },
 }
 
 type UsageCall = { usage: unknown; meta: Record<string, string> }
@@ -56,6 +66,7 @@ function mountApp() {
   const chatboxStore = createChatboxStore(createStorageRepository(createMemoryEngine()))
   const cardSessionStore = createCardSessionStore(createStorageRepository(createMemoryEngine()))
   const characterStore = createCharacterStore(createStorageRepository(createMemoryEngine()))
+  const variableStore = createVariableStore(createStorageRepository(createMemoryEngine()))
   const projection = createSessionProjection()
   const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
   const seams = createSeamRegistry(() => undefined)
@@ -68,6 +79,7 @@ function mountApp() {
         [CHATBOX_STORE_KEY as symbol]: chatboxStore,
         [CARD_SESSION_STORE_KEY as symbol]: cardSessionStore,
         [CHARACTER_STORE_KEY as symbol]: characterStore,
+        [VARIABLE_STORE_KEY as symbol]: variableStore,
         [SEAM_REGISTRY_KEY as symbol]: seams,
         [SESSION_PROJECTION_KEY as symbol]: projection,
         [SETTINGS_STATE_KEY as symbol]: settings,
@@ -77,7 +89,7 @@ function mountApp() {
       },
     },
   })
-  return { wrapper, chatboxStore, cardSessionStore, characterStore, projection, usageCalls }
+  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, projection, usageCalls }
 }
 
 describe('M3-i · 角色 tab 进卡闭环', () => {
@@ -85,6 +97,9 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // Reset the module-level chat route between tests.
     window.history.replaceState({}, '')
     window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
+    // Reset the captured provider traffic between tests.
+    streamCalls.length = 0
+    nextReply = '（测试回复）'
   })
 
   it('点卡直进会话:标题为卡名、开场白种为首楼、发送可回复、投影卡名生效', async () => {
@@ -188,6 +203,99 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     expect(await characterStore.get(stored.id)).toBeNull()
     expect(await cardSessionStore.get(stored.id)).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('变量系统(M3-q):卡默认值播种、setvars 落账、胶囊与 [Variables] 分区、getvar 请求侧展开', async () => {
+    const { wrapper, characterStore, variableStore, cardSessionStore } = mountApp()
+    const stored = await characterStore.import({
+      ...CARD,
+      extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 卡默认值建档播种(extensions.mp_variables)。
+    let snapshot = (await variableStore.get(stored.id))!
+    expect(snapshot.state['好感度']).toMatchObject({ value: 10, sourceEventId: 'seed' })
+
+    // AI 回复带 setvars 块:楼层原文落库不改写,变量落账(AI 事件、±增量)。
+    nextReply = '前文<setvars>{ "好感度": "+15", "时间": "黄昏" }</setvars>'
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('最近如何?')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    snapshot = (await variableStore.get(stored.id))!
+    expect(snapshot.state['好感度']).toMatchObject({ value: 25 })
+    expect(snapshot.state['时间']).toMatchObject({ value: '黄昏' })
+    expect(snapshot.events.find((event) => event.name === '好感度')).toMatchObject({
+      source: 'ai',
+      name: '好感度',
+      before: 10,
+      after: 25,
+    })
+    expect((await cardSessionStore.get(stored.id))!.messages.at(-1)!.content).toContain('<setvars>')
+
+    // 显示投影:标签块剥离,胶囊计数可见。
+    expect(wrapper.text()).toContain('⚙ 变量 ×2')
+    expect(wrapper.text()).not.toContain('<setvars>')
+
+    // 下一轮请求:系统提示词尾带 [Variables] 紧凑行分区。
+    nextReply = '好的'
+    await textarea.setValue('继续')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    const systemRequest = streamCalls.at(-1)!.find((message) => message.role === 'system')!
+    expect(systemRequest.content).toContain('[Variables]')
+    expect(systemRequest.content).toContain('当前状态: 好感度 25 ｜ 时间 黄昏')
+
+    // getvar 请求侧展开:宏解析为当前值,存储楼层保持字面量。
+    // (请求末尾的空 assistant 楼层是 M3-i 预填充占位,断言按内容定位。)
+    await textarea.setValue('{{getvar::好感度}}点好感')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    const expandedUserFloor = streamCalls.at(-1)!.find((message) => message.content === '25点好感')
+    expect(expandedUserFloor).toMatchObject({ role: 'user' })
+    const storedFloors = (await cardSessionStore.get(stored.id))!.messages
+    expect(storedFloors.find((message) => message.content === '{{getvar::好感度}}点好感')).toMatchObject({ role: 'user' })
+    wrapper.unmount()
+  })
+
+  it('变量系统(M3-q):StatData 流派标签同样落账', async () => {
+    const { wrapper, characterStore, variableStore } = mountApp()
+    const stored = await characterStore.import(CARD)
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    nextReply = '状态<StatData>{"金币": 3}</StatData>'
+    await wrapper.find('textarea').setValue('看看状态')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    expect((await variableStore.get(stored.id))!.state['金币']).toMatchObject({ value: 3 })
+    wrapper.unmount()
+  })
+
+  it('变量系统(M3-q):chatbox 域不展开 getvar —— 变量不进对话域(评审 Q4)', async () => {
+    const { wrapper } = mountApp()
+    await flushPromises()
+    await wrapper.find('button[aria-label="新建对话"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('{{getvar::金币}}')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    const literalFloor = streamCalls.at(-1)!.find((message) => message.content === '{{getvar::金币}}')
+    expect(literalFloor).toMatchObject({ role: 'user' })
     wrapper.unmount()
   })
 })

@@ -30,6 +30,13 @@ export interface CharacterCard {
   creatorNotes: string
   /** Source spec: 'v1' | 'chara_card_v2' | 'chara_card_v3'. */
   spec: string
+  /**
+   * Raw card-format `extensions` object (v2/v3), passed through verbatim
+   * (M3-q): variables read `mp_variables` today; worldbook (`character_book`)
+   * and regex (`regex_scripts`) slices consume the same channel. Optional —
+   * records stored before M3-q read back without it.
+   */
+  extensions?: Record<string, unknown>
   importedAt: number
 }
 
@@ -103,6 +110,10 @@ export function pngTextChunks(bytes: Uint8Array): Map<string, string> {
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '')
 const asTextList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+const asExtensions = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
 
 /** Normalizes a card JSON body (already unwrapped from `data` when present). */
 function normalizeCardBody(body: unknown, spec: string): ParsedCharacterCard {
@@ -126,6 +137,7 @@ function normalizeCardBody(body: unknown, spec: string): ParsedCharacterCard {
     creator: asText(record.creator),
     characterVersion: asText(record.character_version),
     creatorNotes: asText(record.creator_notes),
+    extensions: asExtensions(record.extensions),
     spec,
   }
 }
