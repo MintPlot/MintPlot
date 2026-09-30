@@ -17,6 +17,7 @@ import {
   USAGE_RECORDER_KEY,
   VARIABLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
+import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -56,6 +57,9 @@ const projection = inject(SESSION_PROJECTION_KEY, null)
 const seams = inject(SEAM_REGISTRY_KEY, null)
 const recordUsage = inject(USAGE_RECORDER_KEY, null)
 const variableStore = inject(VARIABLE_STORE_KEY, null)
+// Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
+// No runtime injected (pure kernel tests) keeps variables active.
+const runtime = inject(PLUGIN_RUNTIME_KEY, null)
 
 const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
@@ -66,6 +70,7 @@ const streaming = ref(false)
 const loadError = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const variableState = ref<Record<string, VariableState>>({})
+const variablesActive = ref(true)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 let abortController: AbortController | null = null
@@ -101,9 +106,14 @@ onMounted(async () => {
     cardSession.value = (await cardSessions.get(props.conversationId)) ?? (await cardSessions.create(card.value))
     // 卡域投影真实化(TTS 零改动生效):挂载即报卡名与实时楼层。
     projection?.setActiveCardSession({ cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages })
-    // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)。
-    const variableSnapshot = await variableStore?.ensure(card.value.id, readCardVariableDefaults(card.value.extensions))
-    if (variableSnapshot) variableState.value = variableSnapshot.state
+    // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)——插件停用时
+    // 整体休眠:不播种、不解析、不展开、不注入、面板入口隐藏;账本数据不动。
+    const pluginState = runtime === null ? 'active' : runtime.stateOf('variables')
+    variablesActive.value = pluginState === 'active' || pluginState === 'degraded'
+    if (variablesActive.value) {
+      const variableSnapshot = await variableStore?.ensure(card.value.id, readCardVariableDefaults(card.value.extensions))
+      if (variableSnapshot) variableState.value = variableSnapshot.state
+    }
   } else {
     if (!store) {
       loadError.value = '会话存储未接入'
@@ -141,7 +151,7 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
  *  Q1 落库纪律). */
 const renderFloor = (message: ChatboxMessage): string =>
   renderMessageHtml(
-    isCardDomain.value ? stripVariableBlocks(message.content) : message.content,
+    isCardDomain.value && variablesActive.value ? stripVariableBlocks(message.content) : message.content,
     macroContext.value,
     !isStreamingFloor(message),
   )
@@ -150,9 +160,10 @@ const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtml
 
 // M3-q request-side expansion chain (card domain): {{getvar}} → char/user
 // macros. The chatbox domain keeps the M3-n macro pass only — variables
-// never enter it (review Q4), so {{getvar}} stays literal there.
+// never enter it (review Q4), so {{getvar}} stays literal there. The plugin
+// toggle (M3-q2) puts the whole variable layer to sleep.
 const expandRequestText = (text: string): string => {
-  const withVariables = isCardDomain.value
+  const withVariables = isCardDomain.value && variablesActive.value
     ? expandGetvarMacros(text, (name) => variableState.value[name]?.value)
     : text
   return replaceCardMacros(withVariables, macroContext.value)
@@ -166,7 +177,7 @@ const buildRequestMessages = (): LlmChatMessage[] => {
     : conversation.value?.systemPrompt.trim() ?? ''
   // M3-q: the variables artifact section rides the system-prompt tail (review
   // Q5 compact line form); an empty state injects nothing.
-  if (isCardDomain.value) {
+  if (isCardDomain.value && variablesActive.value) {
     const variablesSection = renderVariablesSection(variableState.value)
     if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
   }
@@ -190,7 +201,7 @@ const buildRequestMessages = (): LlmChatMessage[] => {
 // 「⚙ 变量 ×N」; tapping toggles the per-name detail. Derived from the stored
 // content at render time — no extra state to keep consistent.
 const floorVariableUpdates = (message: ChatboxMessage): ParsedVariableUpdate[] =>
-  isCardDomain.value && message.role === 'assistant' ? parseVariableUpdates(message.content).updates : []
+  isCardDomain.value && variablesActive.value && message.role === 'assistant' ? parseVariableUpdates(message.content).updates : []
 
 const toggleCapsule = (messageId: string): void => {
   capsuleOpenId.value = capsuleOpenId.value === messageId ? null : messageId
@@ -259,7 +270,7 @@ const send = async (): Promise<void> => {
           : { detail: conversation.value?.title ?? '' }),
       })
     }
-    if (isCardDomain.value && card.value && assistantFloor.content) {
+    if (isCardDomain.value && card.value && variablesActive.value && assistantFloor.content) {
       // M3-q: the reply's variable tag blocks become ledger events
       // (source=ai, floor-attributed); malformed blocks were ignored by the
       // parser. A storage failure must never fail the finished floor.
@@ -301,8 +312,10 @@ const restartSession = async (): Promise<void> => {
   stopStreaming()
   cardSession.value = await cardSessions.reset(card.value)
   // M3-q: 清空重开 resets the variables ledger to a fresh card-default seed.
-  const variableSnapshot = await variableStore?.reset(card.value.id, readCardVariableDefaults(card.value.extensions))
-  if (variableSnapshot) variableState.value = variableSnapshot.state
+  if (variablesActive.value) {
+    const variableSnapshot = await variableStore?.reset(card.value.id, readCardVariableDefaults(card.value.extensions))
+    if (variableSnapshot) variableState.value = variableSnapshot.state
+  }
   await scrollToBottom()
 }
 </script>
@@ -346,7 +359,7 @@ const restartSession = async (): Promise<void> => {
         {{ title }}
       </h1>
       <button
-        v-if="isCardDomain"
+        v-if="isCardDomain && variablesActive"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
         @click="showVariables = true"

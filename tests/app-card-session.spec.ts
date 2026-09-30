@@ -21,6 +21,20 @@ import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
+import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
+import { createTransientBus } from '@/kernel/runtime/event-bus'
+import { createSeamRegistry as makeRuntimeSeams } from '@/kernel/runtime/seam-registry'
+import { createHookRegistry } from '@/kernel/runtime/hooks'
+import { createSessionLedger } from '@/kernel/sessions/session-ledger'
+import { createSecretsVault } from '@/kernel/secrets/vault'
+import { createPlatformCapability } from '@/kernel/app/platform'
+import { uiService } from '@/kernel/ui/toasts'
+import { pluginViewsSink } from '@/kernel/app/plugin-views'
+import { settingsSink } from '@/kernel/app/settings-registry'
+import { createKvStore, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel/store/kv-store'
+import { createMemorySettingsState } from './helpers/memory-settings'
+import VariablesPlugin from '@/plugins/variables'
+import { createPluginRuntime } from '@/kernel/runtime/runtime'
 import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -62,7 +76,31 @@ const fakeProvider: LlmProvider = {
 
 type UsageCall = { usage: unknown; meta: Record<string, string> }
 
-function mountApp() {
+/** Runtime services bundle mirroring the bootstrap wiring (plugin toggle tests). */
+function makeRuntimeServices() {
+  const bus = createTransientBus()
+  const seams = makeRuntimeSeams((seamId, providerPluginId) => {
+    bus.emit('seam.provider.changed', { seamId, providerPluginId })
+  })
+  return {
+    storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
+    settings: createMemorySettingsState(),
+    session: { getCharacterName: () => '', getCharacterVoice: () => '', getMessageAt: () => null, setActiveCardSession: () => undefined },
+    ledger: createSessionLedger(),
+    bus,
+    seams,
+    hooks: createHookRegistry(),
+    secrets: createSecretsVault(),
+    platform: createPlatformCapability(),
+    ui: uiService,
+    views: pluginViewsSink,
+    settingsSink,
+    inputActions: { registerAction: () => () => {} },
+    cardPanels: { registerSection: () => () => {} },
+  }
+}
+
+function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } = {}) {
   const chatboxStore = createChatboxStore(createStorageRepository(createMemoryEngine()))
   const cardSessionStore = createCardSessionStore(createStorageRepository(createMemoryEngine()))
   const characterStore = createCharacterStore(createStorageRepository(createMemoryEngine()))
@@ -86,6 +124,7 @@ function mountApp() {
         [USAGE_RECORDER_KEY as symbol]: (usage: unknown, meta: Record<string, string>) => {
           usageCalls.push({ usage, meta })
         },
+        ...(options.runtime ? { [PLUGIN_RUNTIME_KEY as symbol]: options.runtime } : {}),
       },
     },
   })
@@ -296,6 +335,40 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
     const literalFloor = streamCalls.at(-1)!.find((message) => message.content === '{{getvar::金币}}')
     expect(literalFloor).toMatchObject({ role: 'user' })
+    wrapper.unmount()
+  })
+
+  it('变量系统插件停用(M3-q2):进卡无变量入口,getvar 保持字面量,不落账', async () => {
+    const runtime = createPluginRuntime(makeRuntimeServices())
+    runtime.load(VariablesPlugin) // loaded but NOT activated → toggle off semantics
+    const { wrapper, characterStore, variableStore } = mountApp({ runtime })
+    const stored = await characterStore.import({
+      ...CARD,
+      extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 停用:顶栏无「变量」入口。
+    expect(wrapper.findAll('button').some((button) => button.text() === '变量')).toBe(false)
+
+    // 请求侧:getvar 不展开(字面量直达),系统提示词无 [Variables] 分区。
+    nextReply = '好的<setvars>{ "好感度": "+5" }</setvars>'
+    await wrapper.find('textarea').setValue('{{getvar::好感度}}还好吗')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    const request = streamCalls.at(-1)!
+    expect(request.find((message) => message.content === '{{getvar::好感度}}还好吗')).toMatchObject({ role: 'user' })
+    expect(request.some((message) => message.content.includes('[Variables]'))).toBe(false)
+
+    // 停用期间不解析不落账,账本保持未建档。
+    expect(await variableStore.get(stored.id)).toBeNull()
     wrapper.unmount()
   })
 })

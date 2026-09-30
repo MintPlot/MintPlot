@@ -25,6 +25,7 @@ import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
 import { getUsageStatsService } from '@/plugins/usage-stats/service-instance'
 import TtsPlugin from '@/plugins/tts'
+import VariablesPlugin from '@/plugins/variables'
 
 initMpTheme()
 
@@ -56,6 +57,9 @@ const recordUsage = (usage: unknown, meta: Record<string, string>): void => {
 kernel.runtime.load(UpdateCheckerPlugin)
 kernel.runtime.load(UsageStatsPlugin)
 kernel.runtime.load(TtsPlugin)
+// Variables system (M3-q2): the plugin is the management surface (tools-area
+// entry + toggle); engine/ledger stay kernel-side and gate on runtime state.
+kernel.runtime.load(VariablesPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
