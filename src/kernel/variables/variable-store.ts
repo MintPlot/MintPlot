@@ -59,6 +59,44 @@ const toSnapshot = (cardId: string, record: VariableRecord): VariableSnapshot =>
   state: replayVariableState(record.seed, record.events),
 })
 
+/** Floor-attributed state replay (M3-s 逐楼快照): the panel state AS OF a
+ *  given chat floor, folded from the seed plus the events attributed to
+ *  floors at or before it. RP stores an interpolated snapshot per message;
+ *  MP re-derives it at render time from the same ledger — zero storage
+ *  duplication, and swipe/deletion semantics come free once floors can move.
+ *
+ *  Attribution: an AI event sits at its own floor (messageId → index via the
+ *  resolver; unknown ids sit at Infinity, i.e. affect no historical floor);
+ *  events without a messageId (manual edits, legacy rows) inherit the floor
+ *  of the nearest preceding AI event, defaulting to the greeting (0). */
+export function replayTemplateStateAtFloor(
+  events: readonly VariableSetEvent[],
+  name: string,
+  initialValue: VariableValue,
+  floorIndexOf: (messageId: string) => number,
+  targetFloor: number,
+): VariableValue {
+  let current = cloneTemplateValue(initialValue)
+  let inheritedFloor = 0
+  for (const event of events) {
+    if (event.name !== name) continue
+    let floor: number
+    if (event.messageId) {
+      const resolved = floorIndexOf(event.messageId)
+      floor = Number.isInteger(resolved) && resolved >= 0 ? resolved : Number.POSITIVE_INFINITY
+    } else {
+      floor = inheritedFloor
+    }
+    inheritedFloor = Number.isFinite(floor) ? floor : inheritedFloor
+    if (floor > targetFloor) continue
+    if (event.after !== null) current = cloneTemplateValue(event.after)
+  }
+  return current
+}
+
+const cloneTemplateValue = <T>(value: T): T =>
+  value === undefined ? (undefined as T) : (JSON.parse(JSON.stringify(value)) as T)
+
 const newEventId = (): string => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 const sameValue = (a: VariableValue, b: VariableValue): boolean =>

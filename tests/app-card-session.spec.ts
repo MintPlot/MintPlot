@@ -372,18 +372,22 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     const seeded = (await variableStore.get(stored.id))!
     expect(seeded.state['tpl-1']).toMatchObject({ value: { hp: 10 }, sourceEventId: 'seed' })
 
-    // 请求侧:模板指令 + 当前状态/schema 注入系统提示词尾。
+    // 请求侧(M3-s):模板指令改挂请求最末一条 system 消息(RP "Instructions
+    // for next message" 位置——最后指令生效),随行当前状态/schema 载荷。
     nextReply = '<ui_template_updates>{"hp": 95, "stats": {"physique": {"val": 12}}}</ui_template_updates>'
     await wrapper.find('textarea').setValue('打坐修炼')
     await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
     await flushPromises()
 
-    const systemRequest = streamCalls.at(-1)!.find((message) => message.role === 'system')!
-    expect(systemRequest.content).toContain('[UI模板变量更新]')
-    expect(systemRequest.content).toContain('<ui_template_updates>')
-    expect(systemRequest.content).toContain('天书蛊匣')
-    expect(systemRequest.content).toContain('"hp": 10')
-    expect(systemRequest.content).toContain('hp: 数值')
+    const request = streamCalls.at(-1)!
+    const lastMessage = request.at(-1)!
+    expect(lastMessage.role).toBe('system')
+    expect(lastMessage.content).toContain('[Instructions for next message]')
+    expect(lastMessage.content).toContain('[UI模板变量更新]')
+    expect(lastMessage.content).toContain('<ui_template_updates>')
+    expect(lastMessage.content).toContain('天书蛊匣')
+    expect(lastMessage.content).toContain('"hp": 10')
+    expect(lastMessage.content).toContain('hp: 数值')
 
     // 嵌套合并落账:hp 更新、strength 原值保留(深合并);同值不重复。
     const after = (await variableStore.get(stored.id))!
@@ -433,6 +437,183 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     // 停用期间不解析不落账,账本保持未建档。
     expect(await variableStore.get(stored.id)).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('面板渲染(M3-s):逐楼快照上屏、按楼层回放、chatbox 域与流式楼不挂', async () => {
+    const { wrapper, characterStore, cardSessionStore } = mountApp()
+    await characterStore.import({
+      ...CARD,
+      uiTemplates: [
+        {
+          id: 'tpl-1',
+          name: '状态栏',
+          enabled: true,
+          scope: 'character',
+          order: 100,
+          placement: 'bottom',
+          htmlTemplate: '<section class="panel"><span class="hp">{{hp}}</span><em>{{location}}</em></section>',
+          initialVariableState: { hp: 10, location: '青茅山' },
+          variableSchema: '',
+        },
+      ],
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 开场白楼挂 seed 态面板:插值产物在沙箱 iframe srcdoc 里。
+    let panels = wrapper.findAll('iframe.executable-html-frame')
+    expect(panels).toHaveLength(1)
+    expect(panels[0]!.attributes('srcdoc')).toContain('<section class="panel">')
+    expect(panels[0]!.attributes('srcdoc')).toContain('10')
+    expect(panels[0]!.attributes('srcdoc')).toContain('青茅山')
+
+    // 第一轮:回复带更新块 → 本楼面板按「该楼事件后」状态渲染(95/中洲)。
+    nextReply = '修炼一番<ui_template_updates>{"hp": 95, "location": "中洲"}</ui_template_updates>'
+    await wrapper.find('textarea').setValue('打坐')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    panels = wrapper.findAll('iframe.executable-html-frame')
+    expect(panels).toHaveLength(2)
+    // 逐楼快照:开场白楼保持 seed(10/青茅山),新楼显示更新后状态。
+    expect(panels[0]!.attributes('srcdoc')).toContain('青茅山')
+    expect(panels[1]!.attributes('srcdoc')).toContain('95')
+    expect(panels[1]!.attributes('srcdoc')).toContain('中洲')
+
+    // 第二轮无变量变化:两楼面板沿用各自状态(共用插值缓存),楼层事件为空。
+    nextReply = '（无变化回复）'
+    await wrapper.find('textarea').setValue('继续')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    await nextTick()
+    panels = wrapper.findAll('iframe.executable-html-frame')
+    expect(panels).toHaveLength(3)
+    expect(panels[2]!.attributes('srcdoc')).toContain('95')
+
+    // 逐楼回放投影正确性直接对账本验证。
+    const session = (await cardSessionStore.get((await characterStore.list())[0]!.id))!
+    expect(session.messages).toHaveLength(5)
+    wrapper.unmount()
+  })
+
+  it('面板渲染(M3-s):placement top 在正文之上,含脚本标签走风险检测纯函数', async () => {
+    const { analyzeTemplateScriptRisk } = await import('@/kernel/render/template-interp')
+    const { wrapper, characterStore } = mountApp()
+    await characterStore.import({
+      ...CARD,
+      uiTemplates: [
+        {
+          id: 'tpl-top',
+          name: '顶栏',
+          enabled: true,
+          scope: 'character',
+          order: 200,
+          placement: 'top',
+          htmlTemplate: '<header>{{realm}}</header>',
+          initialVariableState: { realm: '一转' },
+          variableSchema: '',
+        },
+      ],
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // top 面板 = 楼层正文上方:iframe 在 markdown 楼层内容之前的插槽里。
+    const bubble = wrapper.findAll('iframe.executable-html-frame')
+    expect(bubble).toHaveLength(1)
+    expect(bubble[0]!.attributes('srcdoc')).toContain('一转')
+    // 风险检测是纯函数(轻管理面「含脚本」标签的数据源)。
+    expect(analyzeTemplateScriptRisk('<header>{{realm}}</header>').risky).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('清空重开回种模板树(M3-s 修复):账本回到完整 seed', async () => {
+    const { wrapper, characterStore, variableStore, cardSessionStore } = mountApp()
+    const stored = await characterStore.import({
+      ...CARD,
+      uiTemplates: [
+        {
+          id: 'tpl-1',
+          name: '状态栏',
+          enabled: true,
+          scope: 'character',
+          order: 100,
+          placement: 'bottom',
+          htmlTemplate: '<b>{{hp}}</b>',
+          initialVariableState: { hp: 10 },
+          variableSchema: '',
+        },
+      ],
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    nextReply = '<ui_template_updates>{"hp": 95}</ui_template_updates>'
+    await wrapper.find('textarea').setValue('修炼')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    expect((await variableStore.get(stored.id))!.state['tpl-1']).toMatchObject({ value: { hp: 95 } })
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
+    await flushPromises()
+    confirmSpy.mockRestore()
+
+    // M3-s 修复前:reset 只回种扁平默认,模板树从账本消失(靠 fallback 遮住)。
+    const restarted = (await variableStore.get(stored.id))!
+    expect(restarted.events).toEqual([])
+    expect(restarted.state['tpl-1']).toMatchObject({ value: { hp: 10 }, sourceEventId: 'seed' })
+    expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('请求侧双剥(M3-s):历史楼层协议块不进请求,存储保持原样', async () => {
+    const { wrapper, characterStore, cardSessionStore } = mountApp()
+    await characterStore.import({
+      ...CARD,
+      extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    nextReply = '好的<setvars>{ "好感度": "+5" }</setvars>'
+    await wrapper.find('textarea').setValue('第一句')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    // 下一轮:历史楼层里的 setvars 块剥除,正文保留;存储不改写。
+    nextReply = '（第二条回复）'
+    await wrapper.find('textarea').setValue('第二句')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    const request = streamCalls.at(-1)!
+    const firstUserFloor = request.find((message) => message.role === 'user' && message.content === '第一句')!
+    expect(firstUserFloor).toBeDefined()
+    request.forEach((message) => {
+      expect(message.content).not.toContain('<setvars>')
+    })
+    expect((await cardSessionStore.get((await characterStore.list())[0]!.id))!.messages.some((message) => message.content.includes('<setvars>'))).toBe(true)
     wrapper.unmount()
   })
 })

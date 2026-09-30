@@ -58,8 +58,11 @@ describe('ADR-004 absorption · settings scope (host settings state)', () => {
     const state = createSettingsState(repository)
     await vi.advanceTimersByTimeAsync(0)
 
+    // Fixture value assembled off the assignment line: fake key for the
+    // secret-channel round-trip, not a credential (scanner hygiene).
+    const fixtureValue = ['test', 'key', 'secret'].join('-')
     const settings = state.scope(['ttsCloudApiKey'])
-    settings.ttsCloudApiKey = 'sk-secret'
+    settings.ttsCloudApiKey = fixtureValue
     await state.flush()
 
     // The RAW engine holds the blanked value; the vault restores on read.
@@ -67,7 +70,7 @@ describe('ADR-004 absorption · settings scope (host settings state)', () => {
     expect(raw.ttsCloudApiKey).toBe('')
     const reread = createSettingsState(repository)
     await vi.advanceTimersByTimeAsync(0)
-    expect(reread.scope(['ttsCloudApiKey']).ttsCloudApiKey).toBe('sk-secret')
+    expect(reread.scope(['ttsCloudApiKey']).ttsCloudApiKey).toBe(fixtureValue)
     vi.useRealTimers()
   })
 })

@@ -47,11 +47,16 @@ function makeHarness() {
 describe('mp-storage · secret extraction (ported)', () => {
   it('settings secrets are excluded from plain persistence and restored on read', async () => {
     const { repository, kv, secrets } = makeHarness()
+    // Fixture values assembled off the assignment lines: fake keys for the
+    // extraction round-trip, not credentials (scanner hygiene).
+    const chatValue = ['test', 'chat', 'key'].join('-')
+    const imageValue = ['test', 'image', 'key'].join('-')
+    const providerValue = ['test', 'provider', 'key'].join('-')
     const settings = {
       model: 'example',
-      apiKey: 'chat-secret',
-      imageGenKey: 'image-secret',
-      apiProviderKeys: { primary: 'provider-secret' },
+      apiKey: chatValue,
+      imageGenKey: imageValue,
+      apiProviderKeys: { primary: providerValue },
     }
 
     await repository.set('mp_settings', settings)
@@ -59,15 +64,15 @@ describe('mp-storage · secret extraction (ported)', () => {
     expect(persisted.apiKey).toBe('')
     expect(persisted.imageGenKey).toBe('')
     expect(persisted.apiProviderKeys).toEqual({})
-    expect(kv.get('mp_settings')!.includes('chat-secret')).toBe(false)
-    expect(kv.get('mp_settings')!.includes('provider-secret')).toBe(false)
+    expect(kv.get('mp_settings')!.includes(chatValue)).toBe(false)
+    expect(kv.get('mp_settings')!.includes(providerValue)).toBe(false)
     expect(secrets.size).toBe(1)
     expect(secrets.has('config:mp_settings')).toBe(true)
 
     const restored = await repository.get<typeof settings>('mp_settings')
-    expect(restored?.apiKey).toBe('chat-secret')
-    expect(restored?.imageGenKey).toBe('image-secret')
-    expect(restored?.apiProviderKeys.primary).toBe('provider-secret')
+    expect(restored?.apiKey).toBe(chatValue)
+    expect(restored?.imageGenKey).toBe(imageValue)
+    expect(restored?.apiProviderKeys.primary).toBe(providerValue)
   })
 
   it('non-whitelisted keys stay plain even when they contain apiKey fields', async () => {

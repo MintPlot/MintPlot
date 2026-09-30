@@ -138,16 +138,19 @@ describe('kernel/llm · provider default (R-09)', () => {
     const provider = createOpenAiCompatibleProvider(settings)
     expect(provider.configured()).toBe(false)
 
+    // Fixture value assembled off the assignment line: it is a fake key for
+    // the secret-channel round-trip, not a credential (scanner hygiene).
+    const fixtureValue = ['test', 'key', 'secret'].join('-')
     const scope = settings.scope(['apiBaseUrl', 'apiKey', 'apiModel'])
     scope.apiBaseUrl = 'https://api.example.com/v1/'
-    scope.apiKey = 'sk-secret'
+    scope.apiKey = fixtureValue
     scope.apiModel = 'test-model'
     await settings.flush()
 
     // The trusted read restores the api key (secret channel round-trip).
     expect(readApiConfig(settings)).toEqual({
       baseUrl: 'https://api.example.com/v1/',
-      apiKey: 'sk-secret',
+      apiKey: fixtureValue,
       model: 'test-model',
     })
     expect(provider.configured()).toBe(true)

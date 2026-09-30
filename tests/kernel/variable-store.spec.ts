@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
 import { replayVariableState } from '@/kernel/variables/variable-engine'
-import { createVariableStore } from '@/kernel/variables/variable-store'
+import { createVariableStore, replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
 
 const DEFAULTS = [
   { name: '好感度', value: 10, description: '当前好感' },
@@ -117,5 +117,77 @@ describe('variable store · card-session variables ledger (M3-q, variables:card 
     // Reload replays to the same tree.
     const reloaded = (await store.get('cc-1'))!
     expect(reloaded.state['tpl-1']).toEqual(after.state['tpl-1'])
+  })
+})
+
+describe('replayTemplateStateAtFloor · M3-s 逐楼快照 floor attribution', () => {
+  const INITIAL = { hp: 10, location: '青茅山' }
+  const floors = new Map([
+    ['greet', 0],
+    ['m-1', 2],
+    ['m-3', 4],
+  ])
+  const floorOf = (id: string): number => floors.get(id) ?? Number.POSITIVE_INFINITY
+
+  const eventsOf = (snapshot: VariableSnapshot) => snapshot.events
+
+  it('floors before an AI event show the seed, the event floor and later show the update', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: INITIAL }])
+    const after = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, location: '中洲' } }], {
+      source: 'ai',
+      messageId: 'm-1',
+    })
+    const events = eventsOf(after)
+
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 0)).toEqual(INITIAL)
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 1)).toEqual(INITIAL)
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 2)).toEqual({ hp: 95, location: '中洲' })
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 99)).toEqual({ hp: 95, location: '中洲' })
+  })
+
+  it('manual events inherit the floor of the nearest preceding AI event', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: INITIAL }])
+    await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, location: '中洲' } }], { source: 'ai', messageId: 'm-1' })
+    await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 50, location: '中洲' } }], { source: 'manual' })
+    const afterThird = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 80, location: '白凡山' } }], { source: 'ai', messageId: 'm-3' })
+    const events = eventsOf(afterThird)
+
+    // The manual edit inherits floor 2 (m-1): visible from floor 2 onward
+    // until the m-3 floor's own event supersedes it.
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 1)).toEqual(INITIAL)
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 2)).toEqual({ hp: 50, location: '中洲' })
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 3)).toEqual({ hp: 50, location: '中洲' })
+    expect(replayTemplateStateAtFloor(events, 'tpl-1', INITIAL, floorOf, 4)).toEqual({ hp: 80, location: '白凡山' })
+  })
+
+  it('manual edits before any AI event sit at the greeting floor', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: INITIAL }])
+    const after = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 1, location: '荒原' } }], { source: 'manual' })
+
+    expect(replayTemplateStateAtFloor(eventsOf(after), 'tpl-1', INITIAL, floorOf, 0)).toEqual({ hp: 1, location: '荒原' })
+  })
+
+  it('events with unknown message ids affect no historical floor', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: INITIAL }])
+    const after = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, location: '中洲' } }], {
+      source: 'ai',
+      messageId: 'm-gone',
+    })
+
+    expect(replayTemplateStateAtFloor(eventsOf(after), 'tpl-1', INITIAL, floorOf, 99)).toEqual(INITIAL)
+  })
+
+  it('input trees are not mutated by the fold', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: INITIAL }])
+    const after = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, location: '中洲' } }], { source: 'ai', messageId: 'm-1' })
+
+    const result = replayTemplateStateAtFloor(eventsOf(after), 'tpl-1', INITIAL, floorOf, 2) as Record<string, unknown>
+    result.hp = 0
+    expect(INITIAL.hp).toBe(10)
   })
 })

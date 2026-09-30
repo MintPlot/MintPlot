@@ -29,7 +29,8 @@ import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import '@/kernel/render/html-frame-lifecycle'
 import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
-import { startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { createExecutableHtmlIframe, startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/template-interp'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
@@ -48,7 +49,7 @@ import {
   renderVariablesSection,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
-import type { VariableSnapshot } from '@/kernel/variables/variable-store'
+import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 
@@ -97,6 +98,92 @@ const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
     : entry.initialVariableState
 }
 
+/** Seed rows for a fresh ledger: flat card defaults + each template's initial
+ *  tree under its id (M3-r) — shared by mount-time ensure and 清空重开 reset
+ *  (M3-s fix: reset previously dropped the template trees). */
+const buildVariableDefaults = (): Array<{ name: string; value: VariableState['value'] }> => {
+  if (!card.value) return []
+  return [
+    ...readCardVariableDefaults(card.value.extensions),
+    ...activeTemplates.value.map((entry) => ({
+      name: entry.id,
+      value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
+    })),
+  ]
+}
+
+// M3-s 逐楼快照: panel frames render per floor from the ledger — RP stores an
+// interpolated snapshot on each message, MP re-derives the state at render
+// time (replayTemplateStateAtFloor) so storage stays duplicate-free. Frames
+// ride the same sandboxed-iframe pipeline and ≤3-active-frame budget as M3-n
+// card documents; the gu-class templates are ~78KB, so interpolation results
+// cache by (template, state) and per-floor frames by a ledger/template stamp.
+interface PanelFrame {
+  id: string
+  html: string
+}
+interface FloorPanels {
+  top: PanelFrame[]
+  bottom: PanelFrame[]
+}
+const EMPTY_PANELS: FloorPanels = { top: [], bottom: [] }
+const panelFramesCache = new Map<string, { stamp: string; panels: FloorPanels }>()
+const panelHtmlCache = new Map<string, string>()
+
+const floorIndexOfMessage = (messageId: string): number =>
+  messages.value.findIndex((message) => message.id === messageId)
+
+const renderPanelHtml = (entry: CardUiTemplate, state: Record<string, unknown>): string => {
+  const raw = stripTemplateCodeFence(entry.htmlTemplate)
+  if (!raw || typeof document === 'undefined') return ''
+  const cacheKey = `${entry.id}|${JSON.stringify(state)}`
+  const cached = panelHtmlCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  const container = document.createElement('div')
+  container.appendChild(createExecutableHtmlIframe(renderTemplateString(raw, state)))
+  const html = container.innerHTML
+  if (panelHtmlCache.size >= 32) panelHtmlCache.clear()
+  panelHtmlCache.set(cacheKey, html)
+  return html
+}
+
+const floorPanels = (message: ChatboxMessage): FloorPanels => {
+  if (!isCardDomain.value || !variablesActive.value) return EMPTY_PANELS
+  if (message.role !== 'assistant' || isStreamingFloor(message)) return EMPTY_PANELS
+  if (activeTemplates.value.length === 0) return EMPTY_PANELS
+  const targetFloor = messages.value.indexOf(message)
+  if (targetFloor < 0) return EMPTY_PANELS
+  // The reads below feed Vue's reactivity: ledger/template changes re-render.
+  const stamp = `${variableEvents.value.length}|${messages.value.length}|${activeTemplates.value.length}`
+  const cached = panelFramesCache.get(message.id)
+  if (cached && cached.stamp === stamp) return cached.panels
+  const panels: FloorPanels = { top: [], bottom: [] }
+  for (const entry of activeTemplates.value) {
+    const tree = replayTemplateStateAtFloor(
+      variableEvents.value,
+      entry.id,
+      entry.initialVariableState as VariableState['value'],
+      floorIndexOfMessage,
+      targetFloor,
+    )
+    const state = typeof tree === 'object' && tree !== null && !Array.isArray(tree)
+      ? (tree as Record<string, unknown>)
+      : entry.initialVariableState
+    const html = renderPanelHtml(entry, state)
+    if (!html) continue
+    const frame: PanelFrame = { id: entry.id, html }
+    if (entry.placement === 'top') panels.top.push(frame)
+    else panels.bottom.push(frame)
+  }
+  panelFramesCache.set(message.id, { stamp, panels })
+  return panels
+}
+
+const floorHasPanels = (message: ChatboxMessage): boolean => {
+  const panels = floorPanels(message)
+  return panels.top.length > 0 || panels.bottom.length > 0
+}
+
 let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
@@ -138,14 +225,7 @@ onMounted(async () => {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
       // running ledger.
-      const defaults = [
-        ...readCardVariableDefaults(card.value.extensions),
-        ...activeTemplates.value.map((entry) => ({
-          name: entry.id,
-          value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
-        })),
-      ]
-      const variableSnapshot = await variableStore?.ensure(card.value.id, defaults)
+      const variableSnapshot = await variableStore?.ensure(card.value.id, buildVariableDefaults())
       if (variableSnapshot) {
         variableState.value = variableSnapshot.state
         variableEvents.value = variableSnapshot.events
@@ -213,26 +293,17 @@ const buildRequestMessages = (): LlmChatMessage[] => {
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
   // M3-q: the flat variables artifact section rides the system-prompt tail
-  // (review Q5 compact line form); M3-r adds the template update section
-  // (instruction + per-template state/schema payload). Empty → nothing.
+  // (review Q5 compact line form). The M3-r template update section does NOT
+  // ride here anymore — M3-s moves it to the very last message (RP's
+  // "[Instructions for next message]" placement: the final instruction wins,
+  // a system-prompt tail drowns in long prompts).
   if (isCardDomain.value && variablesActive.value) {
     const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
     const flatState = Object.fromEntries(
       Object.entries(variableState.value).filter(([name]) => !templateIds.has(name)),
     )
-    let tail = ''
     const variablesSection = renderVariablesSection(flatState)
-    if (variablesSection) tail = variablesSection
-    const templateSection = renderTemplateUpdateSection(
-      activeTemplates.value.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        currentVariables: templateStateOf(entry),
-        variableSchema: entry.variableSchema,
-      })),
-    )
-    if (templateSection) tail = tail ? `${tail}\n\n${templateSection}` : templateSection
-    if (tail) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${tail}` : tail
+    if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
@@ -243,9 +314,29 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   }
   for (const message of floors) {
     if (message.role === 'system') continue
+    // M3-s: protocol blocks stay out of the model's context too — RP strips
+    // them from message content at parse time, and the ecosystem regex
+    // convention is display+prompt double-strip. The stored floor keeps them
+    // verbatim; this strips the request projection only.
+    const content = isCardDomain.value && variablesActive.value
+      ? stripVariableBlocks(message.content)
+      : message.content
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
-    result.push({ role: message.role, content: expandRequestText(message.content) })
+    result.push({ role: message.role, content: expandRequestText(content) })
+  }
+  if (isCardDomain.value && variablesActive.value) {
+    const templateSection = renderTemplateUpdateSection(
+      activeTemplates.value.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        currentVariables: templateStateOf(entry),
+        variableSchema: entry.variableSchema,
+      })),
+    )
+    if (templateSection) {
+      result.push({ role: 'system', content: `[Instructions for next message]\n${templateSection}` })
+    }
   }
   return result
 }
@@ -419,9 +510,11 @@ const restartSession = async (): Promise<void> => {
   if (!confirmed) return
   stopStreaming()
   cardSession.value = await cardSessions.reset(card.value)
-  // M3-q: 清空重开 resets the variables ledger to a fresh card-default seed.
+  // M3-q/M3-s: 清空重开 resets the ledger to a fresh full seed — flat card
+  // defaults AND the template trees (previously only the flat rows were
+  // re-seeded and template panels fell back to card initial state).
   if (variablesActive.value) {
-    const variableSnapshot = await variableStore?.reset(card.value.id, readCardVariableDefaults(card.value.extensions))
+    const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
     if (variableSnapshot) variableState.value = variableSnapshot.state
   }
   await scrollToBottom()
@@ -515,15 +608,20 @@ const restartSession = async (): Promise<void> => {
                 message.role === 'user'
                   ? 'rounded-bubble-user bg-primary text-on-primary'
                   : 'border border-line bg-card text-ink',
-                floorUsesHtmlFrame(message) ? 'w-full max-w-none' : 'max-w-[85%]',
+                floorUsesHtmlFrame(message) || floorHasPanels(message) ? 'w-full max-w-none' : 'max-w-[85%]',
               ]"
             >
-              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline) -->
+              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline); panels are replay-interpolated card templates in the same sandbox -->
+              <div
+                v-for="frame in floorPanels(message).top"
+                :key="`top-${frame.id}`"
+                class="mp-panel-frame"
+                v-html="frame.html"
+              />
               <div
                 class="markdown-body"
                 v-html="renderFloor(message)"
               />
-              <!-- eslint-enable vue/no-v-html -->
               <button
                 v-if="floorVariableSummary(message).total > 0"
                 type="button"
@@ -549,6 +647,13 @@ const restartSession = async (): Promise<void> => {
                   面板·{{ line }}
                 </div>
               </div>
+              <div
+                v-for="frame in floorPanels(message).bottom"
+                :key="`bottom-${frame.id}`"
+                class="mp-panel-frame"
+                v-html="frame.html"
+              />
+              <!-- eslint-enable vue/no-v-html -->
               <span
                 v-if="isStreamingFloor(message)"
                 class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
@@ -599,6 +704,21 @@ const restartSession = async (): Promise<void> => {
 </template>
 
 <style scoped>
+/* M3-s panel frames: full-width slots above/below the floor text; the inner
+ * iframe is created via v-html so it needs a deep rule (v-html content is
+ * outside scoped-data attributes). */
+.mp-panel-frame {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+.mp-panel-frame:first-child {
+  margin-top: 0;
+}
+.mp-panel-frame :deep(iframe.executable-html-frame) {
+  width: 100%;
+  display: block;
+  border: 0;
+}
 /* Minimal markdown presentation inside bubbles — Tailwind preflight strips
  * the browser defaults marked output relies on (RP ships a markdown-body
  * theme; this is the MP minimal equivalent). */
