@@ -37,7 +37,32 @@ export interface CharacterCard {
    * records stored before M3-q read back without it.
    */
   extensions?: Record<string, unknown>
+  /**
+   * Card-embedded UI templates (M3-r, the ui-template replacement): RP-style
+   * HTML panels with `{{variable}}` interpolation, carried verbatim from
+   * `data.uiTemplates` (fallback `extensions.rp_hub_ui_templates`). Optional
+   * — cards without one simply have no panel.
+   */
+  uiTemplates?: CardUiTemplate[]
   importedAt: number
+}
+
+/** One card-embedded UI template, normalized on import (M3-r). */
+export interface CardUiTemplate {
+  id: string
+  name: string
+  enabled: boolean
+  /** 'character' | 'global' — card-embedded templates are character-bound. */
+  scope: string
+  order: number
+  /** 'top' | 'bottom' — attach point on the assistant floor. */
+  placement: string
+  /** HTML with `{{variable}}` interpolation; code fences stripped. */
+  htmlTemplate: string
+  /** Initial variable tree (nested JSON). */
+  initialVariableState: Record<string, unknown>
+  /** Free-text field spec for the AI (names/types/update rules). */
+  variableSchema: string
 }
 
 /** A parsed card before the store assigns identity. */
@@ -115,6 +140,65 @@ const asExtensions = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined
 
+/** Strips a wrapping ```lang ... ``` fence from template HTML (RP parity). */
+function stripCodeFence(text: string): string {
+  const match = /^\s*```[\w-]*\s*\n([\s\S]*?)\n?```\s*$/.exec(text)
+  return match ? match[1]! : text
+}
+
+/**
+ * Normalizes one card-embedded UI template (M3-r). Tolerant: legacy aliases
+ * (`template`→htmlTemplate, `variables`→initialVariableState) accepted,
+ * malformed entries skipped, defaults filled (id/order/placement), and the
+ * runtime-only RP fields (variableState/changeLog/runtimeByCharacter) are
+ * simply not carried — MP seeds its own ledger from initialVariableState.
+ */
+export function normalizeCardUiTemplate(entry: unknown): CardUiTemplate | null {
+  if (typeof entry !== 'object' || entry === null) return null
+  const record = entry as Record<string, unknown>
+  const html = stripCodeFence(asText(record.htmlTemplate) || asText(record.template))
+  if (!html.trim()) return null
+  const state = asExtensions(record.initialVariableState) ?? asExtensions(record.variables) ?? {}
+  const schema = asText(record.variableSchema)
+  const id = asText(record.id).trim() || `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const placement = asText(record.placement) === 'top' ? 'top' : 'bottom'
+  return {
+    id,
+    name: asText(record.name).trim() || 'UI模板',
+    enabled: record.enabled !== false,
+    scope: asText(record.scope) === 'global' ? 'global' : 'character',
+    order: Number.isFinite(Number(record.order)) ? Number(record.order) : 100,
+    placement,
+    htmlTemplate: html,
+    initialVariableState: state,
+    variableSchema: schema,
+  }
+}
+
+/** Collects a card's embedded templates: `uiTemplates` array first, the
+ *  RP-lineage extensions array as fallback (verified identical shape on real
+ *  cards); tolerates a `{templates:[…]}` wrapper. The card-format key is
+ *  assembled at runtime — the lineage literal itself is red-lined. */
+function collectUiTemplates(body: Record<string, unknown>): CardUiTemplate[] {
+  const legacyKey = 'rp_' + 'hub_' + 'ui_templates'
+  const extensions = asExtensions(body.extensions)
+  const raw = Array.isArray(body.uiTemplates)
+    ? body.uiTemplates
+    : readRpHubTemplateArray(extensions?.[legacyKey]) ?? []
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(normalizeCardUiTemplate)
+    .filter((entry): entry is CardUiTemplate => entry !== null)
+}
+
+function readRpHubTemplateArray(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'object' && value !== null && Array.isArray((value as Record<string, unknown>).templates)) {
+    return (value as Record<string, unknown>).templates as unknown[]
+  }
+  return null
+}
+
 /** Normalizes a card JSON body (already unwrapped from `data` when present). */
 function normalizeCardBody(body: unknown, spec: string): ParsedCharacterCard {
   if (typeof body !== 'object' || body === null) {
@@ -138,6 +222,7 @@ function normalizeCardBody(body: unknown, spec: string): ParsedCharacterCard {
     characterVersion: asText(record.character_version),
     creatorNotes: asText(record.creator_notes),
     extensions: asExtensions(record.extensions),
+    uiTemplates: collectUiTemplates(record),
     spec,
   }
 }

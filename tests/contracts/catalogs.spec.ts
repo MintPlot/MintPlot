@@ -13,6 +13,7 @@ import {
   VARIABLE_EXPAND_POINT,
   VARIABLE_SET_EVENT_TYPE,
 } from '../../contracts/variables'
+import type { VariableValue } from '../../contracts/variables'
 import type {
   MessageEditedEvent,
   SessionEvent,
@@ -76,7 +77,9 @@ describe('session events (R-07 + variable reservation)', () => {
     expectTypeOf<SessionEvent>().toExtend<{ kind: string }>()
     expectTypeOf<MessageEditedEvent['kind']>().toEqualTypeOf<'message.edited'>()
     expectTypeOf<VariableSetEvent['source']>().toEqualTypeOf<'ai' | 'manual' | 'regex'>()
-    expectTypeOf<VariableSetEvent['after']>().toEqualTypeOf<string | number | null>()
+    // M3-r widened VariableValue with nested JSON trees (ui-template
+    // replacement); `after` rides the widened type.
+    expectTypeOf<VariableSetEvent['after']>().toEqualTypeOf<VariableValue | null>()
   })
 })
 

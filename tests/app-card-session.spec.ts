@@ -281,9 +281,13 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     })
     expect((await cardSessionStore.get(stored.id))!.messages.at(-1)!.content).toContain('<setvars>')
 
-    // 显示投影:标签块剥离,胶囊计数可见。
-    expect(wrapper.text()).toContain('⚙ 变量 ×2')
+    // 显示投影:块被剥离;胶囊账本驱动(扁平 2 事件),点开看明细。
     expect(wrapper.text()).not.toContain('<setvars>')
+    expect(wrapper.text()).toContain('⚙ 变量 ×2')
+    await wrapper.findAll('button').find((button) => button.text().includes('⚙ 变量'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('好感度')
+    expect(wrapper.text()).toContain('25')
 
     // 下一轮请求:系统提示词尾带 [Variables] 紧凑行分区。
     nextReply = '好的'
@@ -335,6 +339,66 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
     const literalFloor = streamCalls.at(-1)!.find((message) => message.content === '{{getvar::金币}}')
     expect(literalFloor).toMatchObject({ role: 'user' })
+    wrapper.unmount()
+  })
+
+  it('UI模板变量(M3-r):播种状态树、schema 注入、ui_template_updates 落账、胶囊', async () => {
+    const { wrapper, characterStore, variableStore } = mountApp()
+    const stored = await characterStore.import({
+      ...CARD,
+      uiTemplates: [
+        {
+          id: 'tpl-1',
+          name: '天书蛊匣',
+          enabled: true,
+          scope: 'character',
+          order: 100,
+          placement: 'bottom',
+          htmlTemplate: '<div>{{hp}}</div>',
+          initialVariableState: { hp: 10, stats: { physique: { val: 5 }, strength: { val: 8 } } },
+          variableSchema: 'hp: 数值',
+        },
+      ],
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 模板初始树按模板 id 播种。
+    const seeded = (await variableStore.get(stored.id))!
+    expect(seeded.state['tpl-1']).toMatchObject({ value: { hp: 10 }, sourceEventId: 'seed' })
+
+    // 请求侧:模板指令 + 当前状态/schema 注入系统提示词尾。
+    nextReply = '<ui_template_updates>{"hp": 95, "stats": {"physique": {"val": 12}}}</ui_template_updates>'
+    await wrapper.find('textarea').setValue('打坐修炼')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    const systemRequest = streamCalls.at(-1)!.find((message) => message.role === 'system')!
+    expect(systemRequest.content).toContain('[UI模板变量更新]')
+    expect(systemRequest.content).toContain('<ui_template_updates>')
+    expect(systemRequest.content).toContain('天书蛊匣')
+    expect(systemRequest.content).toContain('"hp": 10')
+    expect(systemRequest.content).toContain('hp: 数值')
+
+    // 嵌套合并落账:hp 更新、strength 原值保留(深合并);同值不重复。
+    const after = (await variableStore.get(stored.id))!
+    expect(after.state['tpl-1']!.value).toMatchObject({
+      hp: 95,
+      stats: { physique: { val: 12 }, strength: { val: 8 } },
+    })
+    expect(after.events.at(-1)).toMatchObject({ name: 'tpl-1', source: 'ai' })
+
+    // 显示投影:块被剥离;胶囊账本驱动 —— 模板整树一条事件,明细一行。
+    expect(wrapper.text()).not.toContain('ui_template_updates')
+    expect(wrapper.text()).toContain('⚙ 变量 ×1')
+    await wrapper.findAll('button').find((button) => button.text().includes('⚙ 变量'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('面板·天书蛊匣 → 已更新')
     wrapper.unmount()
   })
 

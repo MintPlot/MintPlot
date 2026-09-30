@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { VariableState } from '@contracts'
 import {
+  applyTemplateUpdates,
   expandGetvarMacros,
   manualValueFromInput,
+  matchTemplateUpdates,
+  parseTemplateUpdateBlocks,
+  parseTemplateUpdatePayload,
   parseVariableUpdates,
   readCardVariableDefaults,
+  renderTemplateUpdateSection,
   renderVariablesSection,
   replayVariableState,
   resolveUpdateValue,
@@ -179,5 +184,103 @@ describe('kernel/variables · card defaults & replay projection', () => {
   it('labels seed-only rows with the seed anchor', () => {
     const state = replayVariableState([{ name: '好感度', value: 10 }], [])
     expect(state['好感度']).toEqual({ value: 10, updatedAt: 0, sourceEventId: 'seed' })
+  })
+
+  it('replay clones tree values so mutations never leak into events', () => {
+    const seed = [{ name: 'tpl', value: { hp: 10 } as const }]
+    const state = replayVariableState(seed, [])
+    ;(state['tpl']!.value as { hp: number }).hp = 99
+    expect(seed[0]!.value).toMatchObject({ hp: 10 })
+  })
+})
+
+describe('kernel/variables · ui_template_updates protocol (M3-r)', () => {
+  it('extracts blocks case-insensitively; strip removes them for display', () => {
+    const text = '正文<ui_template_updates>{"hp":95}</ui_template_updates>尾'
+    expect(parseTemplateUpdateBlocks(text)).toEqual(['{"hp":95}'])
+    expect(stripVariableBlocks(text)).toBe('正文尾')
+    expect(stripVariableBlocks('<UI_TEMPLATE_UPDATES>x</UI_TEMPLATE_UPDATES>前')).toBe('前')
+    expect(parseTemplateUpdateBlocks('普通楼层')).toEqual([])
+  })
+
+  it('parses the updates-wrapped, single-variables and bare-object forms', () => {
+    expect(parseTemplateUpdatePayload('{"updates":[{"id":"t1","variables":{"hp":95},"reason":"战斗"}]}')).toEqual([
+      { id: 't1', variables: { hp: 95 }, reason: '战斗' },
+    ])
+    expect(parseTemplateUpdatePayload('{"variables":{"hp":95}}')).toEqual([{ variables: { hp: 95 } }])
+    expect(parseTemplateUpdatePayload('{"hp":95,"location":"青茅山"}')).toEqual([{ variables: { hp: 95, location: '青茅山' } }])
+    expect(parseTemplateUpdatePayload('```json\n{"hp":1}\n```')).toEqual([{ variables: { hp: 1 } }])
+  })
+
+  it('tolerates junk around the JSON and array variables become $root', () => {
+    expect(parseTemplateUpdatePayload('前缀 {"hp":1} 尾巴')).toEqual([{ variables: { hp: 1 } }])
+    const [entry] = parseTemplateUpdatePayload('{"variables":[1,2]}')
+    expect(entry!.variables).toEqual({ $root: [1, 2] })
+    expect(() => parseTemplateUpdatePayload('完全没有JSON')).toThrow()
+    // Metadata-only bare objects carry no variables and are dropped.
+    expect(parseTemplateUpdatePayload('{"reason":"无变化"}')).toEqual([])
+  })
+
+  it('apply deep-merges nested objects (unwritten fields keep their values)', () => {
+    const state = { stats: { physique: { val: 5, bonus: 0 }, strength: { val: 8, bonus: 1 } }, hp: 100 }
+    const { nextState, changedKeys, rejectedKeys } = applyTemplateUpdates(state, [{ variables: { stats: { physique: { val: 12 } } } }])
+    expect(rejectedKeys).toEqual([])
+    expect(changedKeys).toContain('stats')
+    expect(nextState).toEqual({
+      hp: 100,
+      stats: { physique: { val: 12, bonus: 0 }, strength: { val: 8, bonus: 1 } },
+    })
+    // The input state is never mutated.
+    expect(state.stats.physique.val).toBe(5)
+  })
+
+  it('apply replaces arrays wholesale, writes dotted paths, skips no-ops', () => {
+    const state = { equipment: [{ slot: '武器', name: '短剑' }], location: '山' }
+    const { nextState, changedKeys } = applyTemplateUpdates(state, [
+      { variables: { equipment: [{ slot: '武器', name: '铁剑' }], location: '山' } },
+      { variables: { location: '青茅山' } },
+    ])
+    expect(nextState.equipment).toEqual([{ slot: '武器', name: '铁剑' }])
+    expect(nextState.location).toBe('青茅山')
+    expect(changedKeys).toEqual(['equipment', 'location'])
+  })
+
+  it('apply enforces the top-level key allow-list and supports $root', () => {
+    const state = { hp: 10 }
+    const rejected = applyTemplateUpdates(state, [{ variables: { unknownField: 1, hp: 20 } }], {
+      initial: { hp: 0 },
+      schema: 'hp: 数值',
+    })
+    expect(rejected.rejectedKeys).toEqual(['unknownField'])
+    expect(rejected.nextState).toMatchObject({ hp: 20 })
+
+    const open = applyTemplateUpdates({}, [{ variables: { anything: { goes: 1 } } }])
+    expect(open.nextState).toMatchObject({ anything: { goes: 1 } })
+
+    const rooted = applyTemplateUpdates({ a: 1 }, [{ variables: { $root: { b: 2 } } }])
+    expect(rooted.nextState).toEqual({ b: 2 })
+  })
+
+  it('routes updates by id, then name, then the sole active template', () => {
+    const templates = [
+      { id: 't1', name: '面板一' },
+      { id: 't2', name: '面板二' },
+    ]
+    expect(matchTemplateUpdates([{ id: 't2', variables: { x: 1 } }], templates)[0]!.template).toBe(templates[1])
+    expect(matchTemplateUpdates([{ name: '面板一', variables: { x: 1 } }], templates)[0]!.template).toBe(templates[0])
+    const single = [{ id: 'only', name: '唯一' }]
+    expect(matchTemplateUpdates([{ variables: { x: 1 } }], single)[0]!.template).toBe(single[0])
+    expect(matchTemplateUpdates([{ variables: { x: 1 } }], templates)).toEqual([])
+  })
+
+  it('renders the template update section with instruction and payload', () => {
+    expect(renderTemplateUpdateSection([])).toBe('')
+    const section = renderTemplateUpdateSection([
+      { id: 't1', name: '天书蛊匣', currentVariables: { hp: 95 }, variableSchema: 'hp: 数值' },
+    ])
+    expect(section).toContain('[UI模板变量更新]')
+    expect(section).toContain('<ui_template_updates>')
+    expect(section).toContain('"currentVariables"')
+    expect(section).toContain('hp: 数值')
   })
 })

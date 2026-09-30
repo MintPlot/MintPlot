@@ -96,4 +96,26 @@ describe('variable store · card-session variables ledger (M3-q, variables:card 
     const store = createVariableStore(createStorageRepository(createMemoryEngine()))
     expect(await store.get('cc-404')).toBeNull()
   })
+
+  it('template trees ride the same ledger under their template id (M3-r)', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-1', [{ name: 'tpl-1', value: { hp: 0, stats: { physique: { val: 0 } } } }])
+
+    const after = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, stats: { physique: { val: 12 } } } }], {
+      source: 'ai',
+      messageId: 'm-1',
+    })
+    expect(after.state['tpl-1']).toMatchObject({ value: { hp: 95, stats: { physique: { val: 12 } } } })
+    expect(after.events[0]).toMatchObject({ kind: 'variable.set', name: 'tpl-1', source: 'ai', messageId: 'm-1' })
+
+    // Structural no-op: an identical tree does not produce a second event.
+    const again = await store.apply('cc-1', [{ name: 'tpl-1', raw: { hp: 95, stats: { physique: { val: 12 } } } }], {
+      source: 'ai',
+    })
+    expect(again.events).toHaveLength(1)
+
+    // Reload replays to the same tree.
+    const reloaded = (await store.get('cc-1'))!
+    expect(reloaded.state['tpl-1']).toEqual(after.state['tpl-1'])
+  })
 })

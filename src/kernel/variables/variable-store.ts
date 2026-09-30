@@ -61,6 +61,9 @@ const toSnapshot = (cardId: string, record: VariableRecord): VariableSnapshot =>
 
 const newEventId = (): string => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
+const sameValue = (a: VariableValue, b: VariableValue): boolean =>
+  a === b || JSON.stringify(a) === JSON.stringify(b)
+
 export function createVariableStore(repository: StorageRepository): VariableStore {
   const clampEventValue = (value: VariableValue): VariableValue =>
     typeof value === 'string' && value.length > VARIABLE_VALUE_MAX_LENGTH
@@ -96,8 +99,8 @@ export function createVariableStore(repository: StorageRepository): VariableStor
           const before = state[update.name]?.value ?? null
           const resolved = resolveUpdateValue(update.raw, before)
           // Deleting an absent variable and rewriting the same value are not
-          // facts worth a ledger row.
-          if (resolved === null ? before === null : before === resolved) continue
+          // facts worth a ledger row (structural equality for trees).
+          if (resolved === null ? before === null : (before !== null && sameValue(before, resolved))) continue
           const event: VariableSetEvent = {
             id: newEventId(),
             ts: Date.now(),

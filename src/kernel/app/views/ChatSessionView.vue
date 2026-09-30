@@ -5,7 +5,7 @@
 // 示例)+末尾 [User Info]),开场白种为首楼、顶栏「清空重开」为卡域专属。发送 =
 // 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
 // (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
-import { computed, inject, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import type { VariableState } from '@contracts'
 import {
   CARD_SESSION_STORE_KEY,
@@ -37,14 +37,19 @@ import { uiService } from '@/kernel/ui/toasts'
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
 import {
+  applyTemplateUpdates,
   expandGetvarMacros,
+  matchTemplateUpdates,
+  parseTemplateUpdateBlocks,
+  parseTemplateUpdatePayload,
   parseVariableUpdates,
   readCardVariableDefaults,
+  renderTemplateUpdateSection,
   renderVariablesSection,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
-import type { ParsedVariableUpdate } from '@/kernel/variables/variable-engine'
 import type { VariableSnapshot } from '@/kernel/variables/variable-store'
+import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
@@ -69,10 +74,29 @@ const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
-const variableState = ref<Record<string, VariableState>>({})
+// shallowRef — both are replaced wholesale from snapshots (never mutated in
+// place), and Vue's deep UnwrapRef explodes on the recursive VariableValue
+// union (TS2589).
+const variableState = shallowRef<Record<string, VariableState>>({})
+const variableEvents = shallowRef<VariableSnapshot['events']>([])
 const variablesActive = ref(true)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
+
+/** Enabled card-embedded templates, highest order first (M3-r). Their state
+ *  trees live in the ledger under the template id. */
+const activeTemplates = computed<CardUiTemplate[]>(() =>
+  variablesActive.value && isCardDomain.value
+    ? [...(card.value?.uiTemplates ?? [])].filter((entry) => entry.enabled).sort((a, b) => b.order - a.order)
+    : [])
+
+const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
+  const value = variableState.value[entry.id]?.value
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : entry.initialVariableState
+}
+
 let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
@@ -111,8 +135,21 @@ onMounted(async () => {
     const pluginState = runtime === null ? 'active' : runtime.stateOf('variables')
     variablesActive.value = pluginState === 'active' || pluginState === 'degraded'
     if (variablesActive.value) {
-      const variableSnapshot = await variableStore?.ensure(card.value.id, readCardVariableDefaults(card.value.extensions))
-      if (variableSnapshot) variableState.value = variableSnapshot.state
+      // Seed = flat card defaults (mp_variables) + each template's initial
+      // tree under its id (M3-r). First touch only; later ensures keep the
+      // running ledger.
+      const defaults = [
+        ...readCardVariableDefaults(card.value.extensions),
+        ...activeTemplates.value.map((entry) => ({
+          name: entry.id,
+          value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
+        })),
+      ]
+      const variableSnapshot = await variableStore?.ensure(card.value.id, defaults)
+      if (variableSnapshot) {
+        variableState.value = variableSnapshot.state
+        variableEvents.value = variableSnapshot.events
+      }
     }
   } else {
     if (!store) {
@@ -175,11 +212,27 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   let systemPrompt = isCardDomain.value && card.value
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
-  // M3-q: the variables artifact section rides the system-prompt tail (review
-  // Q5 compact line form); an empty state injects nothing.
+  // M3-q: the flat variables artifact section rides the system-prompt tail
+  // (review Q5 compact line form); M3-r adds the template update section
+  // (instruction + per-template state/schema payload). Empty → nothing.
   if (isCardDomain.value && variablesActive.value) {
-    const variablesSection = renderVariablesSection(variableState.value)
-    if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
+    const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
+    const flatState = Object.fromEntries(
+      Object.entries(variableState.value).filter(([name]) => !templateIds.has(name)),
+    )
+    let tail = ''
+    const variablesSection = renderVariablesSection(flatState)
+    if (variablesSection) tail = variablesSection
+    const templateSection = renderTemplateUpdateSection(
+      activeTemplates.value.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        currentVariables: templateStateOf(entry),
+        variableSchema: entry.variableSchema,
+      })),
+    )
+    if (templateSection) tail = tail ? `${tail}\n\n${templateSection}` : templateSection
+    if (tail) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${tail}` : tail
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
@@ -197,20 +250,42 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   return result
 }
 
-// Floor capsule (review Q6): AI floors that shipped variable tag blocks show
-// 「⚙ 变量 ×N」; tapping toggles the per-name detail. Derived from the stored
-// content at render time — no extra state to keep consistent.
-const floorVariableUpdates = (message: ChatboxMessage): ParsedVariableUpdate[] =>
-  isCardDomain.value && variablesActive.value && message.role === 'assistant' ? parseVariableUpdates(message.content).updates : []
+// Floor capsule (review Q6) — LEDGER-DRIVEN (M3-r lesson: counting parsed
+// fields lies when the allow-list rejects them). A floor shows what the
+// ledger actually recorded for it: flat events as 「名 → 值」, template
+// events as one 「面板·名 → 已更新」 line each.
+const floorVariableSummary = (message: ChatboxMessage): { flat: Array<{ name: string; value: string }>; templateLines: string[]; total: number } => {
+  if (!isCardDomain.value || !variablesActive.value || message.role !== 'assistant') {
+    return { flat: [], templateLines: [], total: 0 }
+  }
+  const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
+  const templateNames = new Map(activeTemplates.value.map((entry) => [entry.id, entry.name] as const))
+  const flat: Array<{ name: string; value: string }> = []
+  const templateLines: string[] = []
+  for (const event of variableEvents.value) {
+    if (event.messageId !== message.id) continue
+    if (templateIds.has(event.name)) {
+      templateLines.push(`${templateNames.get(event.name) ?? event.name} → 已更新`)
+    } else {
+      // Not String() — its overload resolution explodes on the recursive
+      // VariableValue union (TS2589, same as Array.find).
+      const after = event.after
+      flat.push({
+        name: event.name,
+        value: after === null ? '已删除' : typeof after === 'object' ? JSON.stringify(after) : String(after),
+      })
+    }
+  }
+  return { flat, templateLines, total: flat.length + templateLines.length }
+}
 
 const toggleCapsule = (messageId: string): void => {
   capsuleOpenId.value = capsuleOpenId.value === messageId ? null : messageId
 }
 
-const capsuleDelta = (update: ParsedVariableUpdate): string => (update.raw === null ? '已删除' : String(update.raw))
-
 const onVariablesChanged = (snapshot: VariableSnapshot): void => {
   variableState.value = snapshot.state
+  variableEvents.value = snapshot.events
 }
 
 const persistSession = async (): Promise<void> => {
@@ -271,14 +346,47 @@ const send = async (): Promise<void> => {
       })
     }
     if (isCardDomain.value && card.value && variablesActive.value && assistantFloor.content) {
-      // M3-q: the reply's variable tag blocks become ledger events
-      // (source=ai, floor-attributed); malformed blocks were ignored by the
-      // parser. A storage failure must never fail the finished floor.
+      // M3-q/M3-r: the reply's variable blocks become ledger events
+      // (source=ai, floor-attributed) — flat setvars/StatData entries and
+      // template-bound ui_template_updates trees alike. Storage failures
+      // must never fail the finished floor; malformed blocks were ignored
+      // by the parsers.
       try {
         const { updates } = parseVariableUpdates(assistantFloor.content)
         if (updates.length > 0) {
           const snapshot = await variableStore?.apply(card.value.id, updates, { source: 'ai', messageId: assistantFloor.id })
-          if (snapshot) variableState.value = snapshot.state
+          if (snapshot) {
+            variableState.value = snapshot.state
+            variableEvents.value = snapshot.events
+          }
+        }
+        const blocks = parseTemplateUpdateBlocks(assistantFloor.content)
+        if (blocks.length > 0 && activeTemplates.value.length > 0) {
+          const parsed = blocks.flatMap((body) => {
+            try {
+              return parseTemplateUpdatePayload(body)
+            } catch {
+              return []
+            }
+          })
+          for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
+            const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
+              initial: template.initialVariableState,
+              schema: template.variableSchema,
+            })
+            if (result.rejectedKeys.length > 0) {
+              console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
+            }
+            if (result.changedKeys.length === 0) continue
+            const snapshot = await variableStore?.apply(card.value.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
+              source: 'ai',
+              messageId: assistantFloor.id,
+            })
+            if (snapshot) {
+            variableState.value = snapshot.state
+            variableEvents.value = snapshot.events
+          }
+          }
         }
       } catch (error) {
         console.error('[variables] failed to record AI-side updates:', error)
@@ -417,22 +525,28 @@ const restartSession = async (): Promise<void> => {
               />
               <!-- eslint-enable vue/no-v-html -->
               <button
-                v-if="floorVariableUpdates(message).length > 0"
+                v-if="floorVariableSummary(message).total > 0"
                 type="button"
                 class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg px-2 py-0.5 text-[10px] text-ink-2"
                 @click="toggleCapsule(message.id)"
               >
-                ⚙ 变量 ×{{ floorVariableUpdates(message).length }}
+                ⚙ 变量 ×{{ floorVariableSummary(message).total }}
               </button>
               <div
                 v-if="capsuleOpenId === message.id"
                 class="mt-1 rounded-input border border-line bg-bg px-2 py-1 text-[10px] text-ink-2"
               >
                 <div
-                  v-for="update in floorVariableUpdates(message)"
+                  v-for="update in floorVariableSummary(message).flat"
                   :key="update.name"
                 >
-                  {{ update.name }} → {{ capsuleDelta(update) }}
+                  {{ update.name }} → {{ update.value }}
+                </div>
+                <div
+                  v-for="line in floorVariableSummary(message).templateLines"
+                  :key="line"
+                >
+                  面板·{{ line }}
                 </div>
               </div>
               <span
@@ -477,6 +591,7 @@ const restartSession = async (): Promise<void> => {
     <VariablesSheet
       v-if="isCardDomain && showVariables && card"
       :card-id="card.id"
+      :templates="activeTemplates"
       @changed="onVariablesChanged"
       @close="showVariables = false"
     />
