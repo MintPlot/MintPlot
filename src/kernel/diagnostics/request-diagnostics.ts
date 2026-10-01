@@ -35,8 +35,19 @@ export interface MpRequestDiagnostics {
   clear(): void
   /** ≤10-line paste-able summary (diagnostics page + manual reports). */
   buildShortSummary(): string
+  /** Full machine-readable export (diagnostics page, manual file download). */
+  buildExportPayload(): DiagnosticJournalExport
   /** Monotonic change counter — reactive bridge for UI surfaces. */
   getRevision(): number
+}
+
+/** Manual-export envelope (slice 2) — user-initiated only, nothing auto-leaves. */
+export interface DiagnosticJournalExport {
+  schema: 'mp-error-journal/1'
+  exportedAt: number
+  count: number
+  summary: string
+  records: DiagnosticRecord[]
 }
 
 const ENTRY_MAX_LENGTH = 200
@@ -159,6 +170,16 @@ export function createRequestDiagnostics(hub: ErrorHub = errorHub): MpRequestDia
         )
       }
       return lines.join('\n')
+    },
+    buildExportPayload(): DiagnosticJournalExport {
+      const all = hub.all()
+      return {
+        schema: 'mp-error-journal/1',
+        exportedAt: Date.now(),
+        count: all.length,
+        summary: this.buildShortSummary(),
+        records: all.map((record) => ({ ...record })),
+      }
     },
     getRevision() {
       return revision

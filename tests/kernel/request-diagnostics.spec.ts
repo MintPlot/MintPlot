@@ -89,6 +89,17 @@ describe('kernel/diagnostics · MPRequestDiagnostics producer (M3-err1)', () => 
     expect(lines[1]).toContain('op-13')
   })
 
+  it('buildExportPayload produces the mp-error-journal/1 envelope', () => {
+    const diag = createRequestDiagnostics()
+    const journal = diag.begin({ category: 'update', action: 'check' })
+    journal.complete()
+    const payload = diag.buildExportPayload()
+    expect(payload.schema).toBe('mp-error-journal/1')
+    expect(payload.count).toBe(1)
+    expect(payload.summary).toContain('MP 诊断摘要')
+    expect(payload.records[0]).toMatchObject({ category: 'update', action: 'check' })
+  })
+
   it('revision increments as records land; window install is idempotent', () => {
     const diag = createRequestDiagnostics()
     const before = diag.getRevision()

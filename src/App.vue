@@ -15,6 +15,7 @@ import SettingsView from '@/kernel/app/views/SettingsView.vue'
 import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
+import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
 
@@ -54,6 +55,8 @@ disposers.push(
   registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection, placement: 'settings' }, 10),
   registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection, placement: 'settings' }, 20),
   registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
+  // M3-err2: the error hub's troubleshooting face — export is manual only.
+  registerSettingsSection('kernel', { id: 'diagnostics', title: '诊断', component: DiagnosticsSection, placement: 'settings' }, 40),
 )
 
 onUnmounted(() => {
