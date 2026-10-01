@@ -16,6 +16,7 @@ import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
+import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
 
 // Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
 // projection of the registry, not hardcoded; from M2+ the card workshop (characters tab)
@@ -115,5 +116,6 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
     />
 
     <ToastHost />
+    <FatalErrorHost />
   </div>
 </template>

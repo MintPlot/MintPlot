@@ -14,6 +14,7 @@
  */
 
 import jqueryUrl from 'jquery/dist/jquery.min.js?url'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 import { limits } from '@/kernel/runtime/runtime-policy'
 
 export const EXECUTABLE_FRAME_CHANNEL = 'mp-executable-frame'
@@ -52,6 +53,15 @@ const SHIM_SCRIPT = `
             if (!text) return;
             postToHost({ type: 'slash', command: String(text) });
         };
+        window.addEventListener('error', function(e) {
+            var m = e && (e.message || e.type);
+            postToHost({ type: 'card-error', message: String(m || 'error').slice(0, 200) });
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            var r = e && e.reason;
+            var m = r && (r.message || r);
+            postToHost({ type: 'card-error', message: String(m || 'rejection').slice(0, 200) });
+        });
         var lastHeight = 0;
         function measureHeight() {
             var body = document.body;
@@ -125,13 +135,14 @@ function findExecutableFrameByWindow(sourceWindow: Window | null): HTMLIFrameEle
 let hostStarted = false
 
 /** Idempotent: installs the postMessage listener that applies card-reported
- *  heights (capped by the runtime policy). Focus/slash payloads are ignored
- *  until card interactions land (M3-p). */
+ *  heights (capped by the runtime policy) and journals card-script errors
+ *  (M3-err1, MP-CARD-001) into the error hub. Focus/slash payloads are
+ *  ignored until card interactions land (M3-p). */
 export function startExecutableFrameHost(): void {
   if (hostStarted || typeof window === 'undefined') return
   hostStarted = true
   window.addEventListener('message', (event: MessageEvent) => {
-    const data = event.data as { source?: unknown; type?: unknown; value?: unknown } | null
+    const data = event.data as { source?: unknown; type?: unknown; value?: unknown; message?: unknown } | null
     if (!data || typeof data !== 'object' || data.source !== EXECUTABLE_FRAME_CHANNEL) return
     // For window-sourced messages the reference is a Window; ports never own
     // our channel payloads (they cannot host a card document).
@@ -141,6 +152,16 @@ export function startExecutableFrameHost(): void {
       const height = Number(data.value)
       if (!Number.isFinite(height) || height <= 0) return
       frame.style.height = `${Math.min(limits.frameMaxHeight, Math.round(height))}px`
+      return
+    }
+    if (data.type === 'card-error') {
+      errorHub.record({
+        severity: 'error',
+        category: 'card',
+        action: 'script_error',
+        code: 'MP-CARD-001',
+        message: typeof data.message === 'string' ? data.message.slice(0, 200) : 'unknown card script error',
+      })
     }
   })
 }

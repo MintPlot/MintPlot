@@ -7,6 +7,26 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // Pre-boot error buffer (M3-err1): failures thrown before the app
+      // module loads are collected here and replayed into the error journal
+      // by main.ts (replayEarlyErrors), then the buffer is deleted.
+      (function () {
+        window.__mpEarlyErrors = []
+        var capture = function (message) {
+          if (window.__mpEarlyErrors.length < 10) {
+            window.__mpEarlyErrors.push(String(message || 'error').slice(0, 200))
+          }
+        }
+        window.addEventListener('error', function (e) {
+          capture(e && (e.message || 'error'))
+        })
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason
+          capture(r && (r.message || r))
+        })
+      })()
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -18,7 +18,8 @@ import {
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
-import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
+import type { LlmChatMessage, LlmRequestError } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
@@ -48,6 +49,10 @@ const cardCover = ref('')
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
+// D3: request failures never write a message floor — they surface as a
+// transient error bar above the composer and vanish on remount/retry/success.
+const sendError = ref('')
+const lastUserText = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 let abortController: AbortController | null = null
 
@@ -152,23 +157,11 @@ const stopStreaming = (): void => {
   abortController = null
 }
 
-const send = async (): Promise<void> => {
+/** The streaming half of a turn: assistant floor, provider stream, usage
+ *  attribution. Retries reuse the persisted user floor (no duplicate). */
+const runAssistantTurn = async (): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
-  if (!sessionLoaded.value || !provider) return
-  const text = draft.value.trim()
-  if (!text || streaming.value) return
-
-  const now = Date.now()
-  messages.value.push({ id: `m-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, role: 'user', content: text, ts: now })
-  // Title defaults to the first utterance (spec §03) — chatbox domain only;
-  // the card domain keeps the card name.
-  if (!isCardDomain.value && conversation.value && conversation.value.title === '新的对话') {
-    conversation.value.title = text.slice(0, 24)
-  }
-  await persistSession()
-  draft.value = ''
-  await scrollToBottom()
-
+  if (!provider) return
   const assistantFloor: ChatboxMessage = {
     id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     role: 'assistant',
@@ -177,10 +170,13 @@ const send = async (): Promise<void> => {
   }
   messages.value.push(assistantFloor)
   streaming.value = true
-  abortController = new AbortController()
+  // Local alias: stopStreaming() may null the module ref while the stream's
+  // rejection is still in flight — the catch must read the live signal.
+  const controller = new AbortController()
+  abortController = controller
   try {
     const result = await provider.stream(buildRequestMessages(), {
-      signal: abortController.signal,
+      signal: controller.signal,
       onDelta: (delta) => {
         assistantFloor.content += delta
         void scrollToBottom()
@@ -200,20 +196,59 @@ const send = async (): Promise<void> => {
       })
     }
   } catch (error) {
-    if (!abortController.signal.aborted) {
-      assistantFloor.content = `「请求失败」${(error as Error)?.message || '未知错误'}`
+    if (!controller.signal.aborted) {
+      const message = (error as Error)?.message || '未知错误'
+      sendError.value = message
+      // M3-err1: journal the failure with its unified code (throw-site).
+      errorHub.record({
+        severity: 'error',
+        category: 'chat',
+        action: 'request_failed',
+        code: (error as LlmRequestError)?.code,
+        message,
+        context: { domain: props.domain },
+      })
     }
   } finally {
     streaming.value = false
-    abortController = null
+    if (abortController === controller) abortController = null
     if (assistantFloor.content === '') {
-      // Aborted before any token: drop the empty floor.
+      // Aborted or failed before any token: drop the empty floor. Failed
+      // turns leave only the user floor — history stays request-clean (D3).
       const index = messages.value.findIndex((message) => message.id === assistantFloor.id)
       if (index >= 0) messages.value.splice(index, 1)
     }
     await persistSession()
     await scrollToBottom()
   }
+}
+
+const send = async (): Promise<void> => {
+  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  if (!sessionLoaded.value || !provider) return
+  const text = draft.value.trim()
+  if (!text || streaming.value) return
+
+  const now = Date.now()
+  messages.value.push({ id: `m-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, role: 'user', content: text, ts: now })
+  // Title defaults to the first utterance (spec §03) — chatbox domain only;
+  // the card domain keeps the card name.
+  if (!isCardDomain.value && conversation.value && conversation.value.title === '新的对话') {
+    conversation.value.title = text.slice(0, 24)
+  }
+  await persistSession()
+  draft.value = ''
+  sendError.value = ''
+  lastUserText.value = text
+  await scrollToBottom()
+  await runAssistantTurn()
+}
+
+/** Retry re-streams a reply for the persisted user floor (D3 error bar). */
+const retryLastSend = async (): Promise<void> => {
+  if (streaming.value || !lastUserText.value) return
+  sendError.value = ''
+  await runAssistantTurn()
 }
 
 const restartSession = async (): Promise<void> => {
@@ -324,6 +359,31 @@ const restartSession = async (): Promise<void> => {
               />
             </div>
           </div>
+        </div>
+      </div>
+
+      <div
+        v-if="sendError"
+        class="shrink-0 border-t border-danger/30 bg-danger-wash px-3 py-2"
+        role="alert"
+      >
+        <div class="mx-auto flex max-w-xl items-center gap-2">
+          <span class="min-w-0 flex-1 break-words text-xs text-danger">请求失败:{{ sendError }}</span>
+          <button
+            type="button"
+            class="flex-shrink-0 rounded-input border border-danger/40 px-2 py-1 text-xs font-bold text-danger"
+            @click="retryLastSend"
+          >
+            重试
+          </button>
+          <button
+            type="button"
+            class="flex-shrink-0 px-1 text-xs text-ink-3"
+            aria-label="关闭错误提示"
+            @click="sendError = ''"
+          >
+            ✕
+          </button>
         </div>
       </div>
 

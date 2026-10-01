@@ -5,10 +5,14 @@ import { initMpTheme } from '@/kernel/design/theme'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
+import { createKvStore } from '@/kernel/store/kv-store'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
+import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
+import { installGlobalErrorHandlers, replayEarlyErrors } from '@/kernel/diagnostics/global-handlers'
+import { installRequestDiagnostics } from '@/kernel/diagnostics/request-diagnostics'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
   CARD_SESSION_STORE_KEY,
@@ -26,9 +30,28 @@ import TtsPlugin from '@/plugins/tts'
 
 initMpTheme()
 
+// Error hub first (M3-err1): the journal is the last thing allowed to die,
+// so its nets and seam go up before anything else can throw. Persistence
+// rides its own default-engine instance — same degradation ladder as every
+// other store; a hub-write failure stays console-only (loop guard).
+installRequestDiagnostics(errorHub)
+const journalStore = createKvStore(createDefaultEngine())
+attachErrorHubPersistence({
+  load: () => journalStore.get<unknown>('error-journal'),
+  save: async (records) => journalStore.set('error-journal', records),
+})
+void hydrateErrorHub()
+replayEarlyErrors()
+
 // Composition root — the only module allowed to see both the kernel and the
 // plugins; src/kernel/** stays free of plugin imports (red line).
 const kernel = createKernel()
+
+// Storage degrade / other fatal events keep the journal durable across the
+// app lifecycle — flush on pause (Capacitor).
+kernel.services.bus.on('app.pause', () => {
+  void errorHub.flush()
+})
 
 // Kernel-owned default LLM provider (R-09) on the public seam; plugins may
 // override via ctx.registerSeamProvider('llm.provider', …).
@@ -62,12 +85,21 @@ async function bootPlugins(): Promise<void> {
       await kernel.runtime.activate(plugin.id)
     } catch (error) {
       console.error(`[boot] plugin "${plugin.id}" failed to activate:`, error)
+      errorHub.record({
+        severity: 'error',
+        category: 'plugin',
+        action: 'activate_failed',
+        code: 'MP-PLUGIN-001',
+        pluginId: plugin.id,
+        message: error instanceof Error ? error.message || error.name : String(error ?? 'unknown'),
+      })
     }
   }
 }
 void bootPlugins()
 
 const app = createApp(App)
+installGlobalErrorHandlers(app)
 app.provide(PLUGIN_RUNTIME_KEY, kernel.runtime)
 app.provide(PLUGIN_SETTINGS_STORE_KEY, kernel.storage)
 app.provide(PLUGIN_BUS_KEY, kernel.services.bus)

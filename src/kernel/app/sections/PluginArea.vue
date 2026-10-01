@@ -5,6 +5,7 @@
 // 无配置没有箭头。停用的插件仍可展开,配置区提示启用后可配置。
 // 开关直接驱动 runtime activate/deactivate,偏好持久化在内核 KV(plugin-states)。
 import { computed, inject, onUnmounted, ref } from 'vue'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import { usePluginConfigSections } from '@/kernel/app/settings-registry'
 import { TOOLS_UI_KEY } from '@/kernel/app/tools-ui-state'
@@ -75,7 +76,16 @@ async function setEnabled(plugin: PluginStateProjection, value: boolean): Promis
     }
     await persistEnabled(plugin.id, value)
   } catch (cause) {
-    error.value = String(cause instanceof Error ? cause.message : cause)
+    const message = String(cause instanceof Error ? cause.message : cause)
+    error.value = message
+    errorHub.record({
+      severity: 'error',
+      category: 'plugin',
+      action: value ? 'activate_failed' : 'deactivate_failed',
+      code: value ? 'MP-PLUGIN-001' : 'MP-PLUGIN-002',
+      pluginId: plugin.id,
+      message,
+    })
   } finally {
     busy.value = null
   }

@@ -44,6 +44,8 @@ export class LlmRequestError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    /** Unified error code (M3-err1) — attached at the throw site. */
+    readonly code?: string,
   ) {
     super(message)
     this.name = 'LlmRequestError'
@@ -108,8 +110,8 @@ export async function streamChatCompletion(
   options: StreamChatOptions = {},
 ): Promise<StreamChatResult> {
   const base = config.baseUrl.trim().replace(/\/+$/, '')
-  if (!base) throw new LlmRequestError('未配置 API Base URL')
-  if (!config.model.trim()) throw new LlmRequestError('未配置模型')
+  if (!base) throw new LlmRequestError('未配置 API Base URL', undefined, 'MP-CHAT-001')
+  if (!config.model.trim()) throw new LlmRequestError('未配置模型', undefined, 'MP-CHAT-002')
 
   const controller = new AbortController()
   const onAbort = (): void => controller.abort()
@@ -141,9 +143,9 @@ export async function streamChatCompletion(
       } catch {
         // body unreadable — status is the message
       }
-      throw new LlmRequestError(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status)
+      throw new LlmRequestError(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status, 'MP-NET-002')
     }
-    if (!response.body) throw new LlmRequestError('响应没有可读流')
+    if (!response.body) throw new LlmRequestError('响应没有可读流', undefined, 'MP-NET-004')
 
     await readSseStream(response.body, (payload) => {
       if (payload === '[DONE]') return
@@ -176,9 +178,9 @@ export async function streamChatCompletion(
       if (options.signal?.aborted) {
         return { content, usage, model }
       }
-      throw new LlmRequestError('请求超时')
+      throw new LlmRequestError('请求超时', undefined, 'MP-NET-001')
     }
-    throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`)
+    throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`, undefined, 'MP-NET-003')
   } finally {
     clearTimeout(timeout)
     options.signal?.removeEventListener('abort', onAbort)

@@ -7,6 +7,7 @@
  */
 
 import { ref } from 'vue'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 import type { UiService } from '@/kernel/runtime/context'
 
 export interface MpToast {
@@ -37,6 +38,18 @@ function push(owner: string, message: string, tone: MpToast['tone'], durationMs:
 export const uiService: UiService = {
   toast(owner, message, options) {
     push(owner, message, options?.tone ?? 'info', options?.durationMs ?? 3000)
+    // Mirror (D6): every error toast leaves a journal trace — existing call
+    // sites start recording with zero changes. Mirror records carry no code;
+    // code-bearing failures record explicitly at their throw/wiring site.
+    if (options?.tone === 'error') {
+      errorHub.record({
+        severity: 'error',
+        category: owner === 'shell' ? 'runtime' : 'plugin',
+        action: 'toast_error',
+        message,
+        pluginId: owner === 'shell' ? undefined : owner,
+      })
+    }
   },
   async confirm(_owner, options) {
     const prompt = [options.title, options.message].filter(Boolean).join('\n\n')

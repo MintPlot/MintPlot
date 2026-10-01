@@ -5,6 +5,7 @@
  */
 
 import type { Disposer, TransientEventMap, TransientEventType } from '@contracts'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 
 export interface TransientBus {
   on<K extends TransientEventType>(type: K, handler: (event: TransientEventMap[K]) => void): Disposer
@@ -36,6 +37,14 @@ export function createTransientBus(): TransientBus {
           ;(handler as (e: unknown) => void)(event)
         } catch (error) {
           console.error(`[transient-bus] handler for "${type}" threw; isolated:`, error)
+          errorHub.record({
+            severity: 'warn',
+            category: 'runtime',
+            action: 'bus_handler_threw',
+            code: 'MP-RUN-006',
+            message: error instanceof Error ? error.message || error.name : String(error ?? 'unknown'),
+            context: { eventType: type },
+          })
         }
       }
     },
