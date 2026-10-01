@@ -128,7 +128,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
       },
     },
   })
-  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, projection, usageCalls }
+  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, projection, usageCalls, seams, settings }
 }
 
 describe('M3-i · 角色 tab 进卡闭环', () => {
@@ -580,6 +580,124 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(restarted.events).toEqual([])
     expect(restarted.state['tpl-1']).toMatchObject({ value: { hp: 10 }, sourceEventId: 'seed' })
     expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('面板按钮 triggerSlash 桥(M3-t):替用户发话,流式中拒绝,草稿不受扰', async () => {
+    const { getExecutableFrameSlashHandler } = await import('@/kernel/render/html-frame')
+    const { wrapper, characterStore, cardSessionStore, seams } = mountApp()
+    // Deferred provider: the stream stays open until the test releases it,
+    // creating a real streaming window to probe the reject branch.
+    let resolveStream: (value: { content: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number | null }; model: string }) => void = () => {}
+    const gatedProvider: LlmProvider = {
+      providerId: 'openai-compatible',
+      configured: () => true,
+      stream: async (messages, options) => {
+        streamCalls.push(messages)
+        void options
+        return await new Promise((resolve) => { resolveStream = resolve })
+      },
+    }
+    seams.register('kernel', 'llm.provider', gatedProvider)
+    await characterStore.import(CARD)
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 组件挂载即注册桥 handler。
+    const handler = getExecutableFrameSlashHandler()
+    expect(handler).toBeTypeOf('function')
+
+    // 空闲触发:命令文本直接成为用户楼层,输入草稿不动。
+    await wrapper.find('textarea').setValue('草稿内容')
+    await handler!('我环顾四周')
+    await flushPromises()
+    expect(wrapper.text()).toContain('我环顾四周')
+    expect(wrapper.find('textarea').element.value).toBe('草稿内容')
+
+    // 流式中触发:拒绝（不追加楼层）。此刻上一触发仍在流式窗口内。
+    const midCount = wrapper.findAll('.markdown-body').length
+    await handler!('流式中的触发应被拒')
+    await flushPromises()
+    expect(wrapper.findAll('.markdown-body').length).toBe(midCount)
+    expect(wrapper.text()).not.toContain('流式中的触发应被拒')
+
+    // 放行流式,回复落地;卸载后桥解绑（不串到下一个视图）。
+    resolveStream({ content: '回复中', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null }, model: 'test-model' })
+    await flushPromises()
+    const session = (await cardSessionStore.get((await characterStore.list())[0]!.id))!
+    expect(session.messages.filter((message) => message.content === '我环顾四周')).toHaveLength(1)
+    wrapper.unmount()
+    expect(getExecutableFrameSlashHandler()).toBeNull()
+  })
+
+  it('副模型降级(M3-t):主模型漏块自动补分析请求,更新落账并重渲染面板', async () => {
+    const { wrapper, characterStore, variableStore, settings } = mountApp()
+    const analysisScope = settings.scope(['uiTemplateModel', 'apiBaseUrl'])
+    analysisScope.uiTemplateModel = 'analysis-model'
+    analysisScope.apiBaseUrl = 'http://analysis-endpoint/v1'
+    await characterStore.import({
+      ...CARD,
+      uiTemplates: [
+        {
+          id: 'tpl-1',
+          name: '状态栏',
+          enabled: true,
+          scope: 'character',
+          order: 100,
+          placement: 'bottom',
+          htmlTemplate: '<b>{{hp}}</b>',
+          initialVariableState: { hp: 10 },
+          variableSchema: 'hp: 数字',
+        },
+      ],
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 分析请求走独立 fetch：主模型回复是 seam fake（不走 fetch），
+    // 所以被捕获的每个 fetch 都是分析请求。
+    const fetchCalls: Array<{ url: string; body: string }> = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const body = String(init?.body ?? '')
+      fetchCalls.push({ url, body })
+      return new Response(JSON.stringify({
+        model: 'analysis-model',
+        choices: [{ message: { content: '{"variables":{"hp":88},"reason":"回复后状态"}' } }],
+        usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+
+    // 主模型回复不带任何协议块 → 降级链应自动发起分析请求。
+    nextReply = '（普通回复，没有变量块）'
+    await wrapper.find('textarea').setValue('出发')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const analysisCall = fetchCalls.find((call) => call.body.includes('"stream":false'))
+    expect(analysisCall).toBeDefined()
+    expect(analysisCall!.body).toContain('"model":"analysis-model"')
+    // 单模板模式：当前状态与卡自带 schema 内嵌在 system 指令里（RP 同构）；
+    // 内层 JSON 在请求体里是转义形态，用无引号子串断言。
+    expect(analysisCall!.body).toContain('当前变量JSON如下')
+    expect(analysisCall!.body).toContain('hp: 数字')
+    expect(analysisCall!.body).toContain('"temperature":0.2')
+    expect(analysisCall!.body).toContain('你好，旅人。')
+
+    // 分析结果落账（AI 事件）并驱动面板。
+    const snapshot = (await variableStore.get((await characterStore.list())[0]!.id))!
+    expect(snapshot.state['tpl-1']).toMatchObject({ value: { hp: 88 } })
+    expect(snapshot.events.at(-1)).toMatchObject({ name: 'tpl-1', source: 'ai' })
+    vi.unstubAllGlobals()
     wrapper.unmount()
   })
 

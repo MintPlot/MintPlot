@@ -1,21 +1,25 @@
 <script setup lang="ts">
-// 变量面板(M3-q,评审 Q6 最小落地):卡域会话页的「变量」段位 —— 值表
-// (名称/值/来源/更新时间)、手改/增删(source=manual 事件)、删除确认。
-// 卡默认值行(updatedAt 0)标记「卡默认」,同样可改可删;改动经 store 落账,
-// 父视图监听 changed 同步展开态。
-import { computed, inject, onMounted, ref } from 'vue'
+// 变量面板(M3-q 最小落地 → M3-t3 轻管理面):卡域会话页的「变量」段位 ——
+// 值表(名称/值/来源/更新时间)、手改/增删(source=manual 事件)、删除确认;
+// 模板区升级为轻管理:含脚本标签 + 变量数/记录数 + 变更记录展开 + 分析
+// 状态行与「立即分析」(副模型管线入口)。卡默认值行(updatedAt 0)标记
+// 「卡默认」,同样可改可删;改动经 store 落账,父视图监听 changed 同步展开态。
+import { computed, inject, onMounted, ref, shallowRef } from 'vue'
 import type { VariableValue } from '@contracts'
 import { VARIABLE_STORE_KEY } from '@/kernel/app/chat-keys'
 import { manualValueFromInput } from '@/kernel/variables/variable-engine'
+import { hasTemplateScripts } from '@/kernel/render/template-interp'
 import type { VariableSnapshot } from '@/kernel/variables/variable-store'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import { uiService } from '@/kernel/ui/toasts'
 
-const props = defineProps<{ cardId: string; templates?: CardUiTemplate[] }>()
-const emit = defineEmits<{ changed: [snapshot: VariableSnapshot]; close: [] }>()
+const props = defineProps<{ cardId: string; templates?: CardUiTemplate[]; analysisStatus?: string }>()
+const emit = defineEmits<{ changed: [snapshot: VariableSnapshot]; close: []; analyze: [] }>()
 
 const store = inject(VARIABLE_STORE_KEY, null)
-const snapshot = ref<VariableSnapshot | null>(null)
+// shallowRef — the snapshot is replaced wholesale; a deep ref's UnwrapRef
+// explodes on the recursive VariableValue union (TS2589, M3-r lesson).
+const snapshot = shallowRef<VariableSnapshot | null>(null)
 // Per-row edit drafts — the input binds the draft, 保存 applies when it differs.
 const drafts = ref<Record<string, string>>({})
 // Per-template JSON drafts (M3-r template tree manual edits).
@@ -34,6 +38,53 @@ const rows = computed(() => {
 })
 
 const templateValue = (entry: CardUiTemplate): VariableValue | undefined => snapshot.value?.state[entry.id]?.value
+
+// 轻管理面计数(对齐 RP 语义):变量数 = 状态树顶层键数;记录数 = 该模板的
+// 账本事件数(诚实计数,白名单拒绝不入账)。
+const templateVariableCount = (entry: CardUiTemplate): number => {
+  const value = templateValue(entry)
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? Object.keys(value).length : 0
+}
+const templateRecordCount = (entry: CardUiTemplate): number => {
+  let count = 0
+  for (const event of snapshot.value?.events ?? []) {
+    if (event.name === entry.id) count += 1
+  }
+  return count
+}
+// 变更记录(展开区):该模板的事件按时间倒序 —— 时间/来源/前后值。
+const expandedTemplate = ref<string | null>(null)
+const toggleTemplateRecords = (entry: CardUiTemplate): void => {
+  expandedTemplate.value = expandedTemplate.value === entry.id ? null : entry.id
+}
+// 变更记录行：事件在折叠处就转成纯展示字段（递归联合的数组方法族会爆
+// TS2589，M3-r 已记录的坑——for-of + 显式行对象是已验证的绕法）。
+interface TemplateRecordRow {
+  id: string
+  ts: number
+  source: string
+  before: string
+  after: string
+}
+const templateRecords = (entry: CardUiTemplate): TemplateRecordRow[] => {
+  const rows: TemplateRecordRow[] = []
+  for (const event of snapshot.value?.events ?? []) {
+    if (event.name !== entry.id) continue
+    rows.push({
+      id: event.id,
+      ts: event.ts,
+      source: sourceLabels[event.source] ?? event.source,
+      before: shortJson(event.before),
+      after: shortJson(event.after),
+    })
+  }
+  return rows.reverse()
+}
+const shortJson = (value: unknown): string => {
+  if (value === null) return '已删除'
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text
+}
 
 const templateJson = (entry: CardUiTemplate): string =>
   templateDrafts.value[entry.id] ?? JSON.stringify(templateValue(entry) ?? entry.initialVariableState, null, 2)
@@ -189,6 +240,52 @@ const displayValue = (value: VariableValue): string => String(value)
             保存
           </button>
         </div>
+        <div class="mt-0.5 flex items-center gap-2">
+          <span
+            v-if="hasTemplateScripts(entry.htmlTemplate)"
+            class="flex-shrink-0 rounded-full border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[10px] text-danger"
+            title="模板含可执行脚本（<script>/内联事件/iframe），在沙箱 iframe 中运行；仅在使用来源可信的卡片时保留"
+          >
+            含脚本
+          </span>
+          <button
+            type="button"
+            class="min-w-0 flex-1 truncate text-left text-[10px] text-ink-3"
+            @click="toggleTemplateRecords(entry)"
+          >
+            {{ templateVariableCount(entry) }} 个变量 · {{ templateRecordCount(entry) }} 条记录
+            <span
+              v-if="templateRecordCount(entry) > 0"
+              class="text-primary"
+            >
+              {{ expandedTemplate === entry.id ? '▲' : '▼' }}
+            </span>
+          </button>
+        </div>
+        <div
+          v-if="expandedTemplate === entry.id"
+          class="mt-1 rounded-input border border-line bg-card px-2 py-1.5"
+        >
+          <p
+            v-if="templateRecords(entry).length === 0"
+            class="py-1 text-center text-[10px] text-ink-3"
+          >
+            暂无变更记录
+          </p>
+          <div
+            v-for="record in templateRecords(entry)"
+            :key="record.id"
+            class="border-b border-line/60 py-1 text-[10px] text-ink-2 last:border-b-0"
+          >
+            <div class="flex items-center gap-2">
+              <span class="flex-shrink-0 text-ink-3">{{ new Date(record.ts).toLocaleString() }}</span>
+              <span class="flex-shrink-0 rounded-full bg-bg px-1.5 text-[9px] text-ink-3">{{ record.source }}</span>
+            </div>
+            <div class="mt-0.5 break-all font-mono text-[9px] leading-relaxed text-ink-3">
+              {{ record.before }} → {{ record.after }}
+            </div>
+          </div>
+        </div>
         <textarea
           :value="templateJson(entry)"
           rows="8"
@@ -199,6 +296,23 @@ const displayValue = (value: VariableValue): string => String(value)
         <p class="mt-1 text-[10px] text-ink-3">
           状态树(JSON) —— AI 每轮更新,也可直接改后保存
         </p>
+      </div>
+
+      <div
+        v-if="(props.templates?.length ?? 0) > 0"
+        class="mb-2 flex items-center gap-2 rounded-input border border-line bg-bg px-3 py-2"
+      >
+        <span class="min-w-0 flex-1 truncate text-xs text-ink-2">
+          {{ analysisStatus || '变量分析待命' }}
+        </span>
+        <button
+          type="button"
+          class="flex-shrink-0 rounded-input border border-primary px-2 py-1 text-xs text-primary disabled:opacity-40"
+          :disabled="!!analysisStatus && analysisStatus.includes('…')"
+          @click="emit('analyze')"
+        >
+          立即分析
+        </button>
       </div>
 
       <ul class="flex flex-col gap-2">

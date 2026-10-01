@@ -124,14 +124,28 @@ function findExecutableFrameByWindow(sourceWindow: Window | null): HTMLIFrameEle
 
 let hostStarted = false
 
+/** Slash-trigger bridge (M3-t): the chat view registers a handler so a card
+ *  panel button (`window.triggerSlash` / `data-slash`) can send a user turn.
+ *  Auth is unchanged — only frames attached to this document are served. */
+type SlashTriggerHandler = (command: string) => void
+let slashHandler: SlashTriggerHandler | null = null
+
+export function setExecutableFrameSlashHandler(handler: SlashTriggerHandler | null): void {
+  slashHandler = handler
+}
+
+/** Test/inspection seam: the handler the active chat view registered. */
+export function getExecutableFrameSlashHandler(): SlashTriggerHandler | null {
+  return slashHandler
+}
+
 /** Idempotent: installs the postMessage listener that applies card-reported
- *  heights (capped by the runtime policy). Focus/slash payloads are ignored
- *  until card interactions land (M3-p). */
+ *  heights and dispatches slash triggers to the registered handler. */
 export function startExecutableFrameHost(): void {
   if (hostStarted || typeof window === 'undefined') return
   hostStarted = true
   window.addEventListener('message', (event: MessageEvent) => {
-    const data = event.data as { source?: unknown; type?: unknown; value?: unknown } | null
+    const data = event.data as { source?: unknown; type?: unknown; value?: unknown; command?: unknown } | null
     if (!data || typeof data !== 'object' || data.source !== EXECUTABLE_FRAME_CHANNEL) return
     // For window-sourced messages the reference is a Window; ports never own
     // our channel payloads (they cannot host a card document).
@@ -141,6 +155,10 @@ export function startExecutableFrameHost(): void {
       const height = Number(data.value)
       if (!Number.isFinite(height) || height <= 0) return
       frame.style.height = `${Math.min(limits.frameMaxHeight, Math.round(height))}px`
+      return
+    }
+    if (data.type === 'slash' && typeof data.command === 'string' && data.command.trim()) {
+      slashHandler?.(data.command)
     }
   })
 }

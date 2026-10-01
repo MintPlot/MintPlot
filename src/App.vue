@@ -15,6 +15,7 @@ import SettingsView from '@/kernel/app/views/SettingsView.vue'
 import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
+import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 
 // Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
@@ -52,6 +53,7 @@ const disposers = [
 disposers.push(
   registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection, placement: 'settings' }, 10),
   registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection, placement: 'settings' }, 20),
+  registerSettingsSection('kernel', { id: 'template-analysis', title: '变量分析', component: TemplateAnalysisSection, placement: 'settings' }, 25),
   registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
 )
 

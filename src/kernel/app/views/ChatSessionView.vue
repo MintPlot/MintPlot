@@ -29,7 +29,7 @@ import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import '@/kernel/render/html-frame-lifecycle'
 import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
-import { createExecutableHtmlIframe, startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { createExecutableHtmlIframe, setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
 import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/template-interp'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
@@ -49,7 +49,15 @@ import {
   renderVariablesSection,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
+import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
 import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import {
+  readTemplateAnalysisSettings,
+  renderTemplateStateContext,
+  runTemplateAnalysis,
+  useBatchAnalysis,
+} from '@/kernel/variables/analysis'
+import type { AnalysisFloor } from '@/kernel/variables/analysis'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 
@@ -83,6 +91,8 @@ const variableEvents = shallowRef<VariableSnapshot['events']>([])
 const variablesActive = ref(true)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
+// Secondary-model analysis status (M3-t): surfaced in the variables sheet.
+const analysisStatus = ref('')
 
 /** Enabled card-embedded templates, highest order first (M3-r). Their state
  *  trees live in the ledger under the template id. */
@@ -200,8 +210,13 @@ const scrollToBottom = async (): Promise<void> => {
 }
 
 onMounted(async () => {
-  // Card-reported frame heights arrive via postMessage (idempotent install).
+  // Card-reported frame heights arrive via postMessage (idempotent install);
+  // panel buttons ride the same channel (M3-t): a trigger sends a user turn —
+  // rejected while a reply is streaming (RP same discipline).
   startExecutableFrameHost()
+  setExecutableFrameSlashHandler((command) => {
+    if (!streaming.value) void send(command)
+  })
   if (isCardDomain.value) {
     if (!cardSessions || !characterStore) {
       loadError.value = '会话存储未接入'
@@ -243,6 +258,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  setExecutableFrameSlashHandler(null)
   projection?.setActiveCardSession(null)
 })
 
@@ -304,6 +320,16 @@ const buildRequestMessages = (): LlmChatMessage[] => {
     )
     const variablesSection = renderVariablesSection(flatState)
     if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
+    // M3-t sub-model mode: the state snapshot rides the system prompt (read
+    // only — the model never writes variables in this mode); the main-model
+    // update instruction is NOT appended in this mode.
+    const analysisSettings = readTemplateAnalysisSettings(settingsState)
+    if (activeTemplates.value.length > 0 && !analysisSettings.mainModelAnalysis && analysisSettings.injectContext) {
+      const context = renderTemplateStateContext(
+        activeTemplates.value.map((entry) => ({ name: entry.name, state: templateStateOf(entry) })),
+      )
+      if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
+    }
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
@@ -325,7 +351,7 @@ const buildRequestMessages = (): LlmChatMessage[] => {
     // sides); the stored history itself stays untouched.
     result.push({ role: message.role, content: expandRequestText(content) })
   }
-  if (isCardDomain.value && variablesActive.value) {
+  if (isCardDomain.value && variablesActive.value && readTemplateAnalysisSettings(settingsState).mainModelAnalysis) {
     const templateSection = renderTemplateUpdateSection(
       activeTemplates.value.map((entry) => ({
         id: entry.id,
@@ -389,10 +415,113 @@ const stopStreaming = (): void => {
   abortController = null
 }
 
-const send = async (): Promise<void> => {
+// Shared ledger chain for parsed template-update entries (main-model blocks
+// and analysis replies both land here): route → deep-merge → whitelist →
+// floor-attributed event. Returns how many templates were matched.
+const applyMatchedTemplateUpdates = async (
+  parsed: ParsedTemplateUpdate[],
+  messageId: string,
+): Promise<number> => {
+  let matched = 0
+  for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
+    matched += 1
+    const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
+      initial: template.initialVariableState,
+      schema: template.variableSchema,
+    })
+    if (result.rejectedKeys.length > 0) {
+      console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
+    }
+    if (result.changedKeys.length === 0) continue
+    const snapshot = await variableStore?.apply(card.value!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
+      source: 'ai',
+      messageId,
+    })
+    if (snapshot) {
+      variableState.value = snapshot.state
+      variableEvents.value = snapshot.events
+    }
+  }
+  return matched
+}
+
+// M3-t secondary-model analysis: fallback when the main-model mode produced
+// no routable block, mandatory in sub-model mode. Recent floors, the card's
+// own schema and a decoupled token budget ride the same OpenAI-compatible
+// endpoint; parsing/routing/application reuse the block path above.
+const runTemplateAnalysisPipeline = async (targetFloor: ChatboxMessage, force = false): Promise<void> => {
+  if (!card.value || !settingsState) return
+  const settings = readTemplateAnalysisSettings(settingsState)
+  if (!settings.analysisModel) {
+    analysisStatus.value = '未配置分析模型'
+    return
+  }
+  const scope = settingsState.scope(['apiBaseUrl', 'apiKey'])
+  const analysisTemplates = activeTemplates.value.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    currentVariables: templateStateOf(entry),
+    variableSchema: entry.variableSchema,
+  }))
+  const depth = settings.analysisDepth
+  const recentFloors: AnalysisFloor[] = messages.value
+    .filter((message) => message.role !== 'system' && message.id !== targetFloor.id)
+    .slice(-depth)
+    .map((message) => ({
+      role: message.role as 'user' | 'assistant',
+      name: message.role === 'user' ? readUserInfo().name : card.value!.name,
+      content: stripVariableBlocks(message.content),
+    }))
+  const config = {
+    baseUrl: String(scope.apiBaseUrl ?? ''),
+    apiKey: String(scope.apiKey ?? ''),
+    model: settings.analysisModel,
+    temperature: 0.2,
+    maxTokens: settings.maxOutputTokens,
+    jsonMode: settings.jsonMode,
+  }
+  analysisStatus.value = '分析中…'
+  try {
+    const outcome = await runTemplateAnalysis({
+      config,
+      templates: analysisTemplates,
+      recentFloors,
+      userInfo: buildUserInfoLine(),
+      batch: useBatchAnalysis(settings, analysisTemplates.length),
+      force,
+      onUsage: (usage, meta) => {
+        if (usage) recordUsage?.(usage, meta)
+      },
+    })
+    let changed = 0
+    for (const reply of outcome.replies) {
+      try {
+        changed += await applyMatchedTemplateUpdates(parseTemplateUpdatePayload(reply.content), targetFloor.id)
+      } catch {
+        // Malformed analysis JSON is skipped — same tolerance as block path.
+      }
+    }
+    analysisStatus.value = outcome.failedTemplates > 0
+      ? `${outcome.failedTemplates} 个失败${outcome.firstError ? `：${outcome.firstError.slice(0, 80)}` : ''}`
+      : changed > 0
+        ? `更新 ${changed} 项`
+        : '无变化'
+  } catch (error) {
+    analysisStatus.value = `分析失败：${(error as Error)?.message || '未知错误'}`
+  }
+}
+
+const buildUserInfoLine = (): string => {
+  const { name, persona } = readUserInfo()
+  return [name ? `用户名字：${name}` : '', persona ? `用户人设：${persona}` : ''].filter(Boolean).join('\n')
+}
+
+const send = async (overrideText?: string): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!sessionLoaded.value || !provider) return
-  const text = draft.value.trim()
+  // Panel-button triggers (M3-t bridge) pass the command directly; the normal
+  // path sends the draft. Both share the streaming guard.
+  const text = (typeof overrideText === 'string' ? overrideText : draft.value).trim()
   if (!text || streaming.value) return
 
   const now = Date.now()
@@ -403,7 +532,7 @@ const send = async (): Promise<void> => {
     conversation.value.title = text.slice(0, 24)
   }
   await persistSession()
-  draft.value = ''
+  if (typeof overrideText !== 'string') draft.value = ''
   await scrollToBottom()
 
   const assistantFloor: ChatboxMessage = {
@@ -442,6 +571,7 @@ const send = async (): Promise<void> => {
       // template-bound ui_template_updates trees alike. Storage failures
       // must never fail the finished floor; malformed blocks were ignored
       // by the parsers.
+      let matchedTemplateCount = 0
       try {
         const { updates } = parseVariableUpdates(assistantFloor.content)
         if (updates.length > 0) {
@@ -460,27 +590,20 @@ const send = async (): Promise<void> => {
               return []
             }
           })
-          for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
-            const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
-              initial: template.initialVariableState,
-              schema: template.variableSchema,
-            })
-            if (result.rejectedKeys.length > 0) {
-              console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
-            }
-            if (result.changedKeys.length === 0) continue
-            const snapshot = await variableStore?.apply(card.value.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
-              source: 'ai',
-              messageId: assistantFloor.id,
-            })
-            if (snapshot) {
-            variableState.value = snapshot.state
-            variableEvents.value = snapshot.events
-          }
-          }
+          matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, assistantFloor.id)
         }
       } catch (error) {
         console.error('[variables] failed to record AI-side updates:', error)
+      }
+      // M3-t: sub-model mode analyzes every reply; main-model mode falls
+      // back only when no block was found or none routed to a template.
+      if (activeTemplates.value.length > 0) {
+        const analysisSettings = readTemplateAnalysisSettings(settingsState)
+        if (!analysisSettings.mainModelAnalysis) {
+          await runTemplateAnalysisPipeline(assistantFloor)
+        } else if (matchedTemplateCount === 0 && analysisSettings.analysisModel) {
+          await runTemplateAnalysisPipeline(assistantFloor)
+        }
       }
     }
   } catch (error) {
@@ -670,7 +793,7 @@ const restartSession = async (): Promise<void> => {
             rows="1"
             placeholder="输入…"
             class="max-h-32 min-h-[44px] flex-1 resize-none rounded-input border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-primary"
-            @keydown.enter.exact.prevent="send"
+            @keydown.enter.exact.prevent="send()"
           />
           <button
             v-if="streaming"
@@ -685,7 +808,7 @@ const restartSession = async (): Promise<void> => {
             type="button"
             class="min-h-[44px] rounded-input bg-primary px-4 text-sm font-bold text-on-primary disabled:opacity-40"
             :disabled="!draft.trim()"
-            @click="send"
+            @click="send()"
           >
             发送
           </button>
@@ -697,8 +820,10 @@ const restartSession = async (): Promise<void> => {
       v-if="isCardDomain && showVariables && card"
       :card-id="card.id"
       :templates="activeTemplates"
+      :analysis-status="analysisStatus"
       @changed="onVariablesChanged"
       @close="showVariables = false"
+      @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
     />
   </div>
 </template>

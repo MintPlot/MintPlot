@@ -18,6 +18,12 @@ export interface LlmRequestConfig {
   baseUrl: string
   apiKey: string
   model: string
+  /** Sampling temperature (analysis runs at 0.2; chat leaves it unset). */
+  temperature?: number
+  /** Output token cap — the analysis budget is decoupled from chat. */
+  maxTokens?: number
+  /** Ask the provider for structured JSON output (response_format). */
+  jsonMode?: boolean
 }
 
 export interface LlmUsage {
@@ -129,6 +135,9 @@ export async function streamChatCompletion(
       body: JSON.stringify({
         model: config.model.trim(),
         messages,
+        ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+        ...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
+        ...(config.jsonMode ? { response_format: { type: 'json_object' } } : {}),
         stream: true,
         stream_options: { include_usage: true },
       }),
@@ -176,6 +185,89 @@ export async function streamChatCompletion(
       if (options.signal?.aborted) {
         return { content, usage, model }
       }
+      throw new LlmRequestError('请求超时')
+    }
+    throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`)
+  } finally {
+    clearTimeout(timeout)
+    options.signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+interface ChatCompletionResponse {
+  model?: string
+  choices?: { message?: { content?: string } }[]
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number } | null
+  } | null
+}
+
+const normalizeUsage = (usage: ChatCompletionResponse['usage']): LlmUsage | null =>
+  usage
+    ? {
+        inputTokens: usage.prompt_tokens ?? null,
+        outputTokens: usage.completion_tokens ?? null,
+        totalTokens: usage.total_tokens ?? null,
+        cacheReadTokens: usage.prompt_tokens_details?.cached_tokens ?? null,
+      }
+    : null
+
+/** One-shot (non-streaming) completion — the secondary-model analysis path
+ *  (M3-t): temperature 0.2, its own token budget, optional JSON mode, same
+ *  timeout/error discipline as the streaming client. */
+export async function completeChatCompletion(
+  config: LlmRequestConfig,
+  messages: readonly LlmChatMessage[],
+  options: { signal?: AbortSignal } = {},
+): Promise<StreamChatResult> {
+  const base = config.baseUrl.trim().replace(/\/+$/, '')
+  if (!base) throw new LlmRequestError('未配置 API Base URL')
+  if (!config.model.trim()) throw new LlmRequestError('未配置模型')
+
+  const controller = new AbortController()
+  const onAbort = (): void => controller.abort()
+  options.signal?.addEventListener('abort', onAbort, { once: true })
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: config.model.trim(),
+        messages,
+        ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+        ...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
+        ...(config.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        stream: false,
+      }),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      let detail = ''
+      try {
+        detail = (await response.text()).slice(0, 300)
+      } catch {
+        // body unreadable — status is the message
+      }
+      throw new LlmRequestError(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status)
+    }
+    const data = (await response.json()) as ChatCompletionResponse
+    return {
+      content: data.choices?.[0]?.message?.content ?? '',
+      usage: normalizeUsage(data.usage),
+      model: data.model ?? config.model.trim(),
+    }
+  } catch (error) {
+    if (error instanceof LlmRequestError) throw error
+    if ((error as Error)?.name === 'AbortError') {
+      if (options.signal?.aborted) throw new LlmRequestError('分析已取消')
       throw new LlmRequestError('请求超时')
     }
     throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`)
