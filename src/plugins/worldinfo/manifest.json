@@ -1,0 +1,12 @@
+{
+  "id": "worldinfo",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "世界书",
+    "description": "卡自带世界书：关键词/常驻激活、token 预算裁剪、七位置注入请求"
+  },
+  "sessions": ["card"],
+  "permissions": []
+}

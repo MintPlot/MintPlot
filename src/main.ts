@@ -9,6 +9,7 @@ import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createVariableStore } from '@/kernel/variables/variable-store'
+import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
@@ -20,12 +21,14 @@ import {
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
   VARIABLE_STORE_KEY,
+  WORLDBOOK_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
 import { getUsageStatsService } from '@/plugins/usage-stats/service-instance'
 import TtsPlugin from '@/plugins/tts'
 import VariablesPlugin from '@/plugins/variables'
+import WorldinfoPlugin from '@/plugins/worldinfo'
 
 initMpTheme()
 
@@ -47,6 +50,9 @@ const cardSessionStore = createCardSessionStore(createStorageRepository(createDe
 // Card-session variables ledger (M3-q, `variables:card:*` keys) — card domain
 // only; the chatbox domain never sees variables (review Q4 isolation).
 const variableStore = createVariableStore(createStorageRepository(createDefaultEngine()))
+// Worldbook per-entry toggles (M3-u, `worldinfo:card:*` keys) — the card's
+// verbatim book rides the character record; only overrides live here.
+const worldbookStore = createWorldbookStore(createStorageRepository(createDefaultEngine()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -60,6 +66,9 @@ kernel.runtime.load(TtsPlugin)
 // Variables system (M3-q2): the plugin is the management surface (tools-area
 // entry + toggle); engine/ledger stay kernel-side and gate on runtime state.
 kernel.runtime.load(VariablesPlugin)
+// Worldbook (M3-u): same serviceless shape — activation/budget/injection
+// engine stays kernel-side; the plugin is the tools-area toggle surface.
+kernel.runtime.load(WorldinfoPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
@@ -84,6 +93,7 @@ app.provide(CHATBOX_STORE_KEY, chatboxStore)
 app.provide(CHARACTER_STORE_KEY, characterStore)
 app.provide(CARD_SESSION_STORE_KEY, cardSessionStore)
 app.provide(VARIABLE_STORE_KEY, variableStore)
+app.provide(WORLDBOOK_STORE_KEY, worldbookStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)

@@ -44,6 +44,13 @@ export interface CharacterCard {
    * — cards without one simply have no panel.
    */
   uiTemplates?: CardUiTemplate[]
+  /**
+   * Card-embedded worldbook (M3-u), carried VERBATIM from the ccv3
+   * `data.character_book` object (spec: never destroy unknown fields) — the
+   * engine projects a normalized entry view at runtime; storage keeps the
+   * author's shape. Optional — cards without a book simply have none.
+   */
+  book?: unknown
   importedAt: number
 }
 
@@ -223,8 +230,19 @@ function normalizeCardBody(body: unknown, spec: string): ParsedCharacterCard {
     creatorNotes: asText(record.creator_notes),
     extensions: asExtensions(record.extensions),
     uiTemplates: collectUiTemplates(record),
+    book: asCharacterBook(record),
     spec,
   }
+}
+
+/** ccv3 `character_book` carried verbatim (spec-shaped `{entries, …}` or the
+ *  legacy bare array); absent/shapeless → undefined (no book, not an error). */
+function asCharacterBook(record: Record<string, unknown>): unknown {
+  const raw = record.character_book
+  if (typeof raw !== 'object' || raw === null) return undefined
+  if (Array.isArray(raw)) return raw
+  if (Array.isArray((raw as Record<string, unknown>).entries)) return raw
+  return undefined
 }
 
 /** Normalizes a raw card JSON document (v1 flat or v2/v3 `{spec, data}`). */

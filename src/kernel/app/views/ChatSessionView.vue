@@ -16,6 +16,7 @@ import {
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
   VARIABLE_STORE_KEY,
+  WORLDBOOK_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { closeConversation } from '@/kernel/app/chat-router'
@@ -52,6 +53,12 @@ import {
 import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
 import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
 import {
+  buildWorldbookInjections,
+  projectWorldbook,
+  DEFAULT_SCAN_SETTINGS,
+} from '@/kernel/worldinfo/worldbook-engine'
+import type { WorldbookActivationReport } from '@/kernel/worldinfo/worldbook-engine'
+import {
   readTemplateAnalysisSettings,
   renderTemplateStateContext,
   runTemplateAnalysis,
@@ -60,6 +67,7 @@ import {
 import type { AnalysisFloor } from '@/kernel/variables/analysis'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
+import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -71,6 +79,7 @@ const projection = inject(SESSION_PROJECTION_KEY, null)
 const seams = inject(SEAM_REGISTRY_KEY, null)
 const recordUsage = inject(USAGE_RECORDER_KEY, null)
 const variableStore = inject(VARIABLE_STORE_KEY, null)
+const worldbookStore = inject(WORLDBOOK_STORE_KEY, null)
 // Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
 // No runtime injected (pure kernel tests) keeps variables active.
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
@@ -89,6 +98,12 @@ const messagesEl = ref<HTMLElement | null>(null)
 const variableState = shallowRef<Record<string, VariableState>>({})
 const variableEvents = shallowRef<VariableSnapshot['events']>([])
 const variablesActive = ref(true)
+// Worldbook layer (M3-u): same gating shape as variables — the plugin toggle
+// flips the runtime state; dormant = no scan, no injection, no panel entry.
+const worldbookActive = ref(true)
+const showWorldbook = ref(false)
+const worldbookReport = shallowRef<WorldbookActivationReport | null>(null)
+const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
@@ -100,6 +115,19 @@ const activeTemplates = computed<CardUiTemplate[]>(() =>
   variablesActive.value && isCardDomain.value
     ? [...(card.value?.uiTemplates ?? [])].filter((entry) => entry.enabled).sort((a, b) => b.order - a.order)
     : [])
+
+// M3-u worldbook: the projected entry view (verbatim card data → runtime
+// list); toggles ride worldbookDisabledUids, never the card record.
+const worldbookEntries = computed(() =>
+  isCardDomain.value ? projectWorldbook(card.value?.book) : [])
+
+const toggleWorldbookEntry = async (uid: number): Promise<void> => {
+  const next = new Set(worldbookDisabledUids.value)
+  if (next.has(uid)) next.delete(uid)
+  else next.add(uid)
+  worldbookDisabledUids.value = next
+  if (card.value) await worldbookStore?.setDisabled(card.value.id, next)
+}
 
 const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
   const value = variableState.value[entry.id]?.value
@@ -236,6 +264,12 @@ onMounted(async () => {
     // 整体休眠:不播种、不解析、不展开、不注入、面板入口隐藏;账本数据不动。
     const pluginState = runtime === null ? 'active' : runtime.stateOf('variables')
     variablesActive.value = pluginState === 'active' || pluginState === 'degraded'
+    // M3-u: the worldbook layer gates on its own plugin the same way.
+    const worldinfoState = runtime === null ? 'active' : runtime.stateOf('worldinfo')
+    worldbookActive.value = worldinfoState === 'active' || worldinfoState === 'degraded'
+    if (worldbookActive.value) {
+      worldbookDisabledUids.value = (await worldbookStore?.getDisabled(card.value.id)) ?? new Set()
+    }
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -308,6 +342,46 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   let systemPrompt = isCardDomain.value && card.value
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
+  // M3-u worldbook: one artifact per request — activation over the last
+  // scanDepth floors, whole-entry budget, seven-position injections. The
+  // report feeds the sheet's visibility panel (预算丢弃必须可见).
+  let worldbookSystemArea = ''
+  const worldbookBeforeChar: string[] = []
+  const worldbookAtDepth: Array<{ depth: number; content: string }> = []
+  if (isCardDomain.value && worldbookActive.value && card.value?.book) {
+    const settings = DEFAULT_SCAN_SETTINGS
+    const scanText = floors
+      .filter((message) => message.role !== 'system')
+      .slice(-Math.max(1, settings.scanDepth))
+      .map((message) => stripVariableBlocks(message.content))
+      .join('\n')
+    const artifact = buildWorldbookInjections({
+      book: card.value.book,
+      scanText,
+      turnSeed: floors.length,
+      settings,
+      disabledUids: worldbookDisabledUids.value,
+    })
+    worldbookReport.value = artifact
+    const systemArea = artifact.injections.filter(
+      (injection) => injection.position === 'system_top' || injection.position === 'global_note',
+    )
+    // system_top rides the very top; global_note after it, still ahead of the
+    // character block (RP prompt order). `global_note` ignores depth (D5).
+    if (systemArea.length > 0) {
+      worldbookSystemArea = systemArea.map((injection) => injection.content).join('\n\n')
+    }
+    for (const injection of artifact.injections) {
+      if (injection.position === 'before_char') worldbookBeforeChar.push(injection.content)
+      else if (injection.position === 'at_depth') worldbookAtDepth.push({ depth: injection.depth, content: injection.content })
+    }
+  }
+  if (worldbookBeforeChar.length > 0) {
+    systemPrompt = `${worldbookBeforeChar.join('\n\n')}\n\n${systemPrompt}`
+  }
+  if (worldbookSystemArea) {
+    systemPrompt = `${worldbookSystemArea}\n\n${systemPrompt}`
+  }
   // M3-q: the flat variables artifact section rides the system-prompt tail
   // (review Q5 compact line form). The M3-r template update section does NOT
   // ride here anymore — M3-s moves it to the very last message (RP's
@@ -350,6 +424,30 @@ const buildRequestMessages = (): LlmChatMessage[] => {
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
     result.push({ role: message.role, content: expandRequestText(content) })
+  }
+  // M3-u: at_depth injections splice into the history (depth counts
+  // individual messages from the end; never ahead of the system block).
+  for (const injection of worldbookAtDepth) {
+    const index = Math.max(1, result.length - injection.depth)
+    result.splice(index, 0, { role: 'system', content: injection.content })
+  }
+  // M3-u: user_top prepends to the last user floor (RP same); assistant_top
+  // rides the trailing system-note channel — BEFORE the template instruction,
+  // which stays the true last message (final instruction wins).
+  let lastUserIndex = -1
+  for (let index = result.length - 1; index >= 0; index -= 1) {
+    if (result[index]?.role === 'user') {
+      lastUserIndex = index
+      break
+    }
+  }
+  const userTop = worldbookReport.value?.injections.find((injection) => injection.position === 'user_top')
+  if (lastUserIndex >= 0 && userTop) {
+    result[lastUserIndex] = { role: 'user', content: `${userTop.content}\n${result[lastUserIndex]!.content}` }
+  }
+  const assistantTop = worldbookReport.value?.injections.find((injection) => injection.position === 'assistant_top')
+  if (assistantTop) {
+    result.push({ role: 'system', content: `[Instructions for next message]\n${assistantTop.content}` })
   }
   if (isCardDomain.value && variablesActive.value && readTemplateAnalysisSettings(settingsState).mainModelAnalysis) {
     const templateSection = renderTemplateUpdateSection(
@@ -691,6 +789,14 @@ const restartSession = async (): Promise<void> => {
         变量
       </button>
       <button
+        v-if="isCardDomain && worldbookActive && worldbookEntries.length > 0"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showWorldbook = true"
+      >
+        世界书
+      </button>
+      <button
         v-if="isCardDomain"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-3 active:text-danger"
@@ -824,6 +930,15 @@ const restartSession = async (): Promise<void> => {
       @changed="onVariablesChanged"
       @close="showVariables = false"
       @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
+    />
+
+    <WorldbookSheet
+      v-if="isCardDomain && showWorldbook"
+      :entries="worldbookEntries"
+      :disabled-uids="worldbookDisabledUids"
+      :report="worldbookReport"
+      @toggle="toggleWorldbookEntry"
+      @close="showWorldbook = false"
     />
   </div>
 </template>

@@ -17,6 +17,8 @@ import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createVariableStore } from '@/kernel/variables/variable-store'
+import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
+import { WORLDBOOK_STORE_KEY } from '@/kernel/app/chat-keys'
 import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
@@ -105,6 +107,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
   const cardSessionStore = createCardSessionStore(createStorageRepository(createMemoryEngine()))
   const characterStore = createCharacterStore(createStorageRepository(createMemoryEngine()))
   const variableStore = createVariableStore(createStorageRepository(createMemoryEngine()))
+  const worldbookStore = createWorldbookStore(createStorageRepository(createMemoryEngine()))
   const projection = createSessionProjection()
   const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
   const seams = createSeamRegistry(() => undefined)
@@ -118,6 +121,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
         [CARD_SESSION_STORE_KEY as symbol]: cardSessionStore,
         [CHARACTER_STORE_KEY as symbol]: characterStore,
         [VARIABLE_STORE_KEY as symbol]: variableStore,
+        [WORLDBOOK_STORE_KEY as symbol]: worldbookStore,
         [SEAM_REGISTRY_KEY as symbol]: seams,
         [SESSION_PROJECTION_KEY as symbol]: projection,
         [SETTINGS_STATE_KEY as symbol]: settings,
@@ -128,7 +132,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
       },
     },
   })
-  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, projection, usageCalls, seams, settings }
+  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, worldbookStore, projection, usageCalls, seams, settings }
 }
 
 describe('M3-i · 角色 tab 进卡闭环', () => {
@@ -698,6 +702,65 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(snapshot.state['tpl-1']).toMatchObject({ value: { hp: 88 } })
     expect(snapshot.events.at(-1)).toMatchObject({ name: 'tpl-1', source: 'ai' })
     vi.unstubAllGlobals()
+    wrapper.unmount()
+  })
+
+  it('世界书(M3-u):蓝灯进系统提示词、绿灯按深度 splice、启停覆盖生效、无书卡零注入', async () => {
+    const { wrapper, characterStore, worldbookStore } = mountApp()
+    const stored = await characterStore.import({
+      ...CARD,
+      book: {
+        entries: [
+          { uid: 0, comment: '蓝灯', content: '世界书常驻设定内容', constant: true, insertion_order: 10, position: 'global_note' },
+          { uid: 1, comment: '绿灯', content: '中洲深度知识', keys: ['中洲'], insertion_order: 5, position: 4, depth: 1 },
+          { uid: 2, comment: '不触发', content: '永不出现的内容', keys: ['绝对不存在的词'], insertion_order: 1 },
+        ],
+      },
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 顶栏入口出现(有书才有)。
+    expect(wrapper.findAll('button').some((button) => button.text() === '世界书')).toBe(true)
+
+    nextReply = '（回复）'
+    await wrapper.find('textarea').setValue('出发去中洲')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    const request = streamCalls.at(-1)!
+    // 蓝灯 global_note → 系统提示词内。
+    const systemMessage = request.find((message) => message.role === 'system')!
+    expect(systemMessage.content).toContain('[蓝灯]')
+    expect(systemMessage.content).toContain('世界书常驻设定内容')
+    // 绿灯 at_depth=1 → 以 system 消息 splice 在最后一条用户楼层之前。
+    const depthMessage = request.find((message) => message.role === 'system' && message.content === '[绿灯]\n中洲深度知识')
+    expect(depthMessage).toBeDefined()
+    // 未触发条目不进请求。
+    expect(request.some((message) => message.content.includes('永不出现的内容'))).toBe(false)
+
+    // 启停覆盖:关掉蓝灯后,同应用内返回再重进(ChatSessionView 重挂载重读
+    // 覆盖层)——蓝灯消失、绿灯仍在。
+    await worldbookStore.setDisabled(stored.id, new Set([0]))
+    await wrapper.find('button[aria-label="返回对话列表"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('再出发去中洲')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    const secondRequest = streamCalls.at(-1)!
+    expect(secondRequest.some((message) => message.content.includes('世界书常驻设定内容'))).toBe(false)
+    // 绿灯未关,仍触发。
+    expect(secondRequest.some((message) => message.content.includes('中洲深度知识'))).toBe(true)
     wrapper.unmount()
   })
 

@@ -52,6 +52,17 @@ const SHIM_SCRIPT = `
             if (!text) return;
             postToHost({ type: 'slash', command: String(text) });
         };
+        document.addEventListener('click', function(event) {
+            var node = event.target;
+            while (node && node !== document.body) {
+                if (node.getAttribute && node.getAttribute('data-slash')) {
+                    event.preventDefault();
+                    window.triggerSlash(node.getAttribute('data-slash'));
+                    return;
+                }
+                node = node.parentNode;
+            }
+        }, true);
         var lastHeight = 0;
         function measureHeight() {
             var body = document.body;
