@@ -150,40 +150,109 @@ const createRootContext = (variables: unknown): TemplateRenderContext => ({
   alias: '',
 })
 
-const EACH_PATTERN = /\{\{\s*#each\s+([^\s}]+)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*\}\}((?:(?!\{\{\s*#each\b)[\s\S])*?)\{\{\s*\/each\s*\}\}/g
+/** Each-block tokens are located by plain string scanning (no pattern
+ *  literals): find an opening brace pair, classify the trimmed inner text,
+ *  continue after it. Deliberately hand-rolled — see findEachClose. */
+interface EachToken {
+  kind: 'open' | 'close' | 'else'
+  start: number
+  end: number
+  path: string
+  alias: string
+}
 
-const renderEachBlocks = (templateText: string, variables: unknown, context: TemplateRenderContext): string => {
-  let output = String(templateText ?? '')
-  for (let pass = 0; pass < 50; pass++) {
-    let replaced = false
-    output = output.replace(EACH_PATTERN, (_whole, path: string, alias: string | undefined, body: string) => {
-      replaced = true
-      const value = readTemplateValue(variables, path, context)
-      const [itemTemplate, emptyTemplate = ''] = String(body ?? '').split(/\{\{\s*else\s*\}\}/i)
-      const entries: Array<{ item: unknown; key: string | number; index: number }> = Array.isArray(value)
-        ? value.map((item, index) => ({ item, key: index, index }))
-        : isTemplateObject(value)
-          ? Object.entries(value).map(([key, item], index) => ({ item, key, index }))
-          : []
-      if (entries.length === 0) {
-        return renderTemplateString(emptyTemplate, variables, context)
-      }
-      return entries
-        .map(({ item, key, index }) =>
-          renderTemplateString(itemTemplate, variables, {
-            root: context.root,
-            current: item,
-            parentContext: context,
-            index,
-            key,
-            length: entries.length,
-            alias: alias ?? '',
-          }))
-        .join('')
-    })
-    if (!replaced) break
+const scanEachTokens = (text: string): EachToken[] => {
+  const tokens: EachToken[] = []
+  let cursor = 0
+  for (;;) {
+    const open = text.indexOf('{{', cursor)
+    if (open === -1) break
+    const close = text.indexOf('}}', open + 2)
+    if (close === -1) break
+    const inner = text.slice(open + 2, close).trim()
+    const lower = inner.toLowerCase()
+    if (lower.startsWith('#each')) {
+      const spec = inner.slice(5).trim()
+      const asIndex = spec.indexOf(' as ')
+      tokens.push({
+        kind: 'open',
+        start: open,
+        end: close + 2,
+        path: asIndex === -1 ? spec : spec.slice(0, asIndex).trim(),
+        alias: asIndex === -1 ? '' : spec.slice(asIndex + 4).trim(),
+      })
+    } else if (lower === '/each' || lower === '/ each') {
+      tokens.push({ kind: 'close', start: open, end: close + 2, path: '', alias: '' })
+    } else if (lower === 'else') {
+      tokens.push({ kind: 'else', start: open, end: close + 2, path: '', alias: '' })
+    }
+    cursor = close + 2
   }
-  return output
+  return tokens
+}
+
+/** Expand every each-block, outermost first, recursively: the body of one
+ *  block re-enters renderTemplateString with the item context, so nested
+ *  loops and parent climbs resolve against the innermost enclosing item. */
+const renderEachBlocks = (templateText: string, variables: unknown, context: TemplateRenderContext): string => {
+  const segments: string[] = []
+  let rest = templateText
+  for (let guard = 0; guard < 50; guard += 1) {
+    const tokens = scanEachTokens(rest)
+    const open = tokens.find((token) => token.kind === 'open')
+    if (!open) break
+    let depth = 0
+    const close = tokens.find((token) => {
+      if (token.start <= open.start) return false
+      if (token.kind === 'open') depth += 1
+      else if (token.kind === 'close') {
+        if (depth === 0) return true
+        depth -= 1
+      }
+      return false
+    })
+    if (!close) break
+    const body = rest.slice(open.end, close.start)
+    // Top-level else only: an else inside a nested block belongs to that
+    // block, so track depth while scanning the tokens in between.
+    let innerDepth = 0
+    let elseToken: EachToken | undefined
+    for (const token of tokens) {
+      if (token.start <= open.start || token.end >= close.end) continue
+      if (token.kind === 'open') innerDepth += 1
+      else if (token.kind === 'close') innerDepth -= 1
+      else if (token.kind === 'else' && innerDepth === 0) {
+        elseToken = token
+        break
+      }
+    }
+    const itemTemplate = elseToken ? body.slice(0, elseToken.start - open.end) : body
+    const emptyTemplate = elseToken ? body.slice(elseToken.end - open.end) : ''
+    const value = readTemplateValue(variables, open.path, context)
+    const entries: Array<{ item: unknown; key: string | number; index: number }> = Array.isArray(value)
+      ? value.map((item, index) => ({ item, key: index, index }))
+      : isTemplateObject(value)
+        ? Object.entries(value).map(([entryKey, item], index) => ({ item, key: entryKey, index }))
+        : []
+    const rendered = entries.length === 0
+      ? renderTemplateString(emptyTemplate, variables, context)
+      : entries
+          .map(({ item, key, index }) =>
+            renderTemplateString(itemTemplate, variables, {
+              root: context.root,
+              current: item,
+              parentContext: context,
+              index,
+              key,
+              length: entries.length,
+              alias: open.alias,
+            }))
+          .join('')
+    segments.push(rest.slice(0, open.start), rendered)
+    rest = rest.slice(close.end)
+  }
+  segments.push(rest)
+  return segments.join('')
 }
 
 /** Render one template: `{{#each}}` expansion first, then `{{expression}}`

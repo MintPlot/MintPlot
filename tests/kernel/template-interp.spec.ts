@@ -59,7 +59,7 @@ describe('template interpolation engine · M3-s 逐楼快照 render surface', ()
     expect(missing).toBe('无')
   })
 
-  it('context family: root., @index, @first/@last render true/false (flat each, RP parity)', () => {
+  it('context family: root., @index, @first/@last render true/false', () => {
     const html = renderTemplateString(
       '{{#each bag}}{{name}}({{root.charName}}){{@index}} {{/each}}',
       { charName: '蛊', bag: [{ name: 'a' }, { name: 'b' }] },
@@ -67,9 +67,22 @@ describe('template interpolation engine · M3-s 逐楼快照 render surface', ()
     expect(html).toBe('a(蛊)0 b(蛊)1 ')
     const flags = renderTemplateString('{{#each bag}}{{@first}}/{{@last}} {{/each}}', { bag: [1, 2] })
     expect(flags).toBe('true/false false/true ')
-    // Known RP-parity limitation: a each body containing another each block
-    // is not grouped by the flat pattern (documented; nested each is not used
-    // by the observed community cards — 蛊真人 ships zero {{}} references).
+  })
+
+  it('nested each loops: inner bodies resolve against their item, ../ climbs to the parent item', () => {
+    const html = renderTemplateString(
+      '{{#each groups}}{{#each members}}{{this}}@{{../name}} {{/each}}{{/each}}',
+      { groups: [{ name: 'g1', members: ['x', 'y'] }, { name: 'g2', members: ['z'] }] },
+    )
+    expect(html).toBe('x@g1 y@g1 z@g2 ')
+  })
+
+  it('nested each with an inner else: the else belongs to the inner block', () => {
+    const html = renderTemplateString(
+      '{{#each groups}}[{{#each members}}{{this}}{{else}}空{{/each}}]{{/each}}',
+      { groups: [{ name: 'a', members: ['x'] }, { name: 'b', members: [] }] },
+    )
+    expect(html).toBe('[x][空]')
   })
 
   it('bracket paths normalize to dot reads', () => {

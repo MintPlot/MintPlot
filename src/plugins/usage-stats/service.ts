@@ -177,6 +177,7 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
     summary: '记忆系统',
     embedding: '记忆系统',
     ui_template: '变量分析',
+    ui_template_batch: '变量分析',
   })[type] ?? '对话'
 
   // Inline control panel "latest usage" bar: the most recent main-chat
