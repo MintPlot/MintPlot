@@ -17,6 +17,7 @@ import {
   USAGE_RECORDER_KEY,
   VARIABLE_STORE_KEY,
   WORLDBOOK_STORE_KEY,
+  REGEX_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { closeConversation } from '@/kernel/app/chat-router'
@@ -53,6 +54,12 @@ import {
 import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
 import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
 import {
+  applyRegexPipeline,
+  isFullHtmlDocument,
+  HTML_FLOOR_OMISSION_MARKER,
+  projectRegexScripts,
+} from '@/kernel/regex/regex-engine'
+import {
   buildWorldbookInjections,
   projectWorldbook,
   DEFAULT_SCAN_SETTINGS,
@@ -68,6 +75,7 @@ import type { AnalysisFloor } from '@/kernel/variables/analysis'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
+import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -80,6 +88,7 @@ const seams = inject(SEAM_REGISTRY_KEY, null)
 const recordUsage = inject(USAGE_RECORDER_KEY, null)
 const variableStore = inject(VARIABLE_STORE_KEY, null)
 const worldbookStore = inject(WORLDBOOK_STORE_KEY, null)
+const regexStore = inject(REGEX_STORE_KEY, null)
 // Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
 // No runtime injected (pure kernel tests) keeps variables active.
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
@@ -104,6 +113,11 @@ const worldbookActive = ref(true)
 const showWorldbook = ref(false)
 const worldbookReport = shallowRef<WorldbookActivationReport | null>(null)
 const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
+// Regex layer (M3-v): same gating shape — dormant = no display rewrite, no
+// prompt rewrite, no panel entry. Card scripts ride extensions verbatim.
+const regexActive = ref(true)
+const showRegex = ref(false)
+const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
@@ -127,6 +141,19 @@ const toggleWorldbookEntry = async (uid: number): Promise<void> => {
   else next.add(uid)
   worldbookDisabledUids.value = next
   if (card.value) await worldbookStore?.setDisabled(card.value.id, next)
+}
+
+// M3-v regex: projected card scripts (verbatim extensions data → runtime
+// list); toggles ride regexDisabledUids, never the card record.
+const cardRegexScripts = computed(() =>
+  isCardDomain.value ? projectRegexScripts(card.value?.extensions?.regex_scripts) : [])
+
+const toggleRegexScript = async (uid: number): Promise<void> => {
+  const next = new Set(regexDisabledUids.value)
+  if (next.has(uid)) next.delete(uid)
+  else next.add(uid)
+  regexDisabledUids.value = next
+  if (card.value) await regexStore?.setDisabled(card.value.id, next)
 }
 
 const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
@@ -270,6 +297,12 @@ onMounted(async () => {
     if (worldbookActive.value) {
       worldbookDisabledUids.value = (await worldbookStore?.getDisabled(card.value.id)) ?? new Set()
     }
+    // M3-v: regex layer gates on its own plugin the same way.
+    const regexState = runtime === null ? 'active' : runtime.stateOf('regex')
+    regexActive.value = regexState === 'active' || regexState === 'degraded'
+    if (regexActive.value) {
+      regexDisabledUids.value = (await regexStore?.getDisabled(card.value.id)) ?? new Set()
+    }
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -315,13 +348,22 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
 /** v-html render for one floor; streaming floors bypass the LRU (content
  *  changes every flush). The card domain strips variable tag blocks first —
  *  a display projection only, the stored floor keeps them verbatim (review
- *  Q1 落库纪律). */
-const renderFloor = (message: ChatboxMessage): string =>
-  renderMessageHtml(
-    isCardDomain.value && variablesActive.value ? stripVariableBlocks(message.content) : message.content,
-    macroContext.value,
-    !isStreamingFloor(message),
-  )
+ *  Q1 落库纪律). M3-v: card regexes then rewrite the display projection
+ *  (depth always 0 on this surface; promptOnly scripts skip display). */
+const renderFloor = (message: ChatboxMessage): string => {
+  let content = message.content
+  if (isCardDomain.value && variablesActive.value) content = stripVariableBlocks(content)
+  if (isCardDomain.value && regexActive.value && cardRegexScripts.value.length > 0) {
+    content = applyRegexPipeline(content, {
+      scripts: cardRegexScripts.value,
+      surface: 'display',
+      role: message.role === 'user' ? 'user' : 'assistant',
+      depth: 0,
+      disabledUids: regexDisabledUids.value,
+    })
+  }
+  return renderMessageHtml(content, macroContext.value, !isStreamingFloor(message))
+}
 
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
 
@@ -349,7 +391,13 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   const worldbookBeforeChar: string[] = []
   const worldbookAtDepth: Array<{ depth: number; content: string }> = []
   if (isCardDomain.value && worldbookActive.value && card.value?.book) {
-    const settings = DEFAULT_SCAN_SETTINGS
+    // Settings live in mp_settings (sheet exposes 预算/扫描深度); clamp here.
+    const scope = settingsState?.scope(['worldInfoTokenBudget', 'worldInfoScanDepth'])
+    const settings = {
+      ...DEFAULT_SCAN_SETTINGS,
+      tokenBudget: Math.max(0, Math.round(Number(scope?.worldInfoTokenBudget ?? 4000)) || 0),
+      scanDepth: Math.min(20, Math.max(1, Math.round(Number(scope?.worldInfoScanDepth ?? 2)) || 2)),
+    }
     const scanText = floors
       .filter((message) => message.role !== 'system')
       .slice(-Math.max(1, settings.scanDepth))
@@ -408,19 +456,46 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
   }
+  // M3-v: prompt-side omission switch (D7) — a floor that IS a frontend
+  // HTML document is replaced by a marker in the request; display keeps the
+  // iframe. Default on (the card's lore lives in the worldbook; the markup
+  // itself is pure request weight). Off = verbatim floors.
+  const promptOmitHtml = isCardDomain.value && regexActive.value
+    ? settingsState?.scope(['promptOmitHtmlFloors']).promptOmitHtmlFloors !== false
+    : false
+  const promptScripts = isCardDomain.value && regexActive.value ? cardRegexScripts.value : []
+  const rewritePromptFloor = (content: string, role: 'user' | 'assistant', depth: number): string => {
+    let next = isCardDomain.value && variablesActive.value ? stripVariableBlocks(content) : content
+    if (promptOmitHtml && isFullHtmlDocument(next)) return HTML_FLOOR_OMISSION_MARKER
+    if (promptScripts.length > 0) {
+      next = applyRegexPipeline(next, {
+        scripts: promptScripts,
+        surface: 'prompt',
+        role,
+        depth,
+        disabledUids: regexDisabledUids.value,
+      })
+    }
+    return next
+  }
   // RP 开场白保险:历史首楼不再是开场白时,请求里补注入(历史本身不改写)。
   if (isCardDomain.value && card.value && greetingFloorMissing(floors, card.value.firstMes)) {
-    result.push({ role: 'assistant', content: expandRequestText(card.value.firstMes) })
+    result.push({ role: 'assistant', content: expandRequestText(rewritePromptFloor(card.value.firstMes, 'assistant', floors.length)) })
   }
-  for (const message of floors) {
+  for (let index = 0; index < floors.length; index += 1) {
+    const message = floors[index]!
     if (message.role === 'system') continue
     // M3-s: protocol blocks stay out of the model's context too — RP strips
     // them from message content at parse time, and the ecosystem regex
     // convention is display+prompt double-strip. The stored floor keeps them
     // verbatim; this strips the request projection only.
-    const content = isCardDomain.value && variablesActive.value
-      ? stripVariableBlocks(message.content)
-      : message.content
+    // M3-v: omission marker / card regexes then rewrite the prompt
+    // projection (depth anchored from the end, 0 = last floor).
+    const content = rewritePromptFloor(
+      message.content,
+      message.role === 'user' ? 'user' : 'assistant',
+      floors.length - 1 - index,
+    )
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
     result.push({ role: message.role, content: expandRequestText(content) })
@@ -797,6 +872,14 @@ const restartSession = async (): Promise<void> => {
         世界书
       </button>
       <button
+        v-if="isCardDomain && regexActive && cardRegexScripts.length > 0"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showRegex = true"
+      >
+        正则
+      </button>
+      <button
         v-if="isCardDomain"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-3 active:text-danger"
@@ -939,6 +1022,14 @@ const restartSession = async (): Promise<void> => {
       :report="worldbookReport"
       @toggle="toggleWorldbookEntry"
       @close="showWorldbook = false"
+    />
+
+    <RegexSheet
+      v-if="isCardDomain && showRegex"
+      :scripts="cardRegexScripts"
+      :disabled-uids="regexDisabledUids"
+      @toggle="toggleRegexScript"
+      @close="showRegex = false"
     />
   </div>
 </template>

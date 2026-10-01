@@ -40,6 +40,7 @@ import { createPluginRuntime } from '@/kernel/runtime/runtime'
 import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import type { CharacterCard } from '@/kernel/characters/character-card'
+import { HTML_FLOOR_OMISSION_MARKER } from '@/kernel/regex/regex-engine'
 
 const CARD: Omit<CharacterCard, 'id' | 'importedAt'> = {
   name: '星澜',
@@ -761,6 +762,53 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(secondRequest.some((message) => message.content.includes('世界书常驻设定内容'))).toBe(false)
     // 绿灯未关,仍触发。
     expect(secondRequest.some((message) => message.content.includes('中洲深度知识'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('正则(M3-v):显示面美化上屏、提示词面改写、HTML 楼层省略开关、落库纪律', async () => {
+    const { wrapper, characterStore, cardSessionStore, settings } = mountApp()
+    settings.scope(['promptOmitHtmlFloors']).promptOmitHtmlFloors = true
+    await characterStore.import({
+      ...CARD,
+      firstMes: '<html><body><p>（心理）开场白文档</p></body></html>',
+      extensions: {
+        regex_scripts: [
+          // 美化(全 false=仅显示):（）→ span 心理块
+          { name: '心理', regex: '（([^）]*?)）', flags: 'gi', replacement: '<span class="psy">$1</span>', placement: [1, 2] },
+          // 提示词剥离(带尖括号,raw 跑):删掉开场的残留标记
+          { name: '剥离', regex: '<html>', flags: 'gi', replacement: '', promptOnly: true, placement: [2] },
+        ],
+      },
+    })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 顶栏入口出现。
+    expect(wrapper.findAll('button').some((button) => button.text() === '正则')).toBe(true)
+
+    // 显示面:开场白是完整 HTML 文档 → 走 M3-n iframe 文档路径,美化不套;
+    // 但省略开关只影响提示词,显示保持文档渲染。
+    nextReply = '（紧张）回复正文'
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 显示面:用户楼层「你好」无括号不动;AI 楼层（紧张）→ 心理块 span。
+    const html = wrapper.html()
+    expect(html).toContain('<span class="psy">紧张</span>')
+    // 提示词面:开场白 HTML 文档被省略标记替换(默认开);promptOnly 剥离跑过。
+    const request = streamCalls.at(-1)!
+    const greetingMessage = request.find((message) => message.role === 'assistant' && message.content.includes(HTML_FLOOR_OMISSION_MARKER))!
+    expect(greetingMessage.content).not.toContain('<html>')
+    // 落库纪律:存储楼层保持原样(协议/正则/省略都只是投影)。
+    const stored = (await cardSessionStore.get((await characterStore.list())[0]!.id))!
+    expect(stored.messages[0]!.content).toContain('<html>')
     wrapper.unmount()
   })
 

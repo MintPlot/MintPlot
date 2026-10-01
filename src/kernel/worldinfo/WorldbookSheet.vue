@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // 世界书面板(M3-u 轻管理,D7):条目列表(名/蓝绿灯标签/启停开关/字数)+搜索
 // +激活披露(本次注入了哪些/预算丢了多少——RP/ST 都静默丢弃,MP 用可见性差异
-// 化)。启停 = 设备库覆盖层(worldbook-store),永不回写卡记录。
-import { computed, ref } from 'vue'
+// 化)+预算/扫描深度设置。启停 = 设备库覆盖层(worldbook-store),永不回写卡
+// 记录;预算走 mp_settings(0=不限)。
+import { computed, inject, onMounted, ref } from 'vue'
 import type { WorldbookEntry } from '@/kernel/worldinfo/worldbook-engine'
 import type { WorldbookActivationReport } from '@/kernel/worldinfo/worldbook-engine'
+import { SETTINGS_STATE_KEY } from '@/kernel/app/chat-keys'
+import type { SettingsState } from '@/kernel/settings/settings-state'
 
 const props = defineProps<{
   entries: WorldbookEntry[]
@@ -12,6 +15,24 @@ const props = defineProps<{
   report: WorldbookActivationReport | null
 }>()
 const emit = defineEmits<{ toggle: [uid: number]; close: [] }>()
+
+const settingsState = inject<SettingsState | null>(SETTINGS_STATE_KEY, null)
+const tokenBudget = ref(4000)
+const scanDepth = ref(2)
+
+onMounted(() => {
+  if (!settingsState) return
+  const scope = settingsState.scope(['worldInfoTokenBudget', 'worldInfoScanDepth'])
+  tokenBudget.value = Math.max(0, Number(scope.worldInfoTokenBudget ?? 4000) || 0)
+  scanDepth.value = Math.min(20, Math.max(1, Number(scope.worldInfoScanDepth ?? 2) || 2))
+})
+
+const persist = (): void => {
+  if (!settingsState) return
+  const scope = settingsState.scope(['worldInfoTokenBudget', 'worldInfoScanDepth'])
+  scope.worldInfoTokenBudget = Math.max(0, Math.round(tokenBudget.value))
+  scope.worldInfoScanDepth = Math.min(20, Math.max(1, Math.round(scanDepth.value)))
+}
 
 const search = ref('')
 const filtered = computed(() => {
@@ -85,6 +106,35 @@ const toggle = (entry: WorldbookEntry): void => emit('toggle', entry.uid)
             {{ item.comment || '条目' }}
           </li>
         </ul>
+      </div>
+
+      <!-- 预算与扫描深度(本次会话即生效,下一轮请求起用) -->
+      <div
+        v-if="settingsState"
+        class="mb-2 flex items-center gap-3 rounded-input border border-line bg-bg px-3 py-2 text-[11px] text-ink-2"
+        @change="persist"
+      >
+        <label class="flex min-w-0 flex-1 items-center gap-1.5">
+          预算
+          <input
+            v-model.number="tokenBudget"
+            type="number"
+            min="0"
+            step="500"
+            class="w-20 rounded-input border border-line bg-card px-1.5 py-0.5 text-ink outline-none focus:border-primary"
+          >
+        </label>
+        <label class="flex min-w-0 flex-1 items-center gap-1.5">
+          扫描楼层
+          <input
+            v-model.number="scanDepth"
+            type="number"
+            min="1"
+            max="20"
+            class="w-14 rounded-input border border-line bg-card px-1.5 py-0.5 text-ink outline-none focus:border-primary"
+          >
+        </label>
+        <span class="flex-shrink-0 text-[10px] text-ink-3">预算 0=不限</span>
       </div>
 
       <input

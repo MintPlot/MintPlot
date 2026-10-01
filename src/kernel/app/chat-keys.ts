@@ -12,6 +12,7 @@ import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore } from '@/kernel/variables/variable-store'
 import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
+import type { RegexStore } from '@/kernel/regex/regex-store'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
 
@@ -26,6 +27,9 @@ export const VARIABLE_STORE_KEY: InjectionKey<VariableStore> = Symbol('variable-
 
 /** Worldbook per-entry toggle overrides (M3-u) — card domain only. */
 export const WORLDBOOK_STORE_KEY: InjectionKey<WorldbookStore> = Symbol('worldbook-store')
+
+/** Regex per-script toggle overrides (M3-v) — card domain only. */
+export const REGEX_STORE_KEY: InjectionKey<RegexStore> = Symbol('regex-store')
 
 /**
  * Host session projection — the card session page activates card-domain
