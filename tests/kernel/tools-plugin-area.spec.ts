@@ -133,4 +133,14 @@ describe('kernel/app · PluginArea (M3-h)', () => {
     expect(saved?.groups.system).toBe(true)
     wrapper.unmount()
   })
+
+  it('a degraded plugin shows the 异常 badge; healthy rows do not (M3-err3)', async () => {
+    const degraded: PluginStateProjection = { ...makePlugin('broken', 'system', 'registered'), state: 'degraded' }
+    const { wrapper } = mountArea([makePlugin('tts', 'system', 'active'), degraded])
+    await openSystemGroup(wrapper)
+
+    expect(wrapper.text()).toContain('异常')
+    // Exactly one badge — the healthy plugin row stays clean.
+    expect(wrapper.findAll('span').filter((span) => span.text() === '异常')).toHaveLength(1)
+  })
 })

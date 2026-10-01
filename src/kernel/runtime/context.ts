@@ -28,6 +28,7 @@ import type {
 } from '@contracts'
 import { createDisposerBag } from '@contracts'
 import type { DisposerBag } from '@contracts'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 import type { KvStore } from '@/kernel/store/kv-store'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { SessionLedger } from '@/kernel/sessions/session-ledger'
@@ -250,6 +251,19 @@ export function createPluginContext(
 
     diag: {
       pluginId,
+      // M3-err3 formalization: plugin journal entries land in the kernel
+      // error hub, attributed to the plugin (category 'plugin').
+      record(entry) {
+        errorHub.record({
+          severity: entry.severity ?? 'info',
+          category: 'plugin',
+          action: entry.action,
+          message: entry.message,
+          code: entry.code,
+          pluginId,
+          context: entry.context,
+        })
+      },
     },
 
     onDeactivate(fn) {

@@ -40,6 +40,9 @@ const groups = computed(() => ({
 const configSections = usePluginConfigSections()
 const hasConfig = (id: string): boolean => (configSections.value.get(id)?.length ?? 0) > 0
 
+/** Last runtime-journal line for a degraded plugin (badge tooltip). */
+const lastJournalLine = (id: string): string => runtime?.journalOf?.(id)?.at(-1) ?? ''
+
 const groupOpen = (key: 'system' | 'extension'): boolean => toolsUi?.state.groups[key] ?? false
 const toggleGroup = (key: 'system' | 'extension'): void => {
   if (!toolsUi) return
@@ -144,6 +147,11 @@ async function setEnabled(plugin: PluginStateProjection, value: boolean): Promis
               <span class="block truncate text-sm text-ink">{{ plugin.display.name }}</span>
               <span class="mt-0.5 block truncate text-xs text-ink-3">{{ plugin.display.description }}</span>
             </span>
+            <span
+              v-if="plugin.state === 'degraded'"
+              class="flex-shrink-0 rounded bg-danger-wash px-1.5 py-0.5 text-[10px] text-danger"
+              :title="lastJournalLine(plugin.id)"
+            >异常</span>
             <button
               v-if="hasConfig(plugin.id)"
               type="button"

@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import './main.css'
 import App from './App.vue'
+import { App as CapacitorApp } from '@capacitor/app'
 import { initMpTheme } from '@/kernel/design/theme'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
@@ -48,7 +49,12 @@ replayEarlyErrors()
 const kernel = createKernel()
 
 // Storage degrade / other fatal events keep the journal durable across the
-// app lifecycle — flush on pause (Capacitor).
+// app lifecycle — flush on pause. M3-err3 wires the missing emitter: the
+// contract events app.pause/app.resume finally have a source (Capacitor
+// appStateChange; the web stub rides visibilitychange).
+void CapacitorApp.addListener('appStateChange', (state) => {
+  kernel.services.bus.emit(state.isActive ? 'app.resume' : 'app.pause', {})
+})
 kernel.services.bus.on('app.pause', () => {
   void errorHub.flush()
 })

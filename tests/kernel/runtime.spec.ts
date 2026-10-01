@@ -8,6 +8,7 @@ import {
 } from '@/kernel/runtime'
 import { createPluginRuntime } from '@/kernel/runtime/runtime'
 import type { KernelServices } from '@/kernel/runtime/context'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 import { createKvStore, createMemoryEngine, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel/store/kv-store'
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSecretsVault } from '@/kernel/secrets/vault'
@@ -135,9 +136,60 @@ describe('plugin runtime · lifecycle (R-04)', () => {
 
     await expect(runtime.activate('rollback')).rejects.toThrow(PluginActivationError)
     expect(runtime.isActive('rollback')).toBe(false)
-    expect(runtime.stateOf('rollback')).toBe('registered')
+    // M3-err3: a failed activation marks the plugin degraded (was 'registered').
+    expect(runtime.stateOf('rollback')).toBe('degraded')
     expect(getRegisteredSettingsSections().some((section) => section.id === 'rollback:main')).toBe(false)
     expect(runtime.journalOf('rollback').some((entry) => entry.includes('activation failed'))).toBe(true)
+  })
+
+  it('a degraded plugin retries via a fresh activate and recovers to active', async () => {
+    const { services, bus } = makeServices()
+    const runtime = createPluginRuntime(services)
+    const states: string[] = []
+    bus.on('plugin.state.changed', (event) => states.push(`${event.pluginId}:${event.state}`))
+
+    let attempts = 0
+    runtime.load(makeDefinition('retries', {
+      activate: () => {
+        attempts += 1
+        if (attempts === 1) throw new Error('first boot fails')
+      },
+    }))
+    await expect(runtime.activate('retries')).rejects.toThrow(PluginActivationError)
+    expect(runtime.stateOf('retries')).toBe('degraded')
+
+    await runtime.activate('retries')
+    expect(runtime.stateOf('retries')).toBe('active')
+    expect(states).toEqual(['retries:registered', 'retries:degraded', 'retries:active'])
+  })
+
+  it('ctx.diag.record journals into the error hub attributed to the plugin (M3-err3)', async () => {
+    const { services } = makeServices()
+    const runtime = createPluginRuntime(services)
+    errorHub.clear()
+    runtime.load(makeDefinition('diag-user', {
+      activate: (ctx) => {
+        ctx.diag.record({
+          severity: 'warn',
+          action: 'quota_low',
+          message: 'near the quota edge',
+          code: 'MP-PLUGIN-900',
+          context: { used: 90 },
+        })
+      },
+    }))
+    await runtime.activate('diag-user')
+
+    const record = errorHub.all().find((entry) => entry.pluginId === 'diag-user')
+    expect(record).toMatchObject({
+      severity: 'warn',
+      category: 'plugin',
+      action: 'quota_low',
+      message: 'near the quota edge',
+      code: 'MP-PLUGIN-900',
+      pluginId: 'diag-user',
+      context: { used: 90 },
+    })
   })
 
   it('deactivate drains the bag LIFO and runs the own hook afterwards', async () => {

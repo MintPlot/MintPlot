@@ -14,9 +14,9 @@
  *               unload ≡ deactivate; real unloading is defined then.
  *
  * Error isolation: plugin exceptions never take down the kernel; they are
- * journaled and rethrown to the caller. Degraded marking (repeated errors /
- * quota exhaustion) attaches when the M3 pipeline gives the runtime dispatch
- * surfaces to count errors on.
+ * journaled and rethrown to the caller. A failed activation marks the plugin
+ * 'degraded' (M3-err3) and broadcasts the state — the tools-tab entry shows
+ * the 异常 badge and a fresh activate() retries.
  */
 
 import type {
@@ -155,6 +155,11 @@ export function createPluginRuntime(services: KernelServices): PluginRuntime {
           journal(id, `activation rollback error: ${String(rollbackError)}`)
         })
         journal(id, `activation failed: ${String(cause)}`)
+        // M3-err3: the degraded marking lands — a failed activation marks the
+        // plugin degraded (broadcast so the tools-tab entry shows 异常); the
+        // user can retry via a fresh activate (guards only block 'active').
+        found.state = 'degraded'
+        broadcast(id, 'degraded')
         throw new PluginActivationError(id, cause)
       } finally {
         inFlight.delete(id)
