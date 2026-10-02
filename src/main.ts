@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { App as CapacitorApp } from '@capacitor/app'
 import './main.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
@@ -13,6 +14,7 @@ import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createRegexStore } from '@/kernel/regex/regex-store'
 import { createPresetStore } from '@/kernel/presets/preset-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
+import { closeConversation, useChatRoute } from '@/kernel/app/chat-router'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
   CARD_SESSION_STORE_KEY,
@@ -99,6 +101,20 @@ async function bootPlugins(): Promise<void> {
 void bootPlugins()
 
 const app = createApp(App)
+
+// Android back button (M3-w fix): the WebView session history is unreliable
+// on the Android 15 WebView (a bare pushState→back probe never fires
+// popstate), so the hardware back is driven explicitly through the
+// Capacitor App plugin's dispatcher callback — chat open ⇒ close it (the
+// router resets the route and clears the history flag); at the root ⇒ the
+// Android convention of leaving the app.
+void CapacitorApp.addListener('backButton', () => {
+  if (useChatRoute().value.view === 'chat') {
+    closeConversation()
+    return
+  }
+  void CapacitorApp.exitApp()
+})
 app.provide(PLUGIN_RUNTIME_KEY, kernel.runtime)
 app.provide(PLUGIN_SETTINGS_STORE_KEY, kernel.storage)
 app.provide(PLUGIN_BUS_KEY, kernel.services.bus)

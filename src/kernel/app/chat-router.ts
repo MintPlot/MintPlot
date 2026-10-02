@@ -48,7 +48,18 @@ if (hasHistoryApi) {
   // Reload mid-chat: the browser restores the pushed entry's state.
   route.value = routeFromHistoryState(window.history.state)
   window.addEventListener('popstate', (event) => {
-    route.value = routeFromHistoryState(event.state)
+    const next = routeFromHistoryState(event.state)
+    // Residual-entry skip (M3-g follow-up): repeated card open/close piles
+    // stale mpChat entries into the history stack, so one back step can land
+    // on ANOTHER chat entry — the system back must EXIT the chat, not hop
+    // between stacked ones. Keep stepping back until a non-chat entry (the
+    // list entry's null state terminates the walk). Forward navigation to a
+    // chat entry still works (route starts at list there).
+    if (next.view === 'chat' && route.value.view === 'chat') {
+      window.history.back()
+      return
+    }
+    route.value = next
   })
 }
 
@@ -59,9 +70,15 @@ export function openConversation(conversationId: string, kind: SessionKind = 'ch
 }
 
 export function closeConversation(): void {
+  // M3-w fix: direct reset + flag clear. The previous history.back() route
+  // silently broke on the Android 15 WebView (session back-navigation dead —
+  // even a bare pushState→back probe never fired popstate), so the Android
+  // back button is now driven by the Capacitor backButton event (main.ts)
+  // calling THIS. The stale mpChat entry stays in the stack but its flag is
+  // cleared (replaceState) so a stray popstate resolves to the list.
   if (hasHistoryApi && routeFromHistoryState(window.history.state).view === 'chat') {
-    // Consume the pushed entry so gesture-back and the button stay one stack.
-    window.history.back()
+    route.value = { view: 'list' }
+    window.history.replaceState({}, '')
     return
   }
   route.value = { view: 'list' }
