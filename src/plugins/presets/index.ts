@@ -15,12 +15,22 @@
 import { definePlugin } from '@contracts'
 import manifest from './manifest.json'
 import type { PluginManifest } from '@contracts'
+import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 
 const pluginManifest = manifest as PluginManifest
 
 export default definePlugin({
   manifest: pluginManifest,
-  activate() {
-    // Nothing to mount: the store is kernel infra; the toggle is the feature.
+  activate(ctx) {
+    // Management surface (M3-w follow-up, user call): the preset panel folds
+    // into the plugin's own tools-area accordion entry (placement 'plugin',
+    // M3-h IA) instead of a settings-tab section — presets configure the
+    // request pipeline, so they sit with the other pipeline organs.
+    ctx.registerSettingsSection({
+      id: 'presets',
+      title: '预设设置',
+      component: PresetSection,
+      placement: 'plugin',
+    })
   },
 })

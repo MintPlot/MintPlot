@@ -8,5 +8,15 @@
     "description": "分组互斥的提示词条目集：system 角色进系统提示词区、user/assistant 角色作历史前预注入"
   },
   "sessions": [],
-  "permissions": []
+  "permissions": [
+    "settings.section"
+  ],
+  "extensionPoints": {
+    "settings": [
+      {
+        "id": "presets",
+        "title": "预设设置"
+      }
+    ]
+  }
 }

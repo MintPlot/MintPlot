@@ -23,10 +23,11 @@ describe('M0-d 壳骨架', () => {
     expect(wrapper.text()).toContain('插件运行时未接入')
 
     await tabButtons[3]!.trigger('click')
-    // M3-f IA:设置页 = 用户设定 / API 连接与服务 / 变量分析(M3-t) / 提示词预设(M3-w) / 通用设置
-    // (关于与更新随 update-checker 激活入驻,独立挂载下不在场)。
+    // M3-f IA:设置页 = 用户设定 / API 连接与服务 / 变量分析(M3-t) / 通用设置
+    // (提示词预设 M3-w 收进工具页插件条目——用户拍板;关于与更新随
+    // update-checker 激活入驻,独立挂载下不在场)。
     const sectionTitles = wrapper.findAll('h2').map((title) => title.text())
-    expect(sectionTitles).toEqual(['用户设定', 'API 连接与服务', '变量分析', '提示词预设', '通用设置'])
+    expect(sectionTitles).toEqual(['用户设定', 'API 连接与服务', '变量分析', '通用设置'])
 
     wrapper.unmount()
   })
