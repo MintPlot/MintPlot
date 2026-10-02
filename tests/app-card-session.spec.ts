@@ -18,7 +18,8 @@ import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
-import { WORLDBOOK_STORE_KEY } from '@/kernel/app/chat-keys'
+import { createPresetStore } from '@/kernel/presets/preset-store'
+import { WORLDBOOK_STORE_KEY, PRESET_STORE_KEY } from '@/kernel/app/chat-keys'
 import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
@@ -109,6 +110,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
   const characterStore = createCharacterStore(createStorageRepository(createMemoryEngine()))
   const variableStore = createVariableStore(createStorageRepository(createMemoryEngine()))
   const worldbookStore = createWorldbookStore(createStorageRepository(createMemoryEngine()))
+  const presetStore = createPresetStore(createStorageRepository(createMemoryEngine()))
   const projection = createSessionProjection()
   const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
   const seams = createSeamRegistry(() => undefined)
@@ -123,6 +125,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
         [CHARACTER_STORE_KEY as symbol]: characterStore,
         [VARIABLE_STORE_KEY as symbol]: variableStore,
         [WORLDBOOK_STORE_KEY as symbol]: worldbookStore,
+        [PRESET_STORE_KEY as symbol]: presetStore,
         [SEAM_REGISTRY_KEY as symbol]: seams,
         [SESSION_PROJECTION_KEY as symbol]: projection,
         [SETTINGS_STATE_KEY as symbol]: settings,
@@ -133,7 +136,7 @@ function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } 
       },
     },
   })
-  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, worldbookStore, projection, usageCalls, seams, settings }
+  return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, worldbookStore, presetStore, projection, usageCalls, seams, settings }
 }
 
 describe('M3-i · 角色 tab 进卡闭环', () => {
@@ -809,6 +812,38 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 落库纪律:存储楼层保持原样(协议/正则/省略都只是投影)。
     const stored = (await cardSessionStore.get((await characterStore.list())[0]!.id))!
     expect(stored.messages[0]!.content).toContain('<html>')
+    wrapper.unmount()
+  })
+
+  it('预设(M3-w):system 条目前置、预注入消息、宏展开、停用即回到原装配', async () => {
+    const { wrapper, characterStore, presetStore } = mountApp()
+    await presetStore.ensure()
+    // 启用「防重复」(system 角色,默认组)并新建一条 user 预注入。
+    const seedEntries = (await presetStore.get()).entries
+    await presetStore.setEntryEnabled(seedEntries.find((entry) => entry.name === '防重复')!.id, true)
+    await presetStore.addEntry({ name: '测试预注入', content: '{{user}}的预注入', role: 'user' })
+    await characterStore.import({ ...CARD })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    nextReply = '（回复）'
+    await wrapper.find('textarea').setValue('出发')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    const request = streamCalls.at(-1)!
+    // system 条目带名字包装,置顶于系统提示词(数组序,默认组多条启用)。
+    const systemMessage = request.find((message) => message.role === 'system')!
+    expect(systemMessage.content).toContain('[防重复]')
+    // 预注入 user 消息紧跟系统消息,宏已展开({{user}}→用户名,空则消失)。
+    const prefill = request[1]!
+    expect(prefill.role).toBe('user')
+    expect(prefill.content).toContain('的预注入')
+    expect(prefill.content).not.toContain('{{user}}')
     wrapper.unmount()
   })
 

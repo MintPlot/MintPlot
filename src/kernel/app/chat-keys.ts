@@ -13,6 +13,7 @@ import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore } from '@/kernel/variables/variable-store'
 import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import type { RegexStore } from '@/kernel/regex/regex-store'
+import type { PresetStore } from '@/kernel/presets/preset-store'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
 
@@ -30,6 +31,9 @@ export const WORLDBOOK_STORE_KEY: InjectionKey<WorldbookStore> = Symbol('worldbo
 
 /** Regex per-script toggle overrides (M3-v) — card domain only. */
 export const REGEX_STORE_KEY: InjectionKey<RegexStore> = Symbol('regex-store')
+
+/** Prompt presets (M3-w) — app-level configuration, every domain. */
+export const PRESET_STORE_KEY: InjectionKey<PresetStore> = Symbol('preset-store')
 
 /**
  * Host session projection — the card session page activates card-domain

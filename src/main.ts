@@ -11,6 +11,7 @@ import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createRegexStore } from '@/kernel/regex/regex-store'
+import { createPresetStore } from '@/kernel/presets/preset-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
@@ -24,6 +25,7 @@ import {
   VARIABLE_STORE_KEY,
   WORLDBOOK_STORE_KEY,
   REGEX_STORE_KEY,
+  PRESET_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
@@ -32,6 +34,7 @@ import TtsPlugin from '@/plugins/tts'
 import VariablesPlugin from '@/plugins/variables'
 import WorldinfoPlugin from '@/plugins/worldinfo'
 import RegexPlugin from '@/plugins/regex'
+import PresetsPlugin from '@/plugins/presets'
 
 initMpTheme()
 
@@ -59,6 +62,8 @@ const worldbookStore = createWorldbookStore(createStorageRepository(createDefaul
 // Regex per-script toggles (M3-v, `regex:card:*` keys) — the card's verbatim
 // regex scripts ride the extensions block; only overrides live here.
 const regexStore = createRegexStore(createStorageRepository(createDefaultEngine()))
+// Prompt presets (M3-w) — app-level; the seed sync runs on first read.
+const presetStore = createPresetStore(createStorageRepository(createDefaultEngine()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -76,6 +81,7 @@ kernel.runtime.load(VariablesPlugin)
 // engine stays kernel-side; the plugin is the tools-area toggle surface.
 kernel.runtime.load(WorldinfoPlugin)
 kernel.runtime.load(RegexPlugin)
+kernel.runtime.load(PresetsPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
@@ -102,6 +108,7 @@ app.provide(CARD_SESSION_STORE_KEY, cardSessionStore)
 app.provide(VARIABLE_STORE_KEY, variableStore)
 app.provide(WORLDBOOK_STORE_KEY, worldbookStore)
 app.provide(REGEX_STORE_KEY, regexStore)
+app.provide(PRESET_STORE_KEY, presetStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)

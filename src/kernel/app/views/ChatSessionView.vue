@@ -18,6 +18,7 @@ import {
   VARIABLE_STORE_KEY,
   WORLDBOOK_STORE_KEY,
   REGEX_STORE_KEY,
+  PRESET_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { closeConversation } from '@/kernel/app/chat-router'
@@ -59,6 +60,7 @@ import {
   HTML_FLOOR_OMISSION_MARKER,
   projectRegexScripts,
 } from '@/kernel/regex/regex-engine'
+import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 import {
   buildWorldbookInjections,
   projectWorldbook,
@@ -89,6 +91,7 @@ const recordUsage = inject(USAGE_RECORDER_KEY, null)
 const variableStore = inject(VARIABLE_STORE_KEY, null)
 const worldbookStore = inject(WORLDBOOK_STORE_KEY, null)
 const regexStore = inject(REGEX_STORE_KEY, null)
+const presetStore = inject(PRESET_STORE_KEY, null)
 // Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
 // No runtime injected (pure kernel tests) keeps variables active.
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
@@ -118,6 +121,10 @@ const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 const regexActive = ref(true)
 const showRegex = ref(false)
 const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
+// Preset layer (M3-w): app-level; dormant = request assembles exactly as
+// before this slice. The snapshot is replaced wholesale on changes.
+const presetsActive = ref(true)
+const presetSnapshot = shallowRef<PresetSnapshot | null>(null)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
@@ -303,6 +310,12 @@ onMounted(async () => {
     if (regexActive.value) {
       regexDisabledUids.value = (await regexStore?.getDisabled(card.value.id)) ?? new Set()
     }
+    // M3-w: presets are app-level — gate + load once per view mount.
+    const presetState = runtime === null ? 'active' : runtime.stateOf('presets')
+    presetsActive.value = presetState === 'active' || presetState === 'degraded'
+    if (presetsActive.value) {
+      presetSnapshot.value = (await presetStore?.ensure()) ?? null
+    }
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -381,9 +394,33 @@ const expandRequestText = (text: string): string => {
 const buildRequestMessages = (): LlmChatMessage[] => {
   const floors = messages.value
   const result: LlmChatMessage[] = []
+  // M3-w presets: the active group's entries, split by role. system entries
+  // ride the very front of the system prompt; user/assistant entries become
+  // standalone prefill messages right after the system block (RP semantics:
+  // at-depth injections clamp to never land before them).
+  let presetSystemArea = ''
+  const presetPrefills: LlmChatMessage[] = []
+  if (presetsActive.value && presetSnapshot.value) {
+    const activeGroup = presetSnapshot.value.groups.find((group) => group.enabled)?.id ?? 'default'
+    const activeEntries = presetSnapshot.value.entries.filter(
+      (entry) => entry.enabled && entry.content.trim() && entry.group === activeGroup,
+    )
+    const systemEntries = activeEntries.filter((entry) => entry.role === 'system')
+    if (systemEntries.length > 0) {
+      presetSystemArea = systemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
+    }
+    for (const entry of activeEntries) {
+      if (entry.role === 'user' || entry.role === 'assistant') {
+        presetPrefills.push({ role: entry.role, content: entry.content })
+      }
+    }
+  }
   let systemPrompt = isCardDomain.value && card.value
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
+  if (presetSystemArea) {
+    systemPrompt = `${presetSystemArea}\n\n${systemPrompt}`
+  }
   // M3-u worldbook: one artifact per request — activation over the last
   // scanDepth floors, whole-entry budget, seven-position injections. The
   // report feeds the sheet's visibility panel (预算丢弃必须可见).
@@ -455,6 +492,11 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
+  // M3-w: message-role presets ride as standalone prefill messages right
+  // after the system block, in array order (RP prefill slot).
+  for (const prefill of presetPrefills) {
+    result.push({ role: prefill.role, content: expandRequestText(prefill.content) })
+  }
   }
   // M3-v: prompt-side omission switch (D7) — a floor that IS a frontend
   // HTML document is replaced by a marker in the request; display keeps the
@@ -502,8 +544,11 @@ const buildRequestMessages = (): LlmChatMessage[] => {
   }
   // M3-u: at_depth injections splice into the history (depth counts
   // individual messages from the end; never ahead of the system block).
+  // M3-w: at-depth injections clamp to never land before the preset prefills
+  // (RP safeTargetLimit semantics — the 破限 multi-turn order stays intact).
+  const prefillCount = presetPrefills.length
   for (const injection of worldbookAtDepth) {
-    const index = Math.max(1, result.length - injection.depth)
+    const index = Math.max(1 + prefillCount, result.length - injection.depth)
     result.splice(index, 0, { role: 'system', content: injection.content })
   }
   // M3-u: user_top prepends to the last user floor (RP same); assistant_top
