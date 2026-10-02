@@ -8,5 +8,15 @@
     "description": "角色卡会话的状态账本：AI 标签块落账、{{getvar}} 宏展开、聊天页变量面板"
   },
   "sessions": ["card"],
-  "permissions": []
+  "permissions": [
+    "settings.section"
+  ],
+  "extensionPoints": {
+    "settings": [
+      {
+        "id": "variables-analysis",
+        "title": "变量分析"
+      }
+    ]
+  }
 }

@@ -15,15 +15,22 @@
 import { definePlugin } from '@contracts'
 import manifest from './manifest.json'
 import type { PluginManifest } from '@contracts'
+import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
 
 const pluginManifest = manifest as PluginManifest
 
 export default definePlugin({
   manifest: pluginManifest,
-  activate() {
-    // Nothing to mount: the engine/ledger are kernel infra; the toggle is
-    // the feature. (Contract reservation note: variable.set /
-    // variable-expand / card.panel.section stay reserved until the pipeline
-    // artifact-ization batch moves this work behind real ctx capabilities.)
+  activate(ctx) {
+    // Management surface (M3-w follow-up, user call): the 变量分析 settings
+    // panel folds into the plugin's own tools-area accordion entry
+    // (placement 'plugin', same as the presets panel) instead of a
+    // settings-tab kernel section.
+    ctx.registerSettingsSection({
+      id: 'variables-analysis',
+      title: '变量分析',
+      component: TemplateAnalysisSection,
+      placement: 'plugin',
+    })
   },
 })

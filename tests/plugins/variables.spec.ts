@@ -48,7 +48,9 @@ describe('variables · manifest (M3-q2, R-03)', () => {
     expect(manifest.id).toBe('variables')
     expect(manifest.activation).toBe('lazy')
     expect(manifest.sessions).toEqual(['card'])
-    expect(manifest.permissions).toEqual([])
+    // M3-w follow-up: the 变量分析 panel folds into the plugin entry —
+    // settings.section permission + extensionPoints declaration.
+    expect(manifest.permissions).toEqual(['settings.section'])
     expect(manifest.display).toEqual({
       name: '变量系统',
       description: expect.stringContaining('状态账本'),
