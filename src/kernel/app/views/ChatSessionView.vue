@@ -361,16 +361,21 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
 /** v-html render for one floor; streaming floors bypass the LRU (content
  *  changes every flush). The card domain strips variable tag blocks first —
  *  a display projection only, the stored floor keeps them verbatim (review
- *  Q1 落库纪律). M3-v: card regexes then rewrite the display projection
- *  (depth always 0 on this surface; promptOnly scripts skip display). */
+ *  Q1 落库纪律). M3-v: card regexes rewrite the display projection of AI
+ *  floors (depth always 0; promptOnly scripts skip display). User floors
+ *  stay UNstyled (user feedback 2026-10-02): beautification wrappers make
+ *  user bubbles look oversized — card regexes are authored for prose.
+ *  The prompt surface is untouched: placement-[1] promptOnly scripts still
+ *  rewrite user input in the request. */
 const renderFloor = (message: ChatboxMessage): string => {
   let content = message.content
   if (isCardDomain.value && variablesActive.value) content = stripVariableBlocks(content)
-  if (isCardDomain.value && regexActive.value && cardRegexScripts.value.length > 0) {
+  const assistantFloor = message.role === 'assistant'
+  if (isCardDomain.value && regexActive.value && assistantFloor && cardRegexScripts.value.length > 0) {
     content = applyRegexPipeline(content, {
       scripts: cardRegexScripts.value,
       surface: 'display',
-      role: message.role === 'user' ? 'user' : 'assistant',
+      role: 'assistant',
       depth: 0,
       disabledUids: regexDisabledUids.value,
     })

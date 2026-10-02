@@ -797,14 +797,19 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 显示面:开场白是完整 HTML 文档 → 走 M3-n iframe 文档路径,美化不套;
     // 但省略开关只影响提示词,显示保持文档渲染。
     nextReply = '（紧张）回复正文'
-    await wrapper.find('textarea').setValue('你好')
+    await wrapper.find('textarea').setValue('（试探）你好')
     await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
     await flushPromises()
     await nextTick()
 
-    // 显示面:用户楼层「你好」无括号不动;AI 楼层（紧张）→ 心理块 span。
+    // 显示面:AI 楼层（紧张）→ 心理块 span;用户楼层不吃美化(用户反馈:
+    // 美化包裹让用户气泡显得巨大)——即便用户文本含（）。用户输入里的
+    // 括号按普通文本走 markdown 渲染。
     const html = wrapper.html()
     expect(html).toContain('<span class="psy">紧张</span>')
+    const userBubble = wrapper.findAll('.markdown-body').find((node) => node.text().includes('（试探）你好'))
+    expect(userBubble).toBeDefined()
+    expect(userBubble!.html()).not.toContain('class="psy"')
     // 提示词面:开场白 HTML 文档被省略标记替换(默认开);promptOnly 剥离跑过。
     const request = streamCalls.at(-1)!
     const greetingMessage = request.find((message) => message.role === 'assistant' && message.content.includes(HTML_FLOOR_OMISSION_MARKER))!
