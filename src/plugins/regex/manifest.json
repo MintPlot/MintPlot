@@ -1,0 +1,12 @@
+{
+  "id": "regex",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "正则",
+    "description": "卡自带正则：显示面美化、提示词面改写、深度与标志门控"
+  },
+  "sessions": ["card"],
+  "permissions": []
+}

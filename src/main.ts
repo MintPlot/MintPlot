@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
+import { App as CapacitorApp } from '@capacitor/app'
 import './main.css'
 import App from './App.vue'
-import { App as CapacitorApp } from '@capacitor/app'
 import { initMpTheme } from '@/kernel/design/theme'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
@@ -10,10 +10,15 @@ import { createKvStore } from '@/kernel/store/kv-store'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createCharacterStore } from '@/kernel/characters/character-store'
+import { createVariableStore } from '@/kernel/variables/variable-store'
+import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
+import { createRegexStore } from '@/kernel/regex/regex-store'
+import { createPresetStore } from '@/kernel/presets/preset-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
 import { installGlobalErrorHandlers, replayEarlyErrors } from '@/kernel/diagnostics/global-handlers'
 import { installRequestDiagnostics } from '@/kernel/diagnostics/request-diagnostics'
+import { closeConversation, useChatRoute } from '@/kernel/app/chat-router'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
   CARD_SESSION_STORE_KEY,
@@ -23,11 +28,19 @@ import {
   SESSION_PROJECTION_KEY,
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
+  VARIABLE_STORE_KEY,
+  WORLDBOOK_STORE_KEY,
+  REGEX_STORE_KEY,
+  PRESET_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
 import { getUsageStatsService } from '@/plugins/usage-stats/service-instance'
 import TtsPlugin from '@/plugins/tts'
+import VariablesPlugin from '@/plugins/variables'
+import WorldinfoPlugin from '@/plugins/worldinfo'
+import RegexPlugin from '@/plugins/regex'
+import PresetsPlugin from '@/plugins/presets'
 
 initMpTheme()
 
@@ -70,6 +83,17 @@ const chatboxStore = createChatboxStore(createStorageRepository(createDefaultEng
 // and its one-session-per-card conversation store (M3-i, `chat:card:*` keys).
 const characterStore = createCharacterStore(createStorageRepository(createDefaultEngine()))
 const cardSessionStore = createCardSessionStore(createStorageRepository(createDefaultEngine()))
+// Card-session variables ledger (M3-q, `variables:card:*` keys) — card domain
+// only; the chatbox domain never sees variables (review Q4 isolation).
+const variableStore = createVariableStore(createStorageRepository(createDefaultEngine()))
+// Worldbook per-entry toggles (M3-u, `worldinfo:card:*` keys) — the card's
+// verbatim book rides the character record; only overrides live here.
+const worldbookStore = createWorldbookStore(createStorageRepository(createDefaultEngine()))
+// Regex per-script toggles (M3-v, `regex:card:*` keys) — the card's verbatim
+// regex scripts ride the extensions block; only overrides live here.
+const regexStore = createRegexStore(createStorageRepository(createDefaultEngine()))
+// Prompt presets (M3-w) — app-level; the seed sync runs on first read.
+const presetStore = createPresetStore(createStorageRepository(createDefaultEngine()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -80,6 +104,14 @@ const recordUsage = (usage: unknown, meta: Record<string, string>): void => {
 kernel.runtime.load(UpdateCheckerPlugin)
 kernel.runtime.load(UsageStatsPlugin)
 kernel.runtime.load(TtsPlugin)
+// Variables system (M3-q2): the plugin is the management surface (tools-area
+// entry + toggle); engine/ledger stay kernel-side and gate on runtime state.
+kernel.runtime.load(VariablesPlugin)
+// Worldbook (M3-u): same serviceless shape — activation/budget/injection
+// engine stays kernel-side; the plugin is the tools-area toggle surface.
+kernel.runtime.load(WorldinfoPlugin)
+kernel.runtime.load(RegexPlugin)
+kernel.runtime.load(PresetsPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
@@ -106,12 +138,30 @@ void bootPlugins()
 
 const app = createApp(App)
 installGlobalErrorHandlers(app)
+
+// Android back button (M3-w fix): the WebView session history is unreliable
+// on the Android 15 WebView (a bare pushState→back probe never fires
+// popstate), so the hardware back is driven explicitly through the
+// Capacitor App plugin's dispatcher callback — chat open ⇒ close it (the
+// router resets the route and clears the history flag); at the root ⇒ the
+// Android convention of leaving the app.
+void CapacitorApp.addListener('backButton', () => {
+  if (useChatRoute().value.view === 'chat') {
+    closeConversation()
+    return
+  }
+  void CapacitorApp.exitApp()
+})
 app.provide(PLUGIN_RUNTIME_KEY, kernel.runtime)
 app.provide(PLUGIN_SETTINGS_STORE_KEY, kernel.storage)
 app.provide(PLUGIN_BUS_KEY, kernel.services.bus)
 app.provide(CHATBOX_STORE_KEY, chatboxStore)
 app.provide(CHARACTER_STORE_KEY, characterStore)
 app.provide(CARD_SESSION_STORE_KEY, cardSessionStore)
+app.provide(VARIABLE_STORE_KEY, variableStore)
+app.provide(WORLDBOOK_STORE_KEY, worldbookStore)
+app.provide(REGEX_STORE_KEY, regexStore)
+app.provide(PRESET_STORE_KEY, presetStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)

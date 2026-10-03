@@ -16,6 +16,8 @@ import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
 import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
+import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
+import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
 
@@ -57,6 +59,13 @@ disposers.push(
   registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
   // M3-err2: the error hub's troubleshooting face — export is manual only.
   registerSettingsSection('kernel', { id: 'diagnostics', title: '诊断', component: DiagnosticsSection, placement: 'settings' }, 40),
+  // M3-w followups: 变量分析 / 提示词预设 fold into their plugin's tools-area
+  // entry (user call). The HOST registers these under the plugins' ids — the
+  // section components live kernel-side and the red line forbids plugins
+  // importing kernel modules, so the composition root is the legitimate
+  // registration site.
+  registerSettingsSection('variables', { id: 'variables-analysis', title: '变量分析', component: TemplateAnalysisSection, placement: 'plugin' }, 10),
+  registerSettingsSection('presets', { id: 'presets', title: '预设设置', component: PresetSection, placement: 'plugin' }, 10),
 )
 
 onUnmounted(() => {

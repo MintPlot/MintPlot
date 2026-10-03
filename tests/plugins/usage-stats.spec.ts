@@ -157,6 +157,7 @@ describe('usage-stats · service behavior (ported, mock ctx)', () => {
     expect(service.getTokenUsageTypeLabel('summary')).toBe('记忆系统')
     expect(service.getTokenUsageTypeLabel('embedding')).toBe('记忆系统')
     expect(service.getTokenUsageTypeLabel('ui_template')).toBe('变量分析')
+    expect(service.getTokenUsageTypeLabel('ui_template_batch')).toBe('变量分析')
     expect(service.getTokenUsageTypeLabel('anything-else')).toBe('对话')
 
     // The card type still rides the chat category for the filter tabs.

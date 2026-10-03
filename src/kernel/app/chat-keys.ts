@@ -10,6 +10,10 @@ import type { CharacterStore } from '@/kernel/characters/character-store'
 import type { HostSessionProjection } from '@/kernel/sessions/session-projection'
 import type { SeamRegistry } from '@/kernel/runtime/seam-registry'
 import type { SettingsState } from '@/kernel/settings/settings-state'
+import type { VariableStore } from '@/kernel/variables/variable-store'
+import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
+import type { RegexStore } from '@/kernel/regex/regex-store'
+import type { PresetStore } from '@/kernel/presets/preset-store'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
 
@@ -18,6 +22,18 @@ export const CHARACTER_STORE_KEY: InjectionKey<CharacterStore> = Symbol('charact
 
 /** Card-domain session persistence, one session per card (M3-i). */
 export const CARD_SESSION_STORE_KEY: InjectionKey<CardSessionStore> = Symbol('card-session-store')
+
+/** Card-session variables ledger (M3-q) — card domain only, never chatbox. */
+export const VARIABLE_STORE_KEY: InjectionKey<VariableStore> = Symbol('variable-store')
+
+/** Worldbook per-entry toggle overrides (M3-u) — card domain only. */
+export const WORLDBOOK_STORE_KEY: InjectionKey<WorldbookStore> = Symbol('worldbook-store')
+
+/** Regex per-script toggle overrides (M3-v) — card domain only. */
+export const REGEX_STORE_KEY: InjectionKey<RegexStore> = Symbol('regex-store')
+
+/** Prompt presets (M3-w) — app-level configuration, every domain. */
+export const PRESET_STORE_KEY: InjectionKey<PresetStore> = Symbol('preset-store')
 
 /**
  * Host session projection — the card session page activates card-domain

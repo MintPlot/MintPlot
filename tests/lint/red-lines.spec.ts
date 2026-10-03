@@ -7,8 +7,14 @@
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ESLint } from 'eslint'
+
+// Every test here runs real ESLint work (config load + lint); under
+// full-suite parallelism the 5s default wall clock is too tight for the
+// cold config load, so the whole file gets a generous budget. The
+// assertions themselves are unchanged.
+vi.setConfig({ testTimeout: 30_000 })
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -31,10 +37,14 @@ async function lintSnippet(filePath: string, code: string): Promise<string[]> {
 }
 
 describe('red line · kernel zero functional imports (章程 §3.5.4)', () => {
+  // The real-tree scan is CPU-bound ESLint work; under full-suite parallelism
+  // it legitimately needs more than the 5s default wall clock (grows with the
+  // kernel file count — variables/ landed in M3-q). The zero-error assertion
+  // is unchanged.
   it('the real kernel tree lints clean', async () => {
     const errors = await lintTree(['src/kernel/**/*.ts', 'src/kernel/**/*.vue'])
     expect(errors).toEqual([])
-  })
+  }, 30000)
 
   it('canary: kernel importing a plugin is blocked', async () => {
     const messages = await lintSnippet(

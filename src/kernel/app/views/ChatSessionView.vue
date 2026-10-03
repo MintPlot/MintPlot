@@ -5,7 +5,8 @@
 // 示例)+末尾 [User Info]),开场白种为首楼、顶栏「清空重开」为卡域专属。发送 =
 // 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
 // (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
-import { computed, inject, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import type { VariableState } from '@contracts'
 import {
   CARD_SESSION_STORE_KEY,
   CHATBOX_STORE_KEY,
@@ -14,7 +15,12 @@ import {
   SESSION_PROJECTION_KEY,
   SETTINGS_STATE_KEY,
   USAGE_RECORDER_KEY,
+  VARIABLE_STORE_KEY,
+  WORLDBOOK_STORE_KEY,
+  REGEX_STORE_KEY,
+  PRESET_STORE_KEY,
 } from '@/kernel/app/chat-keys'
+import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -27,10 +33,52 @@ import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import '@/kernel/render/html-frame-lifecycle'
 import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
-import { startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { createExecutableHtmlIframe, setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/template-interp'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
+// M3-q variables: tag-block parsing/ledger on the card domain only — the
+// request path expands {{getvar}} + appends the [Variables] section, the
+// display path strips blocks into the floor capsule.
+import {
+  applyTemplateUpdates,
+  expandGetvarMacros,
+  matchTemplateUpdates,
+  parseTemplateUpdateBlocks,
+  parseTemplateUpdatePayload,
+  parseVariableUpdates,
+  readCardVariableDefaults,
+  renderTemplateUpdateSection,
+  renderVariablesSection,
+  stripVariableBlocks,
+} from '@/kernel/variables/variable-engine'
+import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
+import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import {
+  applyRegexPipeline,
+  isFullHtmlDocument,
+  HTML_FLOOR_OMISSION_MARKER,
+  projectRegexScripts,
+} from '@/kernel/regex/regex-engine'
+import type { PresetSnapshot } from '@/kernel/presets/preset-store'
+import {
+  buildWorldbookInjections,
+  projectWorldbook,
+  DEFAULT_SCAN_SETTINGS,
+} from '@/kernel/worldinfo/worldbook-engine'
+import type { WorldbookActivationReport } from '@/kernel/worldinfo/worldbook-engine'
+import {
+  readTemplateAnalysisSettings,
+  renderTemplateStateContext,
+  runTemplateAnalysis,
+  useBatchAnalysis,
+} from '@/kernel/variables/analysis'
+import type { AnalysisFloor } from '@/kernel/variables/analysis'
+import type { CardUiTemplate } from '@/kernel/characters/character-card'
+import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
+import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
+import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -41,6 +89,13 @@ const settingsState = inject(SETTINGS_STATE_KEY, null)
 const projection = inject(SESSION_PROJECTION_KEY, null)
 const seams = inject(SEAM_REGISTRY_KEY, null)
 const recordUsage = inject(USAGE_RECORDER_KEY, null)
+const variableStore = inject(VARIABLE_STORE_KEY, null)
+const worldbookStore = inject(WORLDBOOK_STORE_KEY, null)
+const regexStore = inject(REGEX_STORE_KEY, null)
+const presetStore = inject(PRESET_STORE_KEY, null)
+// Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
+// No runtime injected (pure kernel tests) keeps variables active.
+const runtime = inject(PLUGIN_RUNTIME_KEY, null)
 
 const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
@@ -54,6 +109,158 @@ const loadError = ref('')
 const sendError = ref('')
 const lastUserText = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+// shallowRef — both are replaced wholesale from snapshots (never mutated in
+// place), and Vue's deep UnwrapRef explodes on the recursive VariableValue
+// union (TS2589).
+const variableState = shallowRef<Record<string, VariableState>>({})
+const variableEvents = shallowRef<VariableSnapshot['events']>([])
+const variablesActive = ref(true)
+// Worldbook layer (M3-u): same gating shape as variables — the plugin toggle
+// flips the runtime state; dormant = no scan, no injection, no panel entry.
+const worldbookActive = ref(true)
+const showWorldbook = ref(false)
+const worldbookReport = shallowRef<WorldbookActivationReport | null>(null)
+const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
+// Regex layer (M3-v): same gating shape — dormant = no display rewrite, no
+// prompt rewrite, no panel entry. Card scripts ride extensions verbatim.
+const regexActive = ref(true)
+const showRegex = ref(false)
+const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
+// Preset layer (M3-w): app-level; dormant = request assembles exactly as
+// before this slice. The snapshot is replaced wholesale on changes.
+const presetsActive = ref(true)
+const presetSnapshot = shallowRef<PresetSnapshot | null>(null)
+const showVariables = ref(false)
+const capsuleOpenId = ref<string | null>(null)
+// Secondary-model analysis status (M3-t): surfaced in the variables sheet.
+const analysisStatus = ref('')
+
+/** Enabled card-embedded templates, highest order first (M3-r). Their state
+ *  trees live in the ledger under the template id. */
+const activeTemplates = computed<CardUiTemplate[]>(() =>
+  variablesActive.value && isCardDomain.value
+    ? [...(card.value?.uiTemplates ?? [])].filter((entry) => entry.enabled).sort((a, b) => b.order - a.order)
+    : [])
+
+// M3-u worldbook: the projected entry view (verbatim card data → runtime
+// list); toggles ride worldbookDisabledUids, never the card record.
+const worldbookEntries = computed(() =>
+  isCardDomain.value ? projectWorldbook(card.value?.book) : [])
+
+const toggleWorldbookEntry = async (uid: number): Promise<void> => {
+  const next = new Set(worldbookDisabledUids.value)
+  if (next.has(uid)) next.delete(uid)
+  else next.add(uid)
+  worldbookDisabledUids.value = next
+  if (card.value) await worldbookStore?.setDisabled(card.value.id, next)
+}
+
+// M3-v regex: projected card scripts (verbatim extensions data → runtime
+// list); toggles ride regexDisabledUids, never the card record.
+const cardRegexScripts = computed(() =>
+  isCardDomain.value ? projectRegexScripts(card.value?.extensions?.regex_scripts) : [])
+
+const toggleRegexScript = async (uid: number): Promise<void> => {
+  const next = new Set(regexDisabledUids.value)
+  if (next.has(uid)) next.delete(uid)
+  else next.add(uid)
+  regexDisabledUids.value = next
+  if (card.value) await regexStore?.setDisabled(card.value.id, next)
+}
+
+const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
+  const value = variableState.value[entry.id]?.value
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : entry.initialVariableState
+}
+
+/** Seed rows for a fresh ledger: flat card defaults + each template's initial
+ *  tree under its id (M3-r) — shared by mount-time ensure and 清空重开 reset
+ *  (M3-s fix: reset previously dropped the template trees). */
+const buildVariableDefaults = (): Array<{ name: string; value: VariableState['value'] }> => {
+  if (!card.value) return []
+  return [
+    ...readCardVariableDefaults(card.value.extensions),
+    ...activeTemplates.value.map((entry) => ({
+      name: entry.id,
+      value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
+    })),
+  ]
+}
+
+// M3-s 逐楼快照: panel frames render per floor from the ledger — RP stores an
+// interpolated snapshot on each message, MP re-derives the state at render
+// time (replayTemplateStateAtFloor) so storage stays duplicate-free. Frames
+// ride the same sandboxed-iframe pipeline and ≤3-active-frame budget as M3-n
+// card documents; the gu-class templates are ~78KB, so interpolation results
+// cache by (template, state) and per-floor frames by a ledger/template stamp.
+interface PanelFrame {
+  id: string
+  html: string
+}
+interface FloorPanels {
+  top: PanelFrame[]
+  bottom: PanelFrame[]
+}
+const EMPTY_PANELS: FloorPanels = { top: [], bottom: [] }
+const panelFramesCache = new Map<string, { stamp: string; panels: FloorPanels }>()
+const panelHtmlCache = new Map<string, string>()
+
+const floorIndexOfMessage = (messageId: string): number =>
+  messages.value.findIndex((message) => message.id === messageId)
+
+const renderPanelHtml = (entry: CardUiTemplate, state: Record<string, unknown>): string => {
+  const raw = stripTemplateCodeFence(entry.htmlTemplate)
+  if (!raw || typeof document === 'undefined') return ''
+  const cacheKey = `${entry.id}|${JSON.stringify(state)}`
+  const cached = panelHtmlCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  const container = document.createElement('div')
+  container.appendChild(createExecutableHtmlIframe(renderTemplateString(raw, state)))
+  const html = container.innerHTML
+  if (panelHtmlCache.size >= 32) panelHtmlCache.clear()
+  panelHtmlCache.set(cacheKey, html)
+  return html
+}
+
+const floorPanels = (message: ChatboxMessage): FloorPanels => {
+  if (!isCardDomain.value || !variablesActive.value) return EMPTY_PANELS
+  if (message.role !== 'assistant' || isStreamingFloor(message)) return EMPTY_PANELS
+  if (activeTemplates.value.length === 0) return EMPTY_PANELS
+  const targetFloor = messages.value.indexOf(message)
+  if (targetFloor < 0) return EMPTY_PANELS
+  // The reads below feed Vue's reactivity: ledger/template changes re-render.
+  const stamp = `${variableEvents.value.length}|${messages.value.length}|${activeTemplates.value.length}`
+  const cached = panelFramesCache.get(message.id)
+  if (cached && cached.stamp === stamp) return cached.panels
+  const panels: FloorPanels = { top: [], bottom: [] }
+  for (const entry of activeTemplates.value) {
+    const tree = replayTemplateStateAtFloor(
+      variableEvents.value,
+      entry.id,
+      entry.initialVariableState as VariableState['value'],
+      floorIndexOfMessage,
+      targetFloor,
+    )
+    const state = typeof tree === 'object' && tree !== null && !Array.isArray(tree)
+      ? (tree as Record<string, unknown>)
+      : entry.initialVariableState
+    const html = renderPanelHtml(entry, state)
+    if (!html) continue
+    const frame: PanelFrame = { id: entry.id, html }
+    if (entry.placement === 'top') panels.top.push(frame)
+    else panels.bottom.push(frame)
+  }
+  panelFramesCache.set(message.id, { stamp, panels })
+  return panels
+}
+
+const floorHasPanels = (message: ChatboxMessage): boolean => {
+  const panels = floorPanels(message)
+  return panels.top.length > 0 || panels.bottom.length > 0
+}
+
 let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
@@ -70,8 +277,13 @@ const scrollToBottom = async (): Promise<void> => {
 }
 
 onMounted(async () => {
-  // Card-reported frame heights arrive via postMessage (idempotent install).
+  // Card-reported frame heights arrive via postMessage (idempotent install);
+  // panel buttons ride the same channel (M3-t): a trigger sends a user turn —
+  // rejected while a reply is streaming (RP same discipline).
   startExecutableFrameHost()
+  setExecutableFrameSlashHandler((command) => {
+    if (!streaming.value) void send(command)
+  })
   if (isCardDomain.value) {
     if (!cardSessions || !characterStore) {
       loadError.value = '会话存储未接入'
@@ -87,6 +299,38 @@ onMounted(async () => {
     cardSession.value = (await cardSessions.get(props.conversationId)) ?? (await cardSessions.create(card.value))
     // 卡域投影真实化(TTS 零改动生效):挂载即报卡名与实时楼层。
     projection?.setActiveCardSession({ cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages })
+    // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)——插件停用时
+    // 整体休眠:不播种、不解析、不展开、不注入、面板入口隐藏;账本数据不动。
+    const pluginState = runtime === null ? 'active' : runtime.stateOf('variables')
+    variablesActive.value = pluginState === 'active' || pluginState === 'degraded'
+    // M3-u: the worldbook layer gates on its own plugin the same way.
+    const worldinfoState = runtime === null ? 'active' : runtime.stateOf('worldinfo')
+    worldbookActive.value = worldinfoState === 'active' || worldinfoState === 'degraded'
+    if (worldbookActive.value) {
+      worldbookDisabledUids.value = (await worldbookStore?.getDisabled(card.value.id)) ?? new Set()
+    }
+    // M3-v: regex layer gates on its own plugin the same way.
+    const regexState = runtime === null ? 'active' : runtime.stateOf('regex')
+    regexActive.value = regexState === 'active' || regexState === 'degraded'
+    if (regexActive.value) {
+      regexDisabledUids.value = (await regexStore?.getDisabled(card.value.id)) ?? new Set()
+    }
+    // M3-w: presets are app-level — gate + load once per view mount.
+    const presetState = runtime === null ? 'active' : runtime.stateOf('presets')
+    presetsActive.value = presetState === 'active' || presetState === 'degraded'
+    if (presetsActive.value) {
+      presetSnapshot.value = (await presetStore?.ensure()) ?? null
+    }
+    if (variablesActive.value) {
+      // Seed = flat card defaults (mp_variables) + each template's initial
+      // tree under its id (M3-r). First touch only; later ensures keep the
+      // running ledger.
+      const variableSnapshot = await variableStore?.ensure(card.value.id, buildVariableDefaults())
+      if (variableSnapshot) {
+        variableState.value = variableSnapshot.state
+        variableEvents.value = variableSnapshot.events
+      }
+    }
   } else {
     if (!store) {
       loadError.value = '会话存储未接入'
@@ -99,6 +343,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  setExecutableFrameSlashHandler(null)
   projection?.setActiveCardSession(null)
 })
 
@@ -119,32 +364,273 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
   streaming.value && message.role === 'assistant' && message === messages.value[messages.value.length - 1]
 
 /** v-html render for one floor; streaming floors bypass the LRU (content
- *  changes every flush). */
-const renderFloor = (message: ChatboxMessage): string =>
-  renderMessageHtml(message.content, macroContext.value, !isStreamingFloor(message))
+ *  changes every flush). The card domain strips variable tag blocks first —
+ *  a display projection only, the stored floor keeps them verbatim (review
+ *  Q1 落库纪律). M3-v: card regexes rewrite the display projection of AI
+ *  floors (depth always 0; promptOnly scripts skip display). User floors
+ *  stay UNstyled (user feedback 2026-10-02): beautification wrappers make
+ *  user bubbles look oversized — card regexes are authored for prose.
+ *  The prompt surface is untouched: placement-[1] promptOnly scripts still
+ *  rewrite user input in the request. */
+const renderFloor = (message: ChatboxMessage): string => {
+  let content = message.content
+  if (isCardDomain.value && variablesActive.value) content = stripVariableBlocks(content)
+  const assistantFloor = message.role === 'assistant'
+  if (isCardDomain.value && regexActive.value && assistantFloor && cardRegexScripts.value.length > 0) {
+    content = applyRegexPipeline(content, {
+      scripts: cardRegexScripts.value,
+      surface: 'display',
+      role: 'assistant',
+      depth: 0,
+      disabledUids: regexDisabledUids.value,
+    })
+  }
+  return renderMessageHtml(content, macroContext.value, !isStreamingFloor(message))
+}
 
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
+
+// M3-q request-side expansion chain (card domain): {{getvar}} → char/user
+// macros. The chatbox domain keeps the M3-n macro pass only — variables
+// never enter it (review Q4), so {{getvar}} stays literal there. The plugin
+// toggle (M3-q2) puts the whole variable layer to sleep.
+const expandRequestText = (text: string): string => {
+  const withVariables = isCardDomain.value && variablesActive.value
+    ? expandGetvarMacros(text, (name) => variableState.value[name]?.value)
+    : text
+  return replaceCardMacros(withVariables, macroContext.value)
+}
 
 const buildRequestMessages = (): LlmChatMessage[] => {
   const floors = messages.value
   const result: LlmChatMessage[] = []
-  const systemPrompt = isCardDomain.value && card.value
+  // M3-w presets: the active group's entries, split by role. system entries
+  // ride the very front of the system prompt; user/assistant entries become
+  // standalone prefill messages right after the system block (RP semantics:
+  // at-depth injections clamp to never land before them).
+  let presetSystemArea = ''
+  const presetPrefills: LlmChatMessage[] = []
+  if (presetsActive.value && presetSnapshot.value) {
+    const activeGroup = presetSnapshot.value.groups.find((group) => group.enabled)?.id ?? 'default'
+    const activeEntries = presetSnapshot.value.entries.filter(
+      (entry) => entry.enabled && entry.content.trim() && entry.group === activeGroup,
+    )
+    const systemEntries = activeEntries.filter((entry) => entry.role === 'system')
+    if (systemEntries.length > 0) {
+      presetSystemArea = systemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
+    }
+    for (const entry of activeEntries) {
+      if (entry.role === 'user' || entry.role === 'assistant') {
+        presetPrefills.push({ role: entry.role, content: entry.content })
+      }
+    }
+  }
+  let systemPrompt = isCardDomain.value && card.value
     ? buildCardSystemPrompt(card.value, readUserInfo())
     : conversation.value?.systemPrompt.trim() ?? ''
+  if (presetSystemArea) {
+    systemPrompt = `${presetSystemArea}\n\n${systemPrompt}`
+  }
+  // M3-u worldbook: one artifact per request — activation over the last
+  // scanDepth floors, whole-entry budget, seven-position injections. The
+  // report feeds the sheet's visibility panel (预算丢弃必须可见).
+  let worldbookSystemArea = ''
+  const worldbookBeforeChar: string[] = []
+  const worldbookAtDepth: Array<{ depth: number; content: string }> = []
+  if (isCardDomain.value && worldbookActive.value && card.value?.book) {
+    // Settings live in mp_settings (sheet exposes 预算/扫描深度); clamp here.
+    const scope = settingsState?.scope(['worldInfoTokenBudget', 'worldInfoScanDepth'])
+    const settings = {
+      ...DEFAULT_SCAN_SETTINGS,
+      tokenBudget: Math.max(0, Math.round(Number(scope?.worldInfoTokenBudget ?? 4000)) || 0),
+      scanDepth: Math.min(20, Math.max(1, Math.round(Number(scope?.worldInfoScanDepth ?? 2)) || 2)),
+    }
+    const scanText = floors
+      .filter((message) => message.role !== 'system')
+      .slice(-Math.max(1, settings.scanDepth))
+      .map((message) => stripVariableBlocks(message.content))
+      .join('\n')
+    const artifact = buildWorldbookInjections({
+      book: card.value.book,
+      scanText,
+      turnSeed: floors.length,
+      settings,
+      disabledUids: worldbookDisabledUids.value,
+    })
+    worldbookReport.value = artifact
+    const systemArea = artifact.injections.filter(
+      (injection) => injection.position === 'system_top' || injection.position === 'global_note',
+    )
+    // system_top rides the very top; global_note after it, still ahead of the
+    // character block (RP prompt order). `global_note` ignores depth (D5).
+    if (systemArea.length > 0) {
+      worldbookSystemArea = systemArea.map((injection) => injection.content).join('\n\n')
+    }
+    for (const injection of artifact.injections) {
+      if (injection.position === 'before_char') worldbookBeforeChar.push(injection.content)
+      else if (injection.position === 'at_depth') worldbookAtDepth.push({ depth: injection.depth, content: injection.content })
+    }
+  }
+  if (worldbookBeforeChar.length > 0) {
+    systemPrompt = `${worldbookBeforeChar.join('\n\n')}\n\n${systemPrompt}`
+  }
+  if (worldbookSystemArea) {
+    systemPrompt = `${worldbookSystemArea}\n\n${systemPrompt}`
+  }
+  // M3-q: the flat variables artifact section rides the system-prompt tail
+  // (review Q5 compact line form). The M3-r template update section does NOT
+  // ride here anymore — M3-s moves it to the very last message (RP's
+  // "[Instructions for next message]" placement: the final instruction wins,
+  // a system-prompt tail drowns in long prompts).
+  if (isCardDomain.value && variablesActive.value) {
+    const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
+    const flatState = Object.fromEntries(
+      Object.entries(variableState.value).filter(([name]) => !templateIds.has(name)),
+    )
+    const variablesSection = renderVariablesSection(flatState)
+    if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
+    // M3-t sub-model mode: the state snapshot rides the system prompt (read
+    // only — the model never writes variables in this mode); the main-model
+    // update instruction is NOT appended in this mode.
+    const analysisSettings = readTemplateAnalysisSettings(settingsState)
+    if (activeTemplates.value.length > 0 && !analysisSettings.mainModelAnalysis && analysisSettings.injectContext) {
+      const context = renderTemplateStateContext(
+        activeTemplates.value.map((entry) => ({ name: entry.name, state: templateStateOf(entry) })),
+      )
+      if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
+    }
+  }
   if (systemPrompt.trim()) {
-    result.push({ role: 'system', content: systemPrompt })
+    result.push({ role: 'system', content: expandRequestText(systemPrompt) })
+  // M3-w: message-role presets ride as standalone prefill messages right
+  // after the system block, in array order (RP prefill slot).
+  for (const prefill of presetPrefills) {
+    result.push({ role: prefill.role, content: expandRequestText(prefill.content) })
+  }
+  }
+  // M3-v: prompt-side omission switch (D7) — a floor that IS a frontend
+  // HTML document is replaced by a marker in the request; display keeps the
+  // iframe. Default on (the card's lore lives in the worldbook; the markup
+  // itself is pure request weight). Off = verbatim floors.
+  const promptOmitHtml = isCardDomain.value && regexActive.value
+    ? settingsState?.scope(['promptOmitHtmlFloors']).promptOmitHtmlFloors !== false
+    : false
+  const promptScripts = isCardDomain.value && regexActive.value ? cardRegexScripts.value : []
+  const rewritePromptFloor = (content: string, role: 'user' | 'assistant', depth: number): string => {
+    let next = isCardDomain.value && variablesActive.value ? stripVariableBlocks(content) : content
+    if (promptOmitHtml && isFullHtmlDocument(next)) return HTML_FLOOR_OMISSION_MARKER
+    if (promptScripts.length > 0) {
+      next = applyRegexPipeline(next, {
+        scripts: promptScripts,
+        surface: 'prompt',
+        role,
+        depth,
+        disabledUids: regexDisabledUids.value,
+      })
+    }
+    return next
   }
   // RP 开场白保险:历史首楼不再是开场白时,请求里补注入(历史本身不改写)。
   if (isCardDomain.value && card.value && greetingFloorMissing(floors, card.value.firstMes)) {
-    result.push({ role: 'assistant', content: card.value.firstMes })
+    result.push({ role: 'assistant', content: expandRequestText(rewritePromptFloor(card.value.firstMes, 'assistant', floors.length)) })
   }
-  for (const message of floors) {
+  for (let index = 0; index < floors.length; index += 1) {
+    const message = floors[index]!
     if (message.role === 'system') continue
+    // M3-s: protocol blocks stay out of the model's context too — RP strips
+    // them from message content at parse time, and the ecosystem regex
+    // convention is display+prompt double-strip. The stored floor keeps them
+    // verbatim; this strips the request projection only.
+    // M3-v: omission marker / card regexes then rewrite the prompt
+    // projection (depth anchored from the end, 0 = last floor).
+    const content = rewritePromptFloor(
+      message.content,
+      message.role === 'user' ? 'user' : 'assistant',
+      floors.length - 1 - index,
+    )
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
-    result.push({ role: message.role, content: replaceCardMacros(message.content, macroContext.value) })
+    result.push({ role: message.role, content: expandRequestText(content) })
+  }
+  // M3-u: at_depth injections splice into the history (depth counts
+  // individual messages from the end; never ahead of the system block).
+  // M3-w: at-depth injections clamp to never land before the preset prefills
+  // (RP safeTargetLimit semantics — the 破限 multi-turn order stays intact).
+  const prefillCount = presetPrefills.length
+  for (const injection of worldbookAtDepth) {
+    const index = Math.max(1 + prefillCount, result.length - injection.depth)
+    result.splice(index, 0, { role: 'system', content: injection.content })
+  }
+  // M3-u: user_top prepends to the last user floor (RP same); assistant_top
+  // rides the trailing system-note channel — BEFORE the template instruction,
+  // which stays the true last message (final instruction wins).
+  let lastUserIndex = -1
+  for (let index = result.length - 1; index >= 0; index -= 1) {
+    if (result[index]?.role === 'user') {
+      lastUserIndex = index
+      break
+    }
+  }
+  const userTop = worldbookReport.value?.injections.find((injection) => injection.position === 'user_top')
+  if (lastUserIndex >= 0 && userTop) {
+    result[lastUserIndex] = { role: 'user', content: `${userTop.content}\n${result[lastUserIndex]!.content}` }
+  }
+  const assistantTop = worldbookReport.value?.injections.find((injection) => injection.position === 'assistant_top')
+  if (assistantTop) {
+    result.push({ role: 'system', content: `[Instructions for next message]\n${assistantTop.content}` })
+  }
+  if (isCardDomain.value && variablesActive.value && readTemplateAnalysisSettings(settingsState).mainModelAnalysis) {
+    const templateSection = renderTemplateUpdateSection(
+      activeTemplates.value.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        currentVariables: templateStateOf(entry),
+        variableSchema: entry.variableSchema,
+      })),
+    )
+    if (templateSection) {
+      result.push({ role: 'system', content: `[Instructions for next message]\n${templateSection}` })
+    }
   }
   return result
+}
+
+// Floor capsule (review Q6) — LEDGER-DRIVEN (M3-r lesson: counting parsed
+// fields lies when the allow-list rejects them). A floor shows what the
+// ledger actually recorded for it: flat events as 「名 → 值」, template
+// events as one 「面板·名 → 已更新」 line each.
+const floorVariableSummary = (message: ChatboxMessage): { flat: Array<{ name: string; value: string }>; templateLines: string[]; total: number } => {
+  if (!isCardDomain.value || !variablesActive.value || message.role !== 'assistant') {
+    return { flat: [], templateLines: [], total: 0 }
+  }
+  const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
+  const templateNames = new Map(activeTemplates.value.map((entry) => [entry.id, entry.name] as const))
+  const flat: Array<{ name: string; value: string }> = []
+  const templateLines: string[] = []
+  for (const event of variableEvents.value) {
+    if (event.messageId !== message.id) continue
+    if (templateIds.has(event.name)) {
+      templateLines.push(`${templateNames.get(event.name) ?? event.name} → 已更新`)
+    } else {
+      // Not String() — its overload resolution explodes on the recursive
+      // VariableValue union (TS2589, same as Array.find).
+      const after = event.after
+      flat.push({
+        name: event.name,
+        value: after === null ? '已删除' : typeof after === 'object' ? JSON.stringify(after) : String(after),
+      })
+    }
+  }
+  return { flat, templateLines, total: flat.length + templateLines.length }
+}
+
+const toggleCapsule = (messageId: string): void => {
+  capsuleOpenId.value = capsuleOpenId.value === messageId ? null : messageId
+}
+
+const onVariablesChanged = (snapshot: VariableSnapshot): void => {
+  variableState.value = snapshot.state
+  variableEvents.value = snapshot.events
 }
 
 const persistSession = async (): Promise<void> => {
@@ -157,8 +643,110 @@ const stopStreaming = (): void => {
   abortController = null
 }
 
+// Shared ledger chain for parsed template-update entries (main-model blocks
+// and analysis replies both land here): route → deep-merge → whitelist →
+// floor-attributed event. Returns how many templates were matched.
+const applyMatchedTemplateUpdates = async (
+  parsed: ParsedTemplateUpdate[],
+  messageId: string,
+): Promise<number> => {
+  let matched = 0
+  for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
+    matched += 1
+    const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
+      initial: template.initialVariableState,
+      schema: template.variableSchema,
+    })
+    if (result.rejectedKeys.length > 0) {
+      console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
+    }
+    if (result.changedKeys.length === 0) continue
+    const snapshot = await variableStore?.apply(card.value!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
+      source: 'ai',
+      messageId,
+    })
+    if (snapshot) {
+      variableState.value = snapshot.state
+      variableEvents.value = snapshot.events
+    }
+  }
+  return matched
+}
+
+// M3-t secondary-model analysis: fallback when the main-model mode produced
+// no routable block, mandatory in sub-model mode. Recent floors, the card's
+// own schema and a decoupled token budget ride the same OpenAI-compatible
+// endpoint; parsing/routing/application reuse the block path above.
+const runTemplateAnalysisPipeline = async (targetFloor: ChatboxMessage, force = false): Promise<void> => {
+  if (!card.value || !settingsState) return
+  const settings = readTemplateAnalysisSettings(settingsState)
+  if (!settings.analysisModel) {
+    analysisStatus.value = '未配置分析模型'
+    return
+  }
+  const scope = settingsState.scope(['apiBaseUrl', 'apiKey'])
+  const analysisTemplates = activeTemplates.value.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    currentVariables: templateStateOf(entry),
+    variableSchema: entry.variableSchema,
+  }))
+  const depth = settings.analysisDepth
+  const recentFloors: AnalysisFloor[] = messages.value
+    .filter((message) => message.role !== 'system' && message.id !== targetFloor.id)
+    .slice(-depth)
+    .map((message) => ({
+      role: message.role as 'user' | 'assistant',
+      name: message.role === 'user' ? readUserInfo().name : card.value!.name,
+      content: stripVariableBlocks(message.content),
+    }))
+  const config = {
+    baseUrl: String(scope.apiBaseUrl ?? ''),
+    apiKey: String(scope.apiKey ?? ''),
+    model: settings.analysisModel,
+    temperature: 0.2,
+    maxTokens: settings.maxOutputTokens,
+    jsonMode: settings.jsonMode,
+  }
+  analysisStatus.value = '分析中…'
+  try {
+    const outcome = await runTemplateAnalysis({
+      config,
+      templates: analysisTemplates,
+      recentFloors,
+      userInfo: buildUserInfoLine(),
+      batch: useBatchAnalysis(settings, analysisTemplates.length),
+      force,
+      onUsage: (usage, meta) => {
+        if (usage) recordUsage?.(usage, meta)
+      },
+    })
+    let changed = 0
+    for (const reply of outcome.replies) {
+      try {
+        changed += await applyMatchedTemplateUpdates(parseTemplateUpdatePayload(reply.content), targetFloor.id)
+      } catch {
+        // Malformed analysis JSON is skipped — same tolerance as block path.
+      }
+    }
+    analysisStatus.value = outcome.failedTemplates > 0
+      ? `${outcome.failedTemplates} 个失败${outcome.firstError ? `：${outcome.firstError.slice(0, 80)}` : ''}`
+      : changed > 0
+        ? `更新 ${changed} 项`
+        : '无变化'
+  } catch (error) {
+    analysisStatus.value = `分析失败：${(error as Error)?.message || '未知错误'}`
+  }
+}
+
+const buildUserInfoLine = (): string => {
+  const { name, persona } = readUserInfo()
+  return [name ? `用户名字：${name}` : '', persona ? `用户人设：${persona}` : ''].filter(Boolean).join('\n')
+}
+
 /** The streaming half of a turn: assistant floor, provider stream, usage
- *  attribution. Retries reuse the persisted user floor (no duplicate). */
+ *  attribution, ledger writes. Retries reuse the persisted user floor (no
+ *  duplicate). */
 const runAssistantTurn = async (): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!provider) return
@@ -195,6 +783,47 @@ const runAssistantTurn = async (): Promise<void> => {
           : { detail: conversation.value?.title ?? '' }),
       })
     }
+    if (isCardDomain.value && card.value && variablesActive.value && assistantFloor.content) {
+      // M3-q/M3-r: the reply's variable blocks become ledger events
+      // (source=ai, floor-attributed) — flat setvars/StatData entries and
+      // template-bound ui_template_updates trees alike. Storage failures
+      // must never fail the finished floor; malformed blocks were ignored
+      // by the parsers.
+      let matchedTemplateCount = 0
+      try {
+        const { updates } = parseVariableUpdates(assistantFloor.content)
+        if (updates.length > 0) {
+          const snapshot = await variableStore?.apply(card.value.id, updates, { source: 'ai', messageId: assistantFloor.id })
+          if (snapshot) {
+            variableState.value = snapshot.state
+            variableEvents.value = snapshot.events
+          }
+        }
+        const blocks = parseTemplateUpdateBlocks(assistantFloor.content)
+        if (blocks.length > 0 && activeTemplates.value.length > 0) {
+          const parsed = blocks.flatMap((body) => {
+            try {
+              return parseTemplateUpdatePayload(body)
+            } catch {
+              return []
+            }
+          })
+          matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, assistantFloor.id)
+        }
+      } catch (error) {
+        console.error('[variables] failed to record AI-side updates:', error)
+      }
+      // M3-t: sub-model mode analyzes every reply; main-model mode falls
+      // back only when no block was found or none routed to a template.
+      if (activeTemplates.value.length > 0) {
+        const analysisSettings = readTemplateAnalysisSettings(settingsState)
+        if (!analysisSettings.mainModelAnalysis) {
+          await runTemplateAnalysisPipeline(assistantFloor)
+        } else if (matchedTemplateCount === 0 && analysisSettings.analysisModel) {
+          await runTemplateAnalysisPipeline(assistantFloor)
+        }
+      }
+    }
   } catch (error) {
     if (!controller.signal.aborted) {
       const message = (error as Error)?.message || '未知错误'
@@ -223,10 +852,12 @@ const runAssistantTurn = async (): Promise<void> => {
   }
 }
 
-const send = async (): Promise<void> => {
+const send = async (overrideText?: string): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!sessionLoaded.value || !provider) return
-  const text = draft.value.trim()
+  // Panel-button triggers (M3-t bridge) pass the command directly; the normal
+  // path sends the draft. Both share the streaming guard.
+  const text = (typeof overrideText === 'string' ? overrideText : draft.value).trim()
   if (!text || streaming.value) return
 
   const now = Date.now()
@@ -237,7 +868,7 @@ const send = async (): Promise<void> => {
     conversation.value.title = text.slice(0, 24)
   }
   await persistSession()
-  draft.value = ''
+  if (typeof overrideText !== 'string') draft.value = ''
   sendError.value = ''
   lastUserText.value = text
   await scrollToBottom()
@@ -261,6 +892,13 @@ const restartSession = async (): Promise<void> => {
   if (!confirmed) return
   stopStreaming()
   cardSession.value = await cardSessions.reset(card.value)
+  // M3-q/M3-s: 清空重开 resets the ledger to a fresh full seed — flat card
+  // defaults AND the template trees (previously only the flat rows were
+  // re-seeded and template panels fell back to card initial state).
+  if (variablesActive.value) {
+    const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
+    if (variableSnapshot) variableState.value = variableSnapshot.state
+  }
   await scrollToBottom()
 }
 </script>
@@ -304,6 +942,30 @@ const restartSession = async (): Promise<void> => {
         {{ title }}
       </h1>
       <button
+        v-if="isCardDomain && variablesActive"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showVariables = true"
+      >
+        变量
+      </button>
+      <button
+        v-if="isCardDomain && worldbookActive && worldbookEntries.length > 0"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showWorldbook = true"
+      >
+        世界书
+      </button>
+      <button
+        v-if="isCardDomain && regexActive && cardRegexScripts.length > 0"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showRegex = true"
+      >
+        正则
+      </button>
+      <button
         v-if="isCardDomain"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-3 active:text-danger"
@@ -344,13 +1006,50 @@ const restartSession = async (): Promise<void> => {
                 message.role === 'user'
                   ? 'rounded-bubble-user bg-primary text-on-primary'
                   : 'border border-line bg-card text-ink',
-                floorUsesHtmlFrame(message) ? 'w-full max-w-none' : 'max-w-[85%]',
+                floorUsesHtmlFrame(message) || floorHasPanels(message) ? 'w-full max-w-none' : 'max-w-[85%]',
               ]"
             >
-              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline) -->
+              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline); panels are replay-interpolated card templates in the same sandbox -->
+              <div
+                v-for="frame in floorPanels(message).top"
+                :key="`top-${frame.id}`"
+                class="mp-panel-frame"
+                v-html="frame.html"
+              />
               <div
                 class="markdown-body"
                 v-html="renderFloor(message)"
+              />
+              <button
+                v-if="floorVariableSummary(message).total > 0"
+                type="button"
+                class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg px-2 py-0.5 text-[10px] text-ink-2"
+                @click="toggleCapsule(message.id)"
+              >
+                ⚙ 变量 ×{{ floorVariableSummary(message).total }}
+              </button>
+              <div
+                v-if="capsuleOpenId === message.id"
+                class="mt-1 rounded-input border border-line bg-bg px-2 py-1 text-[10px] text-ink-2"
+              >
+                <div
+                  v-for="update in floorVariableSummary(message).flat"
+                  :key="update.name"
+                >
+                  {{ update.name }} → {{ update.value }}
+                </div>
+                <div
+                  v-for="line in floorVariableSummary(message).templateLines"
+                  :key="line"
+                >
+                  面板·{{ line }}
+                </div>
+              </div>
+              <div
+                v-for="frame in floorPanels(message).bottom"
+                :key="`bottom-${frame.id}`"
+                class="mp-panel-frame"
+                v-html="frame.html"
               />
               <!-- eslint-enable vue/no-v-html -->
               <span
@@ -394,7 +1093,7 @@ const restartSession = async (): Promise<void> => {
             rows="1"
             placeholder="输入…"
             class="max-h-32 min-h-[44px] flex-1 resize-none rounded-input border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-primary"
-            @keydown.enter.exact.prevent="send"
+            @keydown.enter.exact.prevent="send()"
           />
           <button
             v-if="streaming"
@@ -409,17 +1108,59 @@ const restartSession = async (): Promise<void> => {
             type="button"
             class="min-h-[44px] rounded-input bg-primary px-4 text-sm font-bold text-on-primary disabled:opacity-40"
             :disabled="!draft.trim()"
-            @click="send"
+            @click="send()"
           >
             发送
           </button>
         </div>
       </footer>
     </template>
+
+    <VariablesSheet
+      v-if="isCardDomain && showVariables && card"
+      :card-id="card.id"
+      :templates="activeTemplates"
+      :analysis-status="analysisStatus"
+      @changed="onVariablesChanged"
+      @close="showVariables = false"
+      @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
+    />
+
+    <WorldbookSheet
+      v-if="isCardDomain && showWorldbook"
+      :entries="worldbookEntries"
+      :disabled-uids="worldbookDisabledUids"
+      :report="worldbookReport"
+      @toggle="toggleWorldbookEntry"
+      @close="showWorldbook = false"
+    />
+
+    <RegexSheet
+      v-if="isCardDomain && showRegex"
+      :scripts="cardRegexScripts"
+      :disabled-uids="regexDisabledUids"
+      @toggle="toggleRegexScript"
+      @close="showRegex = false"
+    />
   </div>
 </template>
 
 <style scoped>
+/* M3-s panel frames: full-width slots above/below the floor text; the inner
+ * iframe is created via v-html so it needs a deep rule (v-html content is
+ * outside scoped-data attributes). */
+.mp-panel-frame {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+.mp-panel-frame:first-child {
+  margin-top: 0;
+}
+.mp-panel-frame :deep(iframe.executable-html-frame) {
+  width: 100%;
+  display: block;
+  border: 0;
+}
 /* Minimal markdown presentation inside bubbles — Tailwind preflight strips
  * the browser defaults marked output relies on (RP ships a markdown-body
  * theme; this is the MP minimal equivalent). */

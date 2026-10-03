@@ -62,6 +62,17 @@ const SHIM_SCRIPT = `
             var m = r && (r.message || r);
             postToHost({ type: 'card-error', message: String(m || 'rejection').slice(0, 200) });
         });
+        document.addEventListener('click', function(event) {
+            var node = event.target;
+            while (node && node !== document.body) {
+                if (node.getAttribute && node.getAttribute('data-slash')) {
+                    event.preventDefault();
+                    window.triggerSlash(node.getAttribute('data-slash'));
+                    return;
+                }
+                node = node.parentNode;
+            }
+        }, true);
         var lastHeight = 0;
         function measureHeight() {
             var body = document.body;
@@ -134,15 +145,30 @@ function findExecutableFrameByWindow(sourceWindow: Window | null): HTMLIFrameEle
 
 let hostStarted = false
 
+/** Slash-trigger bridge (M3-t): the chat view registers a handler so a card
+ *  panel button (`window.triggerSlash` / `data-slash`) can send a user turn.
+ *  Auth is unchanged — only frames attached to this document are served. */
+type SlashTriggerHandler = (command: string) => void
+let slashHandler: SlashTriggerHandler | null = null
+
+export function setExecutableFrameSlashHandler(handler: SlashTriggerHandler | null): void {
+  slashHandler = handler
+}
+
+/** Test/inspection seam: the handler the active chat view registered. */
+export function getExecutableFrameSlashHandler(): SlashTriggerHandler | null {
+  return slashHandler
+}
+
 /** Idempotent: installs the postMessage listener that applies card-reported
- *  heights (capped by the runtime policy) and journals card-script errors
- *  (M3-err1, MP-CARD-001) into the error hub. Focus/slash payloads are
- *  ignored until card interactions land (M3-p). */
+ *  heights (capped by the runtime policy), journals card-script errors
+ *  (M3-err1, MP-CARD-001) into the error hub, and dispatches slash triggers
+ *  to the handler registered by the chat view (M3-t). */
 export function startExecutableFrameHost(): void {
   if (hostStarted || typeof window === 'undefined') return
   hostStarted = true
   window.addEventListener('message', (event: MessageEvent) => {
-    const data = event.data as { source?: unknown; type?: unknown; value?: unknown; message?: unknown } | null
+    const data = event.data as { source?: unknown; type?: unknown; value?: unknown; message?: unknown; command?: unknown } | null
     if (!data || typeof data !== 'object' || data.source !== EXECUTABLE_FRAME_CHANNEL) return
     // For window-sourced messages the reference is a Window; ports never own
     // our channel payloads (they cannot host a card document).
@@ -162,6 +188,10 @@ export function startExecutableFrameHost(): void {
         code: 'MP-CARD-001',
         message: typeof data.message === 'string' ? data.message.slice(0, 200) : 'unknown card script error',
       })
+      return
+    }
+    if (data.type === 'slash' && typeof data.command === 'string' && data.command.trim()) {
+      slashHandler?.(data.command)
     }
   })
 }
