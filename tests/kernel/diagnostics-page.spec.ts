@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
+import { uiService } from '@/kernel/ui/toasts'
 
 const clipboardWrite = vi.fn().mockResolvedValue(undefined)
 
@@ -66,12 +67,13 @@ describe('M3-err2 · 设置页诊断分区', () => {
     await flushPromises()
     const clearButton = wrapper.findAll('button').find((button) => button.text() === '清空')!
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    // M4-a:confirm 走应用内模态,桩服务层而非 window.confirm。
+    const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(false)
     await clearButton.trigger('click')
     await flushPromises()
     expect(errorHub.all()).toHaveLength(1)
 
-    confirmSpy.mockReturnValue(true)
+    confirmSpy.mockResolvedValue(true)
     await clearButton.trigger('click')
     await flushPromises()
     expect(errorHub.all()).toHaveLength(0)

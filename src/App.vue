@@ -19,6 +19,7 @@ import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
 import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
 import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
+import ConfirmDialogHost from '@/kernel/ui/ConfirmDialogHost.vue'
 import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
 
 // Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
@@ -128,6 +129,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
     />
 
     <ToastHost />
+    <ConfirmDialogHost />
     <FatalErrorHost />
   </div>
 </template>

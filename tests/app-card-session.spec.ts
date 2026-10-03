@@ -192,13 +192,14 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(usageCalls[0]!.meta).toEqual({ type: 'card', model: 'test-model', characterName: '星澜' })
     expect(usageCalls[0]!.usage).toMatchObject({ inputTokens: 30, outputTokens: 7 })
 
-    // 清空重开:取消不动,确认后回到仅剩开场白首楼(D3)。
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    // 清空重开:取消不动,确认后回到仅剩开场白首楼(D3)。M4-a:confirm 走
+    // 应用内模态,桩服务层而非 window.confirm。
+    const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(false)
     await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
     await flushPromises()
     expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(3)
 
-    confirmSpy.mockReturnValue(true)
+    confirmSpy.mockResolvedValue(true)
     await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
     await flushPromises()
     const restarted = (await cardSessionStore.get(stored.id))!
@@ -242,7 +243,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await tabs[1]!.trigger('click')
     await flushPromises()
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(true)
     // M3-m 网格:删除收进封面格右上角 ✕ 角标(aria-label 携带卡名)。
     await wrapper.find('button[aria-label="删除角色卡「星澜」"]').trigger('click')
     await flushPromises()
@@ -578,7 +579,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
     expect((await variableStore.get(stored.id))!.state['tpl-1']).toMatchObject({ value: { hp: 95 } })
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(true)
     await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
     await flushPromises()
     confirmSpy.mockRestore()
