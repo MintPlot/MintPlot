@@ -633,6 +633,13 @@ const onVariablesChanged = (snapshot: VariableSnapshot): void => {
   variableEvents.value = snapshot.events
 }
 
+// Live ledger projection pushed down to VariablesSheet (M4-a): AI-side applies
+// land here on every turn, so the open sheet re-renders without close/reopen.
+const liveVariableSnapshot = computed<Pick<VariableSnapshot, 'state' | 'events'>>(() => ({
+  state: variableState.value,
+  events: variableEvents.value,
+}))
+
 const persistSession = async (): Promise<void> => {
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
   else if (conversation.value) await store?.save(conversation.value)
@@ -1121,6 +1128,7 @@ const restartSession = async (): Promise<void> => {
       :card-id="card.id"
       :templates="activeTemplates"
       :analysis-status="analysisStatus"
+      :live="liveVariableSnapshot"
       @changed="onVariablesChanged"
       @close="showVariables = false"
       @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"

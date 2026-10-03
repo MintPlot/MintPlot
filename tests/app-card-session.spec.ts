@@ -337,6 +337,35 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     wrapper.unmount()
   })
 
+  it('变量面板打开期间 AI 落账回灌(M4-a):无需关开即见新值', async () => {
+    const { wrapper, characterStore } = mountApp()
+    await characterStore.import({
+      ...CARD,
+      extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    // 先开面板再对话:打开期间 AI setvars 落账。
+    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="10"]').exists()).toBe(true)
+
+    nextReply = '前文<setvars>{ "好感度": "+15" }</setvars>'
+    await wrapper.find('textarea').setValue('摸摸头')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    // 面板仍开着(live 回灌):值表直接显示新值,不再需要关开刷新。
+    expect(wrapper.find('input[placeholder="25"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('变量系统(M3-q):chatbox 域不展开 getvar —— 变量不进对话域(评审 Q4)', async () => {
     const { wrapper } = mountApp()
     await flushPromises()

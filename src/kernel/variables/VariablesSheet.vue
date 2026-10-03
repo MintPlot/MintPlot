@@ -4,7 +4,7 @@
 // 模板区升级为轻管理:含脚本标签 + 变量数/记录数 + 变更记录展开 + 分析
 // 状态行与「立即分析」(副模型管线入口)。卡默认值行(updatedAt 0)标记
 // 「卡默认」,同样可改可删;改动经 store 落账,父视图监听 changed 同步展开态。
-import { computed, inject, onMounted, ref, shallowRef } from 'vue'
+import { computed, inject, onMounted, ref, shallowRef, watch } from 'vue'
 import type { VariableValue } from '@contracts'
 import { VARIABLE_STORE_KEY } from '@/kernel/app/chat-keys'
 import { manualValueFromInput } from '@/kernel/variables/variable-engine'
@@ -13,7 +13,14 @@ import type { VariableSnapshot } from '@/kernel/variables/variable-store'
 import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import { uiService } from '@/kernel/ui/toasts'
 
-const props = defineProps<{ cardId: string; templates?: CardUiTemplate[]; analysisStatus?: string }>()
+const props = defineProps<{
+  cardId: string
+  templates?: CardUiTemplate[]
+  analysisStatus?: string
+  /** Live ledger projection from the parent view (M4-a): AI-side applies flow
+   * back into the open sheet — close/reopen no longer needed to see updates. */
+  live?: Pick<VariableSnapshot, 'state' | 'events'> | null
+}>()
 const emit = defineEmits<{ changed: [snapshot: VariableSnapshot]; close: []; analyze: [] }>()
 
 const store = inject(VARIABLE_STORE_KEY, null)
@@ -124,6 +131,17 @@ const load = async (): Promise<void> => {
 }
 
 onMounted(load)
+
+// M4-a 回灌:parent-owned state/events are replaced wholesale on every AI
+// apply; merge them into the open sheet. Drafts (row + template JSON) are
+// kept — an in-progress manual edit must survive a background ledger update.
+watch(
+  () => props.live,
+  (live) => {
+    if (!live || !snapshot.value) return
+    snapshot.value = { ...snapshot.value, state: live.state, events: live.events }
+  },
+)
 
 const sourceOf = (sourceEventId: string): string => {
   if (sourceEventId === 'seed') return '卡默认'
