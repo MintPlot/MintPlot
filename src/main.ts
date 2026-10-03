@@ -15,6 +15,7 @@ import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createRegexStore } from '@/kernel/regex/regex-store'
 import { createPresetStore } from '@/kernel/presets/preset-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
+import { createPlatformSecretChannel } from '@/kernel/secrets/platform-secret-channel'
 import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
 import { installGlobalErrorHandlers, replayEarlyErrors } from '@/kernel/diagnostics/global-handlers'
 import { installRequestDiagnostics } from '@/kernel/diagnostics/request-diagnostics'
@@ -77,23 +78,23 @@ kernel.services.bus.on('app.pause', () => {
 kernel.services.seams.register('kernel', 'llm.provider', createOpenAiCompatibleProvider(kernel.services.settings))
 
 // Chatbox domain persistence over the kind-scoped repository (ADR-003 keys).
-const chatboxStore = createChatboxStore(createStorageRepository(createDefaultEngine()))
+const chatboxStore = createChatboxStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 
 // Character card library (card-domain library records, `character:<id>` keys)
 // and its one-session-per-card conversation store (M3-i, `chat:card:*` keys).
-const characterStore = createCharacterStore(createStorageRepository(createDefaultEngine()))
-const cardSessionStore = createCardSessionStore(createStorageRepository(createDefaultEngine()))
+const characterStore = createCharacterStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
+const cardSessionStore = createCardSessionStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 // Card-session variables ledger (M3-q, `variables:card:*` keys) — card domain
 // only; the chatbox domain never sees variables (review Q4 isolation).
-const variableStore = createVariableStore(createStorageRepository(createDefaultEngine()))
+const variableStore = createVariableStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 // Worldbook per-entry toggles (M3-u, `worldinfo:card:*` keys) — the card's
 // verbatim book rides the character record; only overrides live here.
-const worldbookStore = createWorldbookStore(createStorageRepository(createDefaultEngine()))
+const worldbookStore = createWorldbookStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 // Regex per-script toggles (M3-v, `regex:card:*` keys) — the card's verbatim
 // regex scripts ride the extensions block; only overrides live here.
-const regexStore = createRegexStore(createStorageRepository(createDefaultEngine()))
+const regexStore = createRegexStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 // Prompt presets (M3-w) — app-level; the seed sync runs on first read.
-const presetStore = createPresetStore(createStorageRepository(createDefaultEngine()))
+const presetStore = createPresetStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
