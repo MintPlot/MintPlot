@@ -16,7 +16,9 @@ import { pluginViewsSink } from '@/kernel/app/plugin-views'
 import { settingsSink } from '@/kernel/app/settings-registry'
 import { createMemorySettingsState } from '../helpers/memory-settings'
 
-function makeServices(): KernelServices {
+/** Shared across plugin-surface specs: the full KernelServices bundle over
+ *  in-memory storage (mirrors the bootstrap wiring). */
+export function makeServices(): KernelServices {
   const bus = createTransientBus()
   const seams = createSeamRegistry((seamId, providerPluginId) => {
     bus.emit('seam.provider.changed', { seamId, providerPluginId })
