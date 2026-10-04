@@ -172,8 +172,10 @@ const removePendingImage = (id: string): void => {
 const onChatImageSelected = async (event: Event): Promise<void> => {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files ?? [])
-  input.value = ''
-  if (files.length === 0 || streaming.value) return
+  // NOTE: input.value stays until every file is READ — Android WebView
+  // invalidates photo-picker File handles the moment the input resets
+  // ("图片读取失败" on-device). Cleared at the end of the read loop.
+  if (files.length === 0 || streaming.value) { input.value = ''; return }
   if (!activeVisionCapable() && !readVisionModel()) {
     uiService.toast('shell', '请先配置识图模型,或在 API 档案声明「支持看图」', { tone: 'error' })
     return
@@ -218,6 +220,8 @@ const onChatImageSelected = async (event: Event): Promise<void> => {
       }
     })()
   }
+  // All reads dispatched — now safe to reset the input for the next pick.
+  input.value = ''
 }
 
 // Candidate-aware ledger projection (M4-c): events tagged with a
