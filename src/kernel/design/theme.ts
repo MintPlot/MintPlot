@@ -25,8 +25,21 @@ function readPref(): MpThemePref {
 const pref = ref<MpThemePref>(readPref())
 const theme = ref<MpTheme>(pref.value === 'system' ? (prefersDark() ? 'dark' : 'light') : pref.value)
 
+type EffectiveThemeListener = (theme: MpTheme) => void
+
+const themeListeners = new Set<EffectiveThemeListener>()
+
+/** Notify on every resolved light/dark flip (pref change or system follow). */
+export function subscribeEffectiveTheme(listener: EffectiveThemeListener): () => void {
+  themeListeners.add(listener)
+  return () => {
+    themeListeners.delete(listener)
+  }
+}
+
 function applyResolved(): void {
   document.documentElement.classList.toggle('dark', theme.value === 'dark')
+  for (const listener of themeListeners) listener(theme.value)
 }
 
 let media: MediaQueryList | null = null

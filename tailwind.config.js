@@ -21,8 +21,8 @@ export default {
           DEFAULT: 'rgb(var(--mp-c-accent) / <alpha-value>)',
           wash: 'var(--mp-accent-wash)',
         },
-        // 聊天配色通道(another):真源在 tokens.css,用户选色经内联变量覆盖;
-        // 背景即主题色(bg 令牌本身),不设独立 chat 背景
+        // 聊天配色通道(色系 v2):真源在 tokens.css,选中色系经 <html> 内联
+        // 变量按当前明暗成套接管;不设独立 chat 背景(表面走 bg/card 令牌)
         chat: {
           accent: 'rgb(var(--mp-c-chat-accent) / <alpha-value>)',
           'bubble-user': 'rgb(var(--mp-c-bubble-user) / <alpha-value>)',
