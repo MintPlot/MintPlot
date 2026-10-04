@@ -32,6 +32,10 @@ export interface ApiProfileConfig {
   baseUrl: string
   model: string
   apiKey: string
+  /** D1 hybrid vision: when true, chat images ride THIS profile's requests
+   *  directly as content parts; when false/absent, the vision-model slot
+   *  describes them instead. */
+  visionCapable?: boolean
 }
 
 export type ApiProfileMap = Record<string, ApiProfileConfig>
@@ -40,6 +44,8 @@ export interface ApiConfigSnapshot {
   baseUrl: string
   apiKey: string
   model: string
+  /** D1 hybrid vision: the active profile declared direct-vision capability. */
+  visionCapable?: boolean
 }
 
 export function normalizeProviderUrl(url: unknown): string {
@@ -69,6 +75,7 @@ function readProfileMap(value: unknown): ApiProfileMap {
       baseUrl: String(raw.baseUrl ?? ''),
       model: String(raw.model ?? ''),
       apiKey: String(raw.apiKey ?? ''),
+      ...(raw.visionCapable === true ? { visionCapable: true } : {}),
     }
   }
   return profiles
@@ -85,7 +92,12 @@ export function resolveApiConfig(snapshot: Record<string, unknown>): ApiConfigSn
   const activeId = String(snapshot.apiActiveProfileId ?? '')
   const picked = (activeId && profiles[activeId]) || Object.values(profiles)[0]
   if (picked) {
-    return { baseUrl: picked.baseUrl, apiKey: picked.apiKey, model: picked.model }
+    return {
+      baseUrl: picked.baseUrl,
+      apiKey: picked.apiKey,
+      model: picked.model,
+      ...(picked.visionCapable ? { visionCapable: true } : {}),
+    }
   }
   return {
     baseUrl: String(snapshot.apiBaseUrl ?? ''),

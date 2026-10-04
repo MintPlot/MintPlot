@@ -9,9 +9,24 @@
  * ignore it simply report nothing (usage-stats skips absent usage).
  */
 
+/** Multimodal content part (M4-d): direct-vision requests send the user turn
+ *  as text + image_url parts; providers without vision reject with their own
+ *  error (surfaces through the normal error bar). */
+export interface LlmTextPart {
+  type: 'text'
+  text: string
+}
+
+export interface LlmImageUrlPart {
+  type: 'image_url'
+  image_url: { url: string; detail?: 'high' | 'low' | 'auto' }
+}
+
+export type LlmContentPart = LlmTextPart | LlmImageUrlPart
+
 export interface LlmChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | LlmContentPart[]
 }
 
 export interface LlmRequestConfig {

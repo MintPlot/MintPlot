@@ -471,7 +471,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     const request = streamCalls.at(-1)!
     expect(request.find((message) => message.content === '{{getvar::好感度}}还好吗')).toMatchObject({ role: 'user' })
-    expect(request.some((message) => message.content.includes('[Variables]'))).toBe(false)
+    expect(request.some((message) => (message.content as string).includes('[Variables]'))).toBe(false)
 
     // 停用期间不解析不落账,账本保持未建档。
     expect(await variableStore.get(stored.id)).toBeNull()
@@ -775,7 +775,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     const depthMessage = request.find((message) => message.role === 'system' && message.content === '[绿灯]\n中洲深度知识')
     expect(depthMessage).toBeDefined()
     // 未触发条目不进请求。
-    expect(request.some((message) => message.content.includes('永不出现的内容'))).toBe(false)
+    expect(request.some((message) => (message.content as string).includes('永不出现的内容'))).toBe(false)
 
     // 启停覆盖:关掉蓝灯后,同应用内返回再重进(ChatSessionView 重挂载重读
     // 覆盖层)——蓝灯消失、绿灯仍在。
@@ -792,9 +792,9 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
     await flushPromises()
     const secondRequest = streamCalls.at(-1)!
-    expect(secondRequest.some((message) => message.content.includes('世界书常驻设定内容'))).toBe(false)
+    expect(secondRequest.some((message) => (message.content as string).includes('世界书常驻设定内容'))).toBe(false)
     // 绿灯未关,仍触发。
-    expect(secondRequest.some((message) => message.content.includes('中洲深度知识'))).toBe(true)
+    expect(secondRequest.some((message) => (message.content as string).includes('中洲深度知识'))).toBe(true)
     wrapper.unmount()
   })
 
@@ -842,7 +842,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(userBubble!.html()).not.toContain('class="psy"')
     // 提示词面:开场白 HTML 文档被省略标记替换(默认开);promptOnly 剥离跑过。
     const request = streamCalls.at(-1)!
-    const greetingMessage = request.find((message) => message.role === 'assistant' && message.content.includes(HTML_FLOOR_OMISSION_MARKER))!
+    const greetingMessage = request.find((message) => message.role === 'assistant' && (message.content as string).includes(HTML_FLOOR_OMISSION_MARKER))!
     expect(greetingMessage.content).not.toContain('<html>')
     // 落库纪律:存储楼层保持原样(协议/正则/省略都只是投影)。
     const stored = (await cardSessionStore.get((await characterStore.list())[0]!.id))!
@@ -912,7 +912,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     request.forEach((message) => {
       expect(message.content).not.toContain('<setvars>')
     })
-    expect((await cardSessionStore.get((await characterStore.list())[0]!.id))!.messages.some((message) => message.content.includes('<setvars>'))).toBe(true)
+    expect((await cardSessionStore.get((await characterStore.list())[0]!.id))!.messages.some((message) => (message.content as string).includes('<setvars>'))).toBe(true)
     wrapper.unmount()
   })
 })
@@ -1007,9 +1007,9 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     await flushPromises()
 
     const request = streamCalls.at(-1)!
-    expect(request.some((message) => message.content.includes('第一次'))).toBe(false)
+    expect(request.some((message) => (message.content as string).includes('第一次'))).toBe(false)
     // 重生成请求看到重生成前状态:被重写楼层的变量效果属于旧候选(此处 = 种子 10)。
-    const variables = request.find((message) => message.content.includes('[Variables]'))
+    const variables = request.find((message) => (message.content as string).includes('[Variables]'))
     expect(variables?.content).toContain('好感度 10')
     wrapper.unmount()
   })

@@ -25,7 +25,16 @@ import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
-import type { LlmChatMessage, LlmRequestError } from '@/kernel/llm/chat-completions'
+import type { LlmChatMessage, LlmContentPart, LlmRequestError } from '@/kernel/llm/chat-completions'
+import { resolveApiConfig } from '@/kernel/llm/api-profiles'
+import {
+  CHAT_IMAGE_MAX_BYTES,
+  MAX_CHAT_IMAGES,
+  compressImageFile,
+  describeImage,
+  userImageContextText,
+  type PendingChatImage,
+} from '@/kernel/llm/vision'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
@@ -138,6 +147,78 @@ const analysisStatus = ref('')
 // M4-c floor actions: in-place editor state for one floor at a time.
 const editingFloorId = ref('')
 const editDraft = ref('')
+// M4-d chat image attachments: pending images ride the NEXT user floor.
+const pendingImages = ref<PendingChatImage[]>([])
+const imageInputEl = ref<HTMLInputElement | null>(null)
+// M4-d single-shot system instruction: rides one request, then clears.
+const oneShotInstruction = ref('')
+const showOneShotPanel = ref(false)
+const viewerImage = ref('')
+
+// D1 hybrid vision: the ACTIVE profile's capability declaration decides
+// direct parts vs the vision-model description fallback.
+const activeVisionCapable = (): boolean =>
+  resolveApiConfig(settingsState?.snapshot() ?? {}).visionCapable === true
+const readVisionModel = (): string => {
+  const scope = settingsState?.scope(['visionModel'])
+  return String(scope?.visionModel ?? '')
+}
+const pendingImagesNotReady = computed(() => pendingImages.value.some((image) => image.status !== 'ready'))
+
+const removePendingImage = (id: string): void => {
+  pendingImages.value = pendingImages.value.filter((image) => image.id !== id)
+}
+
+const onChatImageSelected = async (event: Event): Promise<void> => {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (files.length === 0 || streaming.value) return
+  if (!activeVisionCapable() && !readVisionModel()) {
+    uiService.toast('shell', '请先配置识图模型,或在 API 档案声明「支持看图」', { tone: 'error' })
+    return
+  }
+  const room = MAX_CHAT_IMAGES - pendingImages.value.length
+  const accepted = files.slice(0, Math.max(0, room))
+  if (accepted.length === 0) {
+    uiService.toast('shell', `每条消息最多 ${MAX_CHAT_IMAGES} 张图片`, { tone: 'error' })
+    return
+  }
+  for (const file of accepted) {
+    if (file.size > CHAT_IMAGE_MAX_BYTES) {
+      uiService.toast('shell', '单张图片不能超过 20MB', { tone: 'error' })
+      continue
+    }
+    const id = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const pending: PendingChatImage = { id, dataUrl: '', description: '', status: 'analyzing' }
+    pendingImages.value = [...pendingImages.value, pending]
+    // Compress + (description mode) recognize in the background; failures are
+    // per-image and never block the others.
+    void (async () => {
+      // patchInto = write through a fresh array — the pending object itself is
+      // captured UNREACTIVE in this closure (plain object inside the ref), so
+      // in-place mutation would never re-render the strip.
+      const patchInto = (patch: Partial<PendingChatImage>): void => {
+        pendingImages.value = pendingImages.value.map((image) => image.id === id ? { ...image, ...patch } : image)
+      }
+      try {
+        patchInto({ dataUrl: await compressImageFile(file) })
+        if (activeVisionCapable()) {
+          patchInto({ status: 'ready' })
+          return
+        }
+        const config = resolveApiConfig(settingsState?.snapshot() ?? {})
+        const description = await describeImage(
+          { baseUrl: config.baseUrl, apiKey: config.apiKey, visionModel: readVisionModel() },
+          pending.dataUrl,
+        )
+        patchInto({ description, status: 'ready' })
+      } catch (error) {
+        patchInto({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+      }
+    })()
+  }
+}
 
 // Candidate-aware ledger projection (M4-c): events tagged with a
 // candidateIndex only count toward the floor's ACTIVE candidate — switching
@@ -426,7 +507,7 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
   // standalone prefill messages right after the system block (RP semantics:
   // at-depth injections clamp to never land before them).
   let presetSystemArea = ''
-  const presetPrefills: LlmChatMessage[] = []
+  const presetPrefills: Array<{ role: 'user' | 'assistant'; content: string }> = []
   if (presetsActive.value && presetSnapshot.value) {
     const activeGroup = presetSnapshot.value.groups.find((group) => group.enabled)?.id ?? 'default'
     const activeEntries = presetSnapshot.value.entries.filter(
@@ -560,11 +641,32 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
     // verbatim; this strips the request projection only.
     // M3-v: omission marker / card regexes then rewrite the prompt
     // projection (depth anchored from the end, 0 = last floor).
-    const content = rewritePromptFloor(
+    let content = rewritePromptFloor(
       message.content,
       message.role === 'user' ? 'user' : 'assistant',
       floors.length - 1 - index,
     )
+    // M4-d hybrid vision (D1): the description mode appends the vision-model
+    // text as a <user_image_context> block (RP semantics — descriptions ride
+    // history permanently); direct mode sends the CURRENT turn's user floor
+    // as content parts instead, and older floors degrade to plain text.
+    const attachments = message.imageAttachments
+    if (attachments?.length) {
+      // "Current turn" = the last user floor with no assistant content after
+      // it — the streaming pipeline pushes an EMPTY assistant placeholder
+      // before assembling the request, so index-vs-length never works here.
+      const isCurrentTurn = message.role === 'user'
+        && floors.slice(index + 1).every((floor) => floor.role !== 'assistant' || floor.content === '')
+      if (isCurrentTurn && activeVisionCapable()) {
+        const parts: LlmContentPart[] = [
+          { type: 'text', text: expandRequestText(content) },
+          ...attachments.map((image) => ({ type: 'image_url' as const, image_url: { url: image.dataUrl, detail: 'high' as const } })),
+        ]
+        result.push({ role: message.role, content: parts })
+        continue
+      }
+      content = `${content}\n\n${userImageContextText(attachments)}`
+    }
     // Macros resolve on the request path too (RP default script runs both
     // sides); the stored history itself stays untouched.
     result.push({ role: message.role, content: expandRequestText(content) })
@@ -591,6 +693,12 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
   const userTop = worldbookReport.value?.injections.find((injection) => injection.position === 'user_top')
   if (lastUserIndex >= 0 && userTop) {
     result[lastUserIndex] = { role: 'user', content: `${userTop.content}\n${result[lastUserIndex]!.content}` }
+  }
+  // M4-d single-shot instruction (D3): rides exactly one request, placed
+  // before the trailing instruction blocks (the last system instruction
+  // wins — RP placement) but after the worldbook at-depth splices.
+  if (oneShotInstruction.value.trim()) {
+    result.push({ role: 'system', content: `[单次指令]\n${expandRequestText(oneShotInstruction.value.trim())}` })
   }
   const assistantTop = worldbookReport.value?.injections.find((injection) => injection.position === 'assistant_top')
   if (assistantTop) {
@@ -898,12 +1006,22 @@ const send = async (overrideText?: string): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!sessionLoaded.value || !provider) return
   // Panel-button triggers (M3-t bridge) pass the command directly; the normal
-  // path sends the draft. Both share the streaming guard.
+  // path sends the draft. Both share the streaming guard + the M4-d image
+  // readiness gate (RP same: send waits until every attachment is described).
   const text = (typeof overrideText === 'string' ? overrideText : draft.value).trim()
-  if (!text || streaming.value) return
+  if (!text || streaming.value || pendingImagesNotReady.value) return
 
   const now = Date.now()
-  messages.value.push({ id: `m-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, role: 'user', content: text, ts: now })
+  const attachments = pendingImages.value.map(({ dataUrl, description }) => ({ dataUrl, description }))
+  const userFloor: ChatboxMessage = {
+    id: `m-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    role: 'user',
+    content: text,
+    ts: now,
+    ...(attachments.length > 0 ? { imageAttachments: attachments } : {}),
+  }
+  messages.value.push(userFloor)
+  pendingImages.value = []
   // Title defaults to the first utterance (spec §03) — chatbox domain only;
   // the card domain keeps the card name.
   if (!isCardDomain.value && conversation.value && conversation.value.title === '新的对话') {
@@ -915,6 +1033,8 @@ const send = async (overrideText?: string): Promise<void> => {
   lastUserText.value = text
   await scrollToBottom()
   await runAssistantTurn()
+  // D3 single-shot: consumed by exactly one send (regeneration excluded).
+  oneShotInstruction.value = ''
 }
 
 /** Retry re-streams a reply for the persisted user floor (D3 error bar). */
@@ -1227,6 +1347,21 @@ const restartSession = async (): Promise<void> => {
               ]"
             >
               <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline); panels are replay-interpolated card templates in the same sandbox -->
+              <!-- M4-d attached-image thumbnails (user floors): tap to view. -->
+              <div
+                v-if="message.imageAttachments?.length"
+                class="mb-1 grid gap-1"
+                :class="message.imageAttachments.length === 1 ? 'w-40' : 'grid-cols-2'"
+              >
+                <img
+                  v-for="(image, imageIndex) in message.imageAttachments"
+                  :key="imageIndex"
+                  :src="image.dataUrl"
+                  :alt="`附件图片 ${imageIndex + 1}`"
+                  class="w-full cursor-zoom-in rounded-input border border-line object-cover"
+                  @click="viewerImage = image.dataUrl"
+                >
+              </div>
               <div
                 v-for="frame in floorPanels(message).top"
                 :key="`top-${frame.id}`"
@@ -1376,7 +1511,115 @@ const restartSession = async (): Promise<void> => {
       </div>
 
       <footer class="shrink-0 border-t border-line bg-card px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
+        <!-- M4-d pending attachment strip: thumbnails with per-image status. -->
+        <div
+          v-if="pendingImages.length > 0"
+          class="mx-auto mb-2 flex max-w-xl gap-2 overflow-x-auto pb-1"
+        >
+          <div
+            v-for="image in pendingImages"
+            :key="image.id"
+            class="relative flex-shrink-0"
+          >
+            <img
+              v-if="image.dataUrl"
+              :src="image.dataUrl"
+              alt="待发送图片"
+              class="h-16 w-16 rounded-input border border-line object-cover"
+            >
+            <div
+              v-else
+              class="flex h-16 w-16 items-center justify-center rounded-input border border-line bg-bg text-[10px] text-ink-3"
+            >
+              读取中
+            </div>
+            <span
+              v-if="image.status === 'analyzing'"
+              class="absolute inset-x-0 bottom-0 rounded-b-input bg-black/50 px-1 text-center text-[9px] text-white"
+            >
+              识别中…
+            </span>
+            <span
+              v-else-if="image.status === 'error'"
+              class="absolute inset-x-0 bottom-0 rounded-b-input bg-danger px-1 text-center text-[9px] text-on-primary"
+              :title="image.error"
+            >
+              识别失败
+            </span>
+            <button
+              type="button"
+              class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-bg text-[10px] text-ink-2 shadow"
+              :aria-label="`移除待发送图片(${image.status === 'ready' ? image.description.slice(0, 12) : '未就绪'})`"
+              @click="removePendingImage(image.id)"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
         <div class="mx-auto flex max-w-xl items-end gap-2">
+          <!-- M4-d attach + single-shot instruction (D2/D3, RP composer left
+               controls): direct buttons; the inputActions panel stays reserved. -->
+          <div class="relative flex flex-col items-center gap-1">
+            <button
+              type="button"
+              class="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-bg text-base text-ink-2 active:text-primary disabled:opacity-40"
+              aria-label="添加图片"
+              :disabled="streaming"
+              @click="imageInputEl?.click()"
+            >
+              📎
+            </button>
+            <input
+              ref="imageInputEl"
+              type="file"
+              accept="image/*"
+              multiple
+              class="hidden"
+              @change="onChatImageSelected"
+            >
+          </div>
+          <div class="relative flex flex-col items-center gap-1">
+            <button
+              type="button"
+              class="flex h-9 w-9 items-center justify-center rounded-full border text-base"
+              :class="oneShotInstruction.trim() ? 'border-primary bg-primary-wash text-primary' : 'border-line bg-bg text-ink-2'"
+              aria-label="单次指令"
+              @click="showOneShotPanel = !showOneShotPanel"
+            >
+              ⌘
+            </button>
+            <div
+              v-if="showOneShotPanel"
+              class="absolute bottom-11 left-0 z-40 w-64 rounded-bubble-ai border border-line bg-card p-2 shadow-lg"
+            >
+              <p class="mb-1 text-xs font-bold text-ink">
+                单次指令
+                <span class="ml-1 font-normal text-ink-3">只影响下一次发送</span>
+              </p>
+              <textarea
+                v-model="oneShotInstruction"
+                rows="3"
+                placeholder="例:这段用更轻快的语气写…"
+                class="w-full resize-none rounded-input border border-line bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-primary"
+              />
+              <div class="mt-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="rounded-input border border-line px-2 py-1 text-xs text-ink-2"
+                  @click="oneShotInstruction = ''; showOneShotPanel = false"
+                >
+                  清空
+                </button>
+                <button
+                  type="button"
+                  class="rounded-input bg-primary px-2 py-1 text-xs font-bold text-on-primary"
+                  @click="showOneShotPanel = false"
+                >
+                  完成
+                </button>
+              </div>
+            </div>
+          </div>
           <textarea
             v-model="draft"
             rows="1"
@@ -1396,7 +1639,7 @@ const restartSession = async (): Promise<void> => {
             v-else
             type="button"
             class="min-h-[44px] rounded-input bg-primary px-4 text-sm font-bold text-on-primary disabled:opacity-40"
-            :disabled="!draft.trim()"
+            :disabled="!draft.trim() || pendingImagesNotReady"
             @click="send()"
           >
             发送
@@ -1404,6 +1647,19 @@ const restartSession = async (): Promise<void> => {
         </div>
       </footer>
     </template>
+
+    <!-- M4-d image viewer: tap a floor thumbnail to inspect the attachment. -->
+    <div
+      v-if="viewerImage"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      @click="viewerImage = ''"
+    >
+      <img
+        :src="viewerImage"
+        alt="图片查看"
+        class="max-h-full max-w-full object-contain"
+      >
+    </div>
 
     <VariablesSheet
       v-if="isCardDomain && showVariables && card"

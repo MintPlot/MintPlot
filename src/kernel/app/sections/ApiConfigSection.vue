@@ -23,6 +23,8 @@ const settingsState = inject(SETTINGS_STATE_KEY, null)
 const profiles = ref<ApiProfileMap>({})
 const activeId = ref('')
 const editingId = ref('')
+// 识图模型槽(M4-d D1):描述式识图的独立模型,作用于激活档案的端点+密钥。
+const visionModel = ref('')
 const modelOptions = ref<Record<string, string[]>>({})
 const fetchingModelsId = ref('')
 const status = ref<'unknown' | 'checking' | 'connected' | 'error'>('unknown')
@@ -43,9 +45,10 @@ const urlSummary = (profile: ApiProfileConfig): string =>
 
 const persist = (): void => {
   if (!settingsState) return
-  const scope = settingsState.scope(['apiProfiles', 'apiActiveProfileId', 'apiBaseUrl', 'apiKey', 'apiModel'])
+  const scope = settingsState.scope(['apiProfiles', 'apiActiveProfileId', 'apiBaseUrl', 'apiKey', 'apiModel', 'visionModel'])
   scope.apiProfiles = JSON.parse(JSON.stringify(profiles.value))
   scope.apiActiveProfileId = activeId.value
+  scope.visionModel = visionModel.value.trim()
 }
 
 const persistProbe = (): void => {
@@ -91,6 +94,7 @@ const hydrate = async (): Promise<void> => {
       : {})
     activeId.value = String(snapshot.apiActiveProfileId ?? '') || Object.keys(profiles.value)[0] || ''
   }
+  visionModel.value = String(snapshot.visionModel ?? '')
 }
 
 onMounted(async () => {
@@ -287,6 +291,14 @@ const fetchModels = async (id: string): Promise<void> => {
               </button>
             </div>
           </div>
+          <label class="flex items-center gap-2 text-xs text-ink-2">
+            <input
+              v-model="profiles[id].visionCapable"
+              type="checkbox"
+              class="h-4 w-4 accent-primary"
+            >
+            该模型支持看图(发图直连,不经识图模型)
+          </label>
           <button
             type="button"
             class="self-start text-xs text-danger"
@@ -323,6 +335,20 @@ const fetchModels = async (id: string): Promise<void> => {
       >
         + 自定义
       </button>
+    </div>
+
+    <div>
+      <label class="mb-1 block text-xs font-medium text-ink-3">识图模型(可选)</label>
+      <input
+        v-model.trim="visionModel"
+        type="text"
+        placeholder="glm-4v / gpt-4o / …(发图且模型不支持看图时用)"
+        class="w-full rounded-input border border-line bg-bg px-2 py-1.5 text-sm text-ink outline-none focus:border-primary"
+        @change="persist"
+      >
+      <p class="mt-0.5 text-[10px] text-ink-3">
+        用当前档案的端点与密钥调用;激活档案声明「支持看图」时此槽不参与。
+      </p>
     </div>
 
     <p class="text-[10px] leading-relaxed text-ink-3">
