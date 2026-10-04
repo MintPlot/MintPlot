@@ -49,6 +49,22 @@ describe('色系目录(Edge 式一排色点,每系明暗两套)', () => {
     }
   })
 
+  it('块面明暗方向:浅色 accent 恒亮于等于深色 accent(深色块面更深沉,用户拍板)', () => {
+    const yiq = (hex: string): number => {
+      const v = Number.parseInt(hex.slice(1), 16)
+      return ((v >> 16) * 299 + ((v >> 8) & 0xff) * 587 + (v & 0xff) * 114) / 1000
+    }
+    for (const family of COLOR_FAMILIES) {
+      expect(
+        yiq(family.light.accent),
+        `${family.id}: light.accent ${family.light.accent} 应亮于 dark.accent ${family.dark.accent}`,
+      ).toBeGreaterThanOrEqual(yiq(family.dark.accent))
+      // 深色块面配亮墨;文字强调在深底保持亮色可读
+      expect(family.dark.onAccent.toLowerCase()).toBe('#ffffff')
+      expect(yiq(family.dark.accentText)).toBeGreaterThanOrEqual(yiq(family.dark.accent))
+    }
+  })
+
   it('hexToRgbTriplet 走三元组纪律;非法输入抛错', () => {
     expect(hexToRgbTriplet('#1A1D29')).toBe('26 29 41')
     expect(() => hexToRgbTriplet('1A1D29')).toThrow()

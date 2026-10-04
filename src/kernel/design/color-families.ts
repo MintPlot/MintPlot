@@ -29,7 +29,8 @@ export interface MpColorFamilyMode {
   readonly ink: string
   readonly ink2: string
   readonly ink3: string
-  /** Primary action / user bubble / send button. */
+  /** Primary action / user bubble / send button. Light mode = the brighter
+   *  fill; dark mode = a deep tonal fill (never pastel-bright) with light ink. */
   readonly accent: string
   /** Text on accent surfaces. */
   readonly onAccent: string
@@ -58,43 +59,45 @@ export const COLOR_FAMILIES: readonly MpColorFamily[] = [
     id: 'ocean',
     label: '海蓝',
     light: { bg: '#EFF4FA', card: '#FFFFFF', ink: '#17202B', ink2: '#3E4E60', ink3: '#6E7F92', accent: '#2E7CD6', onAccent: '#FFFFFF', accentText: '#1E5FA8', aiBubble: '#E2EBF5' },
-    dark: { bg: '#0E141C', card: '#161E28', ink: '#E2E9F2', ink2: '#A3B2C4', ink3: '#6B7A8C', accent: '#5B9BFF', onAccent: '#0A1A2E', accentText: '#5B9BFF', aiBubble: '#1A2430' },
+    // Dark fills stay deep (tonal, white-on-ink); only text emphasis keeps the
+    // bright hue for readability on dark surfaces.
+    dark: { bg: '#0E141C', card: '#161E28', ink: '#E2E9F2', ink2: '#A3B2C4', ink3: '#6B7A8C', accent: '#2E63B0', onAccent: '#FFFFFF', accentText: '#5B9BFF', aiBubble: '#1A2430' },
   },
   {
     id: 'cyan',
     label: '青碧',
     light: { bg: '#EAF5F4', card: '#FFFFFF', ink: '#14211F', ink2: '#3A504D', ink3: '#6A817D', accent: '#0E9488', onAccent: '#FFFFFF', accentText: '#0A6E65', aiBubble: '#DFEFED' },
-    dark: { bg: '#0B1514', card: '#12201E', ink: '#DFF0EC', ink2: '#9DB8B3', ink3: '#647D78', accent: '#2DD4BF', onAccent: '#04211C', accentText: '#2DD4BF', aiBubble: '#172825' },
+    dark: { bg: '#0B1514', card: '#12201E', ink: '#DFF0EC', ink2: '#9DB8B3', ink3: '#647D78', accent: '#0B6E64', onAccent: '#FFFFFF', accentText: '#2DD4BF', aiBubble: '#172825' },
   },
   {
     id: 'forest',
     label: '森绿',
     light: { bg: '#EFF5EC', card: '#FFFFFF', ink: '#1A2318', ink2: '#48543F', ink3: '#75826B', accent: '#43875F', onAccent: '#FFFFFF', accentText: '#2F6347', aiBubble: '#E4EDDF' },
-    dark: { bg: '#0F1611', card: '#16201A', ink: '#E4EEE3', ink2: '#A8B8A0', ink3: '#71806A', accent: '#7CC08B', onAccent: '#0C2312', accentText: '#7CC08B', aiBubble: '#1B271F' },
+    dark: { bg: '#0F1611', card: '#16201A', ink: '#E4EEE3', ink2: '#A8B8A0', ink3: '#71806A', accent: '#356B4C', onAccent: '#FFFFFF', accentText: '#7CC08B', aiBubble: '#1B271F' },
   },
   {
     id: 'amber',
     label: '琥珀',
     light: { bg: '#F8F2E7', card: '#FFFFFF', ink: '#26211A', ink2: '#54483A', ink3: '#837765', accent: '#C07A1D', onAccent: '#FFFFFF', accentText: '#8F5A12', aiBubble: '#F1E9DA' },
-    dark: { bg: '#171310', card: '#201A14', ink: '#F0E8DC', ink2: '#BCAC96', ink3: '#877963', accent: '#E5A54B', onAccent: '#241503', accentText: '#E5A54B', aiBubble: '#282017' },
+    dark: { bg: '#171310', card: '#201A14', ink: '#F0E8DC', ink2: '#BCAC96', ink3: '#877963', accent: '#A26712', onAccent: '#FFFFFF', accentText: '#E5A54B', aiBubble: '#282017' },
   },
   {
     id: 'vermilion',
     label: '绯红',
     light: { bg: '#F7F1E8', card: '#FFFFFF', ink: '#241E1A', ink2: '#52453D', ink3: '#80705F', accent: '#B85450', onAccent: '#FFFFFF', accentText: '#963E3B', aiBubble: '#F0E8DC' },
-    dark: { bg: '#161210', card: '#1F1917', ink: '#F0E7E1', ink2: '#BBA8A0', ink3: '#86746C', accent: '#D4756B', onAccent: '#260D0A', accentText: '#D4756B', aiBubble: '#292019' },
+    dark: { bg: '#161210', card: '#1F1917', ink: '#F0E7E1', ink2: '#BBA8A0', ink3: '#86746C', accent: '#9C4541', onAccent: '#FFFFFF', accentText: '#D4756B', aiBubble: '#292019' },
   },
   {
     id: 'rose',
     label: '玫粉',
     light: { bg: '#F9F0F3', card: '#FFFFFF', ink: '#241A1E', ink2: '#543F48', ink3: '#826B74', accent: '#C2577F', onAccent: '#FFFFFF', accentText: '#93395F', aiBubble: '#F2E6EB' },
-    dark: { bg: '#171114', card: '#1F171B', ink: '#F0E4EA', ink2: '#BCA3AF', ink3: '#846F79', accent: '#DA7FA7', onAccent: '#2B0A1A', accentText: '#DA7FA7', aiBubble: '#291E24' },
+    dark: { bg: '#171114', card: '#1F171B', ink: '#F0E4EA', ink2: '#BCA3AF', ink3: '#846F79', accent: '#A04A6E', onAccent: '#FFFFFF', accentText: '#DA7FA7', aiBubble: '#291E24' },
   },
   {
     id: 'violet',
     label: '黛紫',
     light: { bg: '#F2F0F8', card: '#FFFFFF', ink: '#1C1A24', ink2: '#454153', ink3: '#6F6C80', accent: '#7160BE', onAccent: '#FFFFFF', accentText: '#52449B', aiBubble: '#EAE7F3' },
-    dark: { bg: '#121018', card: '#1A1822', ink: '#E9E6F2', ink2: '#AFA9C4', ink3: '#767089', accent: '#9C8EE0', onAccent: '#17102E', accentText: '#9C8EE0', aiBubble: '#221F2C' },
+    dark: { bg: '#121018', card: '#1A1822', ink: '#E9E6F2', ink2: '#AFA9C4', ink3: '#767089', accent: '#5F51A8', onAccent: '#FFFFFF', accentText: '#9C8EE0', aiBubble: '#221F2C' },
   },
 ]
 
