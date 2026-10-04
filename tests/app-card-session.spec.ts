@@ -916,3 +916,212 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     wrapper.unmount()
   })
 })
+
+describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/朗读)', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '')
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
+    streamCalls.length = 0
+    nextReply = '（测试回复）'
+  })
+
+  const enterCard = async (mount: ReturnType<typeof mountApp>, extensions?: Record<string, unknown>) => {
+    const stored = await mount.characterStore.import({ ...CARD, ...(extensions ? { extensions } : {}) })
+    await flushPromises()
+    const tabs = mount.wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await mount.wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    return stored
+  }
+
+  it('重新生成追加候选并切换:候选独立、账本按候选回放、请求见重生成前状态', async () => {
+    const app = mountApp()
+    const { wrapper, variableStore, cardSessionStore } = app
+    const stored = await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
+
+    // 首轮:普通回复落账(未标记候选)。
+    nextReply = '第一次回复<setvars>{ "好感度": "+1" }</setvars>'
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    expect((await variableStore.get(stored.id))!.state['好感度']).toMatchObject({ value: 11 })
+
+    // ⟳ 重生成:第二个候选落地并激活;请求侧系统提示词看到重生成前状态(好感度 11)。
+    nextReply = '第二次回复<setvars>{ "好感度": "+5" }</setvars>'
+    await wrapper.find('button[aria-label="重新生成(追加候选)"]').trigger('click')
+    await flushPromises()
+
+    const session = (await cardSessionStore.get(stored.id))!
+    const aiFloor = session.messages.at(-1)!
+    // 存储原文纪律:候选携带 setvars 块原文,显示/请求侧才剥。
+    expect(aiFloor.content).toBe('第二次回复<setvars>{ "好感度": "+5" }</setvars>')
+    expect(aiFloor.candidates).toEqual([
+      '第一次回复<setvars>{ "好感度": "+1" }</setvars>',
+      '第二次回复<setvars>{ "好感度": "+5" }</setvars>',
+    ])
+    expect(aiFloor.activeIndex).toBe(1)
+    expect(wrapper.text()).toContain('第二次回复')
+    expect(wrapper.text()).toContain('2/2')
+
+    // 账本:旧候选事件回标 0,新候选事件标 1;当前状态 = 激活候选(10+1+5=16)。
+    const events = (await variableStore.get(stored.id))!.events
+    expect(events.map((event) => event.candidateIndex)).toEqual([0, 1])
+    expect((await variableStore.get(stored.id))!.state['好感度']).toMatchObject({ value: 16 })
+
+    // ‹ 切回第一候选:内容与变量状态跟着回放(好感度 11,面板直读视图层状态)。
+    await wrapper.find('button[aria-label="切换到上一候选(2/2)"]').trigger('click')
+    await flushPromises()
+    const switched = (await cardSessionStore.get(stored.id))!.messages.at(-1)!
+    expect(switched.content).toBe('第一次回复<setvars>{ "好感度": "+1" }</setvars>')
+    expect(switched.activeIndex).toBe(0)
+    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="11"]').exists()).toBe(true)
+    expect(wrapper.find('input[placeholder="16"]').exists()).toBe(false)
+    await wrapper.findAll('button').find((button) => button.text() === '完成')!.trigger('click')
+    await flushPromises()
+
+    // › 切回第二候选:状态回 16。
+    await wrapper.find('button[aria-label="切换到下一候选(1/2)"]').trigger('click')
+    await flushPromises()
+    expect((await cardSessionStore.get(stored.id))!.messages.at(-1)!.content).toBe('第二次回复<setvars>{ "好感度": "+5" }</setvars>')
+    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="16"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('重生成请求侧:[Variables] 分区与历史楼层都不含被重写楼层', async () => {
+    const app = mountApp()
+    const { wrapper } = app
+    await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
+    nextReply = '第一次<setvars>{ "好感度": "+1" }</setvars>'
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    nextReply = '第二次'
+    await wrapper.find('button[aria-label="重新生成(追加候选)"]').trigger('click')
+    await flushPromises()
+
+    const request = streamCalls.at(-1)!
+    expect(request.some((message) => message.content.includes('第一次'))).toBe(false)
+    // 重生成请求看到重生成前状态:被重写楼层的变量效果属于旧候选(此处 = 种子 10)。
+    const variables = request.find((message) => message.content.includes('[Variables]'))
+    expect(variables?.content).toContain('好感度 10')
+    wrapper.unmount()
+  })
+
+  it('删除楼层连带其后:确认模态写明楼数,变量事件随之回滚;取消不动', async () => {
+    const app = mountApp()
+    const { wrapper, cardSessionStore, variableStore } = app
+    const stored = await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
+    nextReply = '回复一<setvars>{ "好感度": "+2" }</setvars>'
+    await wrapper.find('textarea').setValue('第一句')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    nextReply = '回复二'
+    await wrapper.find('textarea').setValue('第二句')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(5) // 开场白 + 用户/AI ×2
+
+    // 取消:楼层不动。
+    const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(false)
+    await wrapper.find('button[aria-label="删除第 2 楼及其后"]').trigger('click')
+    await flushPromises()
+    expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(5)
+
+    // 确认:第 2 楼及其后(4 楼)删除,变量事件回滚到开场白前(空)。
+    confirmSpy.mockResolvedValue(true)
+    await wrapper.find('button[aria-label="删除第 2 楼及其后"]').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledWith('shell', expect.objectContaining({ message: expect.stringContaining('4 楼') }))
+    confirmSpy.mockRestore()
+    const after = (await cardSessionStore.get(stored.id))!
+    expect(after.messages).toHaveLength(1)
+    expect(after.messages[0]).toMatchObject({ role: 'assistant', content: '你好，旅人。' })
+    expect((await variableStore.get(stored.id))!.events).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('编辑楼层:原地改写存储原文与激活候选,下一轮请求携带新文', async () => {
+    const app = mountApp()
+    const { wrapper, cardSessionStore } = app
+    const stored = await enterCard(app)
+    nextReply = '原始回复'
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    
+    await wrapper.find('button[aria-label="编辑第 3 楼"]').trigger('click')
+    
+    const editor = wrapper.find('textarea')
+    expect((editor.element as HTMLTextAreaElement).value).toBe('原始回复')
+    await editor.setValue('改写后的回复')
+    await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
+    await flushPromises()
+
+    const session = (await cardSessionStore.get(stored.id))!
+    expect(session.messages.at(-1)!.content).toBe('改写后的回复')
+
+    // 下一轮请求:历史楼层带改写文。
+    nextReply = '好的'
+    await wrapper.find('textarea').setValue('继续')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+    expect(streamCalls.at(-1)!.some((message) => message.content === '改写后的回复')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('朗读按钮:经瞬态总线发朗读意图(带楼层文本),不直连 tts 插件', async () => {
+    // Minimal runtime stub — the view only reads stateOf (plugin gating) and
+    // emits tts.speak.requested; the real tts plugin subscribes on the bus.
+    const emitSpy = vi.fn()
+    const runtime = {
+      stateOf: () => 'active' as const,
+      emit: emitSpy,
+    } as unknown as ReturnType<typeof createPluginRuntime>
+    const app = mountApp({ runtime })
+    const { wrapper } = app
+    const stored = await enterCard(app)
+    nextReply = '可以朗读的回复'
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    await wrapper.find('button[aria-label="朗读第 3 楼"]').trigger('click')
+    expect(emitSpy).toHaveBeenCalledWith('tts.speak.requested', expect.objectContaining({
+      kind: 'card',
+      sessionId: stored.id,
+      text: '可以朗读的回复',
+    }))
+    wrapper.unmount()
+  })
+
+  it('chatbox 域同样可重生成:单候选首答 ⟳ 后成双候选', async () => {
+    const { wrapper, chatboxStore } = mountApp()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[0]!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '+')!.trigger('click')
+    await flushPromises()
+    await wrapper.find('textarea').setValue('你好')
+    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await flushPromises()
+
+    // 单候选:无 swipe 组,只有 ⟳。
+    expect(wrapper.find('button[aria-label^="切换到上一候选"]').exists()).toBe(false)
+    await wrapper.find('button[aria-label="重新生成(追加候选)"]').trigger('click')
+    await flushPromises()
+
+    const conversation = (await chatboxStore.list())[0]!
+    const stored = await chatboxStore.get(conversation.id)
+    expect(stored!.messages.at(-1)!.candidates).toEqual(['（测试回复）', '（测试回复）'])
+    expect(wrapper.text()).toContain('2/2')
+    wrapper.unmount()
+  })
+})

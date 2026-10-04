@@ -21,6 +21,10 @@ export interface ChatboxMessage extends StoredMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   ts: number
+  /** Swipe candidates (M4-c): regenerate appends; `content` always mirrors
+   *  the active candidate. Absent = single-candidate legacy floor. */
+  candidates?: string[]
+  activeIndex?: number
 }
 
 export interface ChatboxConversation {

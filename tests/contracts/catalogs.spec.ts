@@ -92,6 +92,8 @@ describe('transient events (§4.4)', () => {
       'plugin.state.changed',
       'app.resume',
       'app.pause',
+      // M4-c: the kernel chat page asks the tts plugin to toggle floor reading.
+      'tts.speak.requested',
     ])
   })
 })

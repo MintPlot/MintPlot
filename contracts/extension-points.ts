@@ -120,6 +120,9 @@ export interface VariableSetEvent extends SessionEventBase, VariableSetEventPayl
   /** Message the AI-side update was parsed from (manual updates omit it). */
   messageId?: string
   branchId?: string
+  /** Swipe-candidate attribution (M4-c): which candidate of the attributed
+   *  floor produced this update; absent = the floor's primary content. */
+  candidateIndex?: number
 }
 
 export type SessionEvent =
@@ -168,6 +171,8 @@ export interface TransientEventMap {
   'plugin.state.changed': { pluginId: string; state: 'registered' | 'active' | 'degraded' }
   'app.resume': Record<string, never>
   'app.pause': Record<string, never>
+  /** Kernel chat page asks the tts plugin to toggle reading of one floor. */
+  'tts.speak.requested': { sessionId: string; kind: 'chatbox' | 'card'; messageId: string; floorIndex: number; text: string }
 }
 
 export type TransientEventType = keyof TransientEventMap
@@ -179,4 +184,5 @@ export const TRANSIENT_EVENT_TYPES = [
   'plugin.state.changed',
   'app.resume',
   'app.pause',
+  'tts.speak.requested',
 ] as const satisfies readonly TransientEventType[]

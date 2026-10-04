@@ -68,6 +68,8 @@ export interface TtsService {
   testTtsVoice(): Promise<void>
   ttsSpeakTextFor(msg: { id?: string; content?: string } | null | undefined): string
   toggleSpeakMessage(index: number): Promise<void>
+  /** M4-c: bus-driven floor speak (kernel emits tts.speak.requested). */
+  toggleSpeakContent(msg: { id?: string; content?: string } | null | undefined): Promise<void>
   stopSpeaking(): Promise<void>
   onTtsCloudProviderChange(): void
 }
@@ -273,8 +275,13 @@ export function createTtsService(ctx: PluginContext): TtsService {
   }
 
   const toggleSpeakMessage = async (index: number): Promise<void> => {
-    const msg = ctx.session.getMessageAt(index)
-    if (!msg) return
+    await toggleSpeakContent(ctx.session.getMessageAt(index))
+  }
+
+  /** M4-c floor speak button: the kernel emits tts.speak.requested with the
+   *  floor text — projection-index free, content rides the event. */
+  const toggleSpeakContent = async (msg: { id?: string; content?: string } | null | undefined): Promise<void> => {
+    if (!msg?.id) return
     if (ttsPlayingMessageId.value === msg.id) {
       await stopSpeaking()
       return
@@ -349,6 +356,7 @@ export function createTtsService(ctx: PluginContext): TtsService {
     testTtsVoice,
     ttsSpeakTextFor,
     toggleSpeakMessage,
+    toggleSpeakContent,
     stopSpeaking,
     // Cloud settings
     ttsCloudProviderOptions: ttsProviderOptions,

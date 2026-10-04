@@ -39,6 +39,9 @@ export interface VariableApplyOptions {
   source: VariableSetEvent['source']
   /** AI-side updates: the floor the tag block was parsed from. */
   messageId?: string
+  /** Swipe-candidate attribution (M4-c): which candidate of the attributed
+   *  floor produced the update; absent = primary content (legacy). */
+  candidateIndex?: number
 }
 
 export interface VariableStore {
@@ -50,6 +53,43 @@ export interface VariableStore {
   /** Resolves updates against the current state (delta semantics), appends
    *  one event per name (no-op updates are skipped), replays, persists. */
   apply(cardId: string, updates: ParsedVariableUpdate[], options: VariableApplyOptions): Promise<VariableSnapshot>
+  /** M4-c floor deletion (连带其后): drops every event attributed to any of
+   *  the removed floors. User floors carry no events; later AI floors' events
+   *  still must go. */
+  rollbackFloors(cardId: string, messageIds: readonly string[]): Promise<VariableSnapshot>
+  /** M4-c regenerate: retags the floor's untagged events to the active
+   *  candidate index so per-candidate replay stays disjoint. */
+  retagUntaggedEvents(cardId: string, messageId: string, candidateIndex: number): Promise<VariableSnapshot>
+}
+
+/**
+ * Candidate-aware event filter (M4-c): events carrying a candidateIndex only
+ * count toward a floor whose active candidate matches — switching swipes must
+ * not mix sibling candidates' variables. Untagged events (legacy, manual,
+ * plain floors) always count; floors without candidates never filter.
+ */
+export function filterCandidateEvents(
+  events: readonly VariableSetEvent[],
+  candidateIndexOf: (messageId: string) => number | undefined,
+): VariableSetEvent[] {
+  return events.filter((event) => {
+    if (event.candidateIndex === undefined) return true
+    const active = candidateIndexOf(event.messageId ?? '')
+    return active === undefined || event.candidateIndex === active
+  })
+}
+
+/**
+ * Events strictly BEFORE the first event attributed to `messageId` (M4-c):
+ * the pre-floor ledger segment a regeneration request must see. Floors with
+ * no events return the whole stream unchanged.
+ */
+export function eventsBeforeFloor(
+  events: readonly VariableSetEvent[],
+  messageId: string,
+): VariableSetEvent[] {
+  const index = events.findIndex((event) => event.messageId === messageId)
+  return index >= 0 ? events.slice(0, index) : [...events]
 }
 
 const toSnapshot = (cardId: string, record: VariableRecord): VariableSnapshot => ({
@@ -151,6 +191,7 @@ export function createVariableStore(repository: StorageRepository): VariableStor
             after: resolved === null ? null : clampEventValue(resolved),
             source: options.source,
             ...(options.messageId ? { messageId: options.messageId } : {}),
+            ...(options.candidateIndex !== undefined ? { candidateIndex: options.candidateIndex } : {}),
           }
           record.events.push(event)
           if (event.after === null) delete state[update.name]
@@ -158,6 +199,32 @@ export function createVariableStore(repository: StorageRepository): VariableStor
         }
         await repository.set(keyOf(cardId), record)
       }
+      return toSnapshot(cardId, record)
+    },
+
+    async rollbackFloors(cardId, messageIds) {
+      const record =
+        (await repository.get<VariableRecord>(keyOf(cardId))) ?? { seed: [], events: [] }
+      const removed = new Set(messageIds)
+      const filtered = record.events.filter((event) => !removed.has(event.messageId ?? ''))
+      if (filtered.length !== record.events.length) {
+        record.events = filtered
+        await repository.set(keyOf(cardId), record)
+      }
+      return toSnapshot(cardId, record)
+    },
+
+    async retagUntaggedEvents(cardId, messageId, candidateIndex) {
+      const record =
+        (await repository.get<VariableRecord>(keyOf(cardId))) ?? { seed: [], events: [] }
+      let changed = false
+      for (const event of record.events) {
+        if (event.messageId === messageId && event.candidateIndex === undefined) {
+          event.candidateIndex = candidateIndex
+          changed = true
+        }
+      }
+      if (changed) await repository.set(keyOf(cardId), record)
       return toSnapshot(cardId, record)
     },
   }

@@ -54,7 +54,8 @@ import {
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
 import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
-import { replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import { replayTemplateStateAtFloor, filterCandidateEvents, eventsBeforeFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import { replayVariableState } from '@/kernel/variables/variable-engine'
 import {
   applyRegexPipeline,
   isFullHtmlDocument,
@@ -134,6 +135,23 @@ const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
 const analysisStatus = ref('')
+// M4-c floor actions: in-place editor state for one floor at a time.
+const editingFloorId = ref('')
+const editDraft = ref('')
+
+// Candidate-aware ledger projection (M4-c): events tagged with a
+// candidateIndex only count toward the floor's ACTIVE candidate — switching
+// swipes must not mix sibling candidates' variables. Untagged events
+// (legacy, manual, plain floors) always count.
+const candidateIndexOf = (messageId: string): number | undefined => {
+  const floor = messages.value.find((message) => message.id === messageId)
+  return floor?.candidates ? floor.activeIndex ?? 0 : undefined
+}
+const activeCandidateEvents = computed(() => filterCandidateEvents(variableEvents.value, candidateIndexOf))
+const absorbVariableSnapshot = (snapshot: VariableSnapshot): void => {
+  variableEvents.value = snapshot.events
+  variableState.value = replayVariableState(snapshot.seed, activeCandidateEvents.value)
+}
 
 /** Enabled card-embedded templates, highest order first (M3-r). Their state
  *  trees live in the ledger under the template id. */
@@ -237,7 +255,7 @@ const floorPanels = (message: ChatboxMessage): FloorPanels => {
   const panels: FloorPanels = { top: [], bottom: [] }
   for (const entry of activeTemplates.value) {
     const tree = replayTemplateStateAtFloor(
-      variableEvents.value,
+      activeCandidateEvents.value,
       entry.id,
       entry.initialVariableState as VariableState['value'],
       floorIndexOfMessage,
@@ -327,8 +345,7 @@ onMounted(async () => {
       // running ledger.
       const variableSnapshot = await variableStore?.ensure(card.value.id, buildVariableDefaults())
       if (variableSnapshot) {
-        variableState.value = variableSnapshot.state
-        variableEvents.value = variableSnapshot.events
+        absorbVariableSnapshot(variableSnapshot)
       }
     }
   } else {
@@ -401,8 +418,8 @@ const expandRequestText = (text: string): string => {
   return replaceCardMacros(withVariables, macroContext.value)
 }
 
-const buildRequestMessages = (): LlmChatMessage[] => {
-  const floors = messages.value
+const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): LlmChatMessage[] => {
+  const floors = floorsSource
   const result: LlmChatMessage[] = []
   // M3-w presets: the active group's entries, split by role. system entries
   // ride the very front of the system prompt; user/assistant entries become
@@ -607,7 +624,7 @@ const floorVariableSummary = (message: ChatboxMessage): { flat: Array<{ name: st
   const templateNames = new Map(activeTemplates.value.map((entry) => [entry.id, entry.name] as const))
   const flat: Array<{ name: string; value: string }> = []
   const templateLines: string[] = []
-  for (const event of variableEvents.value) {
+  for (const event of activeCandidateEvents.value) {
     if (event.messageId !== message.id) continue
     if (templateIds.has(event.name)) {
       templateLines.push(`${templateNames.get(event.name) ?? event.name} → 已更新`)
@@ -629,8 +646,7 @@ const toggleCapsule = (messageId: string): void => {
 }
 
 const onVariablesChanged = (snapshot: VariableSnapshot): void => {
-  variableState.value = snapshot.state
-  variableEvents.value = snapshot.events
+  absorbVariableSnapshot(snapshot)
 }
 
 // Live ledger projection pushed down to VariablesSheet (M4-a): AI-side applies
@@ -656,6 +672,7 @@ const stopStreaming = (): void => {
 const applyMatchedTemplateUpdates = async (
   parsed: ParsedTemplateUpdate[],
   messageId: string,
+  candidateIndex?: number,
 ): Promise<number> => {
   let matched = 0
   for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
@@ -671,10 +688,10 @@ const applyMatchedTemplateUpdates = async (
     const snapshot = await variableStore?.apply(card.value!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
       source: 'ai',
       messageId,
+      ...(candidateIndex !== undefined ? { candidateIndex } : {}),
     })
     if (snapshot) {
-      variableState.value = snapshot.state
-      variableEvents.value = snapshot.events
+      absorbVariableSnapshot(snapshot)
     }
   }
   return matched
@@ -751,33 +768,34 @@ const buildUserInfoLine = (): string => {
   return [name ? `用户名字：${name}` : '', persona ? `用户人设：${persona}` : ''].filter(Boolean).join('\n')
 }
 
-/** The streaming half of a turn: assistant floor, provider stream, usage
- *  attribution, ledger writes. Retries reuse the persisted user floor (no
- *  duplicate). */
-const runAssistantTurn = async (): Promise<void> => {
+/** The streaming half of a turn, shared by fresh sends and M4-c floor
+ *  regeneration: streams into an existing floor object, attributes usage and
+ *  variable events (candidateIndex tags regen candidates), runs the analysis
+ *  pipeline. Returns true when a reply fully landed. */
+const streamAssistantInto = async (
+  floor: ChatboxMessage,
+  requestMessages: LlmChatMessage[],
+  options: { candidateIndex?: number; isNewFloor?: boolean } = {},
+): Promise<boolean> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
-  if (!provider) return
-  const assistantFloor: ChatboxMessage = {
-    id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'assistant',
-    content: '',
-    ts: Date.now(),
-  }
-  messages.value.push(assistantFloor)
+  if (!provider) return false
+  const candidateIndex = options.candidateIndex
   streaming.value = true
   // Local alias: stopStreaming() may null the module ref while the stream's
   // rejection is still in flight — the catch must read the live signal.
   const controller = new AbortController()
   abortController = controller
+  let succeeded = false
   try {
-    const result = await provider.stream(buildRequestMessages(), {
+    const result = await provider.stream(requestMessages, {
       signal: controller.signal,
       onDelta: (delta) => {
-        assistantFloor.content += delta
+        floor.content += delta
         void scrollToBottom()
       },
     })
-    assistantFloor.content = result.content
+    floor.content = result.content
+    succeeded = true
     if (result.usage) {
       // Attribution: the record must say which session it came from — the
       // card domain types itself 'card' (labeled 角色卡 in the ledger) and
@@ -790,7 +808,7 @@ const runAssistantTurn = async (): Promise<void> => {
           : { detail: conversation.value?.title ?? '' }),
       })
     }
-    if (isCardDomain.value && card.value && variablesActive.value && assistantFloor.content) {
+    if (isCardDomain.value && card.value && variablesActive.value && floor.content) {
       // M3-q/M3-r: the reply's variable blocks become ledger events
       // (source=ai, floor-attributed) — flat setvars/StatData entries and
       // template-bound ui_template_updates trees alike. Storage failures
@@ -798,15 +816,18 @@ const runAssistantTurn = async (): Promise<void> => {
       // by the parsers.
       let matchedTemplateCount = 0
       try {
-        const { updates } = parseVariableUpdates(assistantFloor.content)
+        const { updates } = parseVariableUpdates(floor.content)
         if (updates.length > 0) {
-          const snapshot = await variableStore?.apply(card.value.id, updates, { source: 'ai', messageId: assistantFloor.id })
+          const snapshot = await variableStore?.apply(card.value.id, updates, {
+            source: 'ai',
+            messageId: floor.id,
+            ...(candidateIndex !== undefined ? { candidateIndex } : {}),
+          })
           if (snapshot) {
-            variableState.value = snapshot.state
-            variableEvents.value = snapshot.events
+            absorbVariableSnapshot(snapshot)
           }
         }
-        const blocks = parseTemplateUpdateBlocks(assistantFloor.content)
+        const blocks = parseTemplateUpdateBlocks(floor.content)
         if (blocks.length > 0 && activeTemplates.value.length > 0) {
           const parsed = blocks.flatMap((body) => {
             try {
@@ -815,7 +836,7 @@ const runAssistantTurn = async (): Promise<void> => {
               return []
             }
           })
-          matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, assistantFloor.id)
+          matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, floor.id, candidateIndex)
         }
       } catch (error) {
         console.error('[variables] failed to record AI-side updates:', error)
@@ -825,9 +846,9 @@ const runAssistantTurn = async (): Promise<void> => {
       if (activeTemplates.value.length > 0) {
         const analysisSettings = readTemplateAnalysisSettings(settingsState)
         if (!analysisSettings.mainModelAnalysis) {
-          await runTemplateAnalysisPipeline(assistantFloor)
+          await runTemplateAnalysisPipeline(floor)
         } else if (matchedTemplateCount === 0 && analysisSettings.analysisModel) {
-          await runTemplateAnalysisPipeline(assistantFloor)
+          await runTemplateAnalysisPipeline(floor)
         }
       }
     }
@@ -848,15 +869,29 @@ const runAssistantTurn = async (): Promise<void> => {
   } finally {
     streaming.value = false
     if (abortController === controller) abortController = null
-    if (assistantFloor.content === '') {
+    if (options.isNewFloor && floor.content === '') {
       // Aborted or failed before any token: drop the empty floor. Failed
       // turns leave only the user floor — history stays request-clean (D3).
-      const index = messages.value.findIndex((message) => message.id === assistantFloor.id)
+      const index = messages.value.findIndex((message) => message.id === floor.id)
       if (index >= 0) messages.value.splice(index, 1)
     }
     await persistSession()
     await scrollToBottom()
   }
+  return succeeded
+}
+
+const runAssistantTurn = async (): Promise<void> => {
+  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  if (!provider) return
+  const assistantFloor: ChatboxMessage = {
+    id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    role: 'assistant',
+    content: '',
+    ts: Date.now(),
+  }
+  messages.value.push(assistantFloor)
+  await streamAssistantInto(assistantFloor, buildRequestMessages(), { isNewFloor: true })
 }
 
 const send = async (overrideText?: string): Promise<void> => {
@@ -887,6 +922,153 @@ const retryLastSend = async (): Promise<void> => {
   if (streaming.value || !lastUserText.value) return
   sendError.value = ''
   await runAssistantTurn()
+}
+
+// ── M4-c floor actions ──────────────────────────────────────────────────────
+// Every floor carries a persistent action row (RP-Hub shape, plan D1/D2);
+// the LAST assistant floor adds the swipe group and regenerate (D3).
+
+const isLastAssistantFloor = (message: ChatboxMessage): boolean =>
+  message.role === 'assistant' && messages.value[messages.value.length - 1]?.id === message.id
+
+/** Regenerate (D3): re-rolls the last assistant floor as an ADDITIONAL
+ *  candidate. The ledger's pre-floor state drives the request; the previous
+ *  candidate stays switchable, and its untagged events are retagged first so
+ *  per-candidate replay stays disjoint. Abort/failure restores the previous
+ *  candidate untouched. */
+const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
+  if (streaming.value || !isLastAssistantFloor(floor)) return
+  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  if (!provider || !sessionLoaded.value) return
+  if (isCardDomain.value && card.value && variablesActive.value) {
+    await variableStore?.retagUntaggedEvents(card.value.id, floor.id, floor.activeIndex ?? 0)
+  }
+  if (!floor.candidates) {
+    floor.candidates = [floor.content]
+    floor.activeIndex = 0
+  }
+  const prevIndex = floor.activeIndex ?? 0
+  const prevContent = floor.candidates[prevIndex] ?? floor.content
+  const newIndex = floor.candidates.length
+  // The request sees the ledger AS OF before this floor (variables partition,
+  // worldbook scan, macros) — the floor itself is being rewritten.
+  const snapshot = isCardDomain.value && card.value ? await variableStore?.get(card.value.id) : null
+  if (snapshot) {
+    const preFloorEvents = eventsBeforeFloor(snapshot.events, floor.id)
+    variableEvents.value = preFloorEvents
+    variableState.value = replayVariableState(snapshot.seed, filterCandidateEvents(preFloorEvents, candidateIndexOf))
+  }
+  floor.activeIndex = newIndex
+  floor.candidates.push('')
+  const ok = await streamAssistantInto(
+    floor,
+    buildRequestMessages(messages.value.slice(0, -1)),
+    { candidateIndex: newIndex },
+  )
+  if (ok) {
+    floor.candidates[newIndex] = floor.content
+    floor.activeIndex = newIndex
+  } else {
+    // Aborted or failed: drop the placeholder candidate, restore the previous.
+    floor.candidates.pop()
+    floor.activeIndex = prevIndex
+    floor.content = prevContent
+    const restored = isCardDomain.value && card.value ? await variableStore?.get(card.value.id) : null
+    if (restored) absorbVariableSnapshot(restored)
+  }
+  await persistSession()
+}
+
+/** Swipe (D3): switch the displayed candidate; the ledger projection follows
+ *  the active candidate (candidate-aware replay). */
+const switchCandidate = async (floor: ChatboxMessage, direction: -1 | 1): Promise<void> => {
+  if (streaming.value || !floor.candidates?.length) return
+  const next = (floor.activeIndex ?? 0) + direction
+  if (next < 0 || next >= floor.candidates.length) return
+  floor.activeIndex = next
+  floor.content = floor.candidates[next] ?? ''
+  await persistSession()
+  if (isCardDomain.value && card.value && variablesActive.value) {
+    const snapshot = await variableStore?.get(card.value.id)
+    if (snapshot) absorbVariableSnapshot(snapshot)
+  }
+}
+
+/** Delete (D4): a floor and EVERYTHING after it leaves the conversation;
+ *  their ledger events roll back with them (confirm modal states the count). */
+const deleteFloorFrom = async (floor: ChatboxMessage): Promise<void> => {
+  if (streaming.value) return
+  const index = messages.value.findIndex((message) => message.id === floor.id)
+  if (index < 0) return
+  const count = messages.value.length - index
+  const confirmed = await uiService.confirm('shell', {
+    title: '删除楼层',
+    message: count > 1 ? `将删除此楼及其后 ${count} 楼,不可恢复。` : '将删除此楼,不可恢复。',
+    confirmLabel: '删除',
+  })
+  if (!confirmed) return
+  if (isCardDomain.value && card.value && variablesActive.value) {
+    await variableStore?.rollbackFloors(card.value.id, messages.value.slice(index).map((message) => message.id))
+  }
+  messages.value.splice(index)
+  await persistSession()
+  if (isCardDomain.value && card.value && variablesActive.value) {
+    const snapshot = await variableStore?.get(card.value.id)
+    if (snapshot) absorbVariableSnapshot(snapshot)
+  }
+}
+
+// In-place editor (plan §2): the bubble becomes a textarea; saving rewrites
+// the stored floor (and the active candidate's slot).
+const startEditFloor = (floor: ChatboxMessage): void => {
+  editingFloorId.value = floor.id
+  editDraft.value = floor.content
+}
+const cancelEditFloor = (): void => {
+  editingFloorId.value = ''
+  editDraft.value = ''
+}
+const saveEditFloor = async (): Promise<void> => {
+  const floor = messages.value.find((message) => message.id === editingFloorId.value)
+  if (!floor) {
+    cancelEditFloor()
+    return
+  }
+  floor.content = editDraft.value
+  if (floor.candidates && floor.activeIndex !== undefined) {
+    floor.candidates[floor.activeIndex] = floor.content
+  }
+  cancelEditFloor()
+  await persistSession()
+}
+
+const copyFloor = async (floor: ChatboxMessage): Promise<void> => {
+  try {
+    await navigator.clipboard.writeText(floor.content)
+    uiService.toast('shell', '已复制楼层原文', { tone: 'success' })
+  } catch {
+    uiService.toast('shell', '复制失败:剪贴板不可用', { tone: 'error' })
+  }
+}
+
+/** Speak (D5): the kernel emits an intent; the tts plugin toggles reading.
+ *  Red line — the view never imports the plugin, the bus carries the request
+ *  with the floor text (projection-index free). */
+const ttsActive = computed(() => {
+  if (!runtime) return true
+  const state = runtime.stateOf('tts')
+  return state === 'active' || state === 'degraded'
+})
+const toggleSpeakFloor = (floor: ChatboxMessage): void => {
+  if (streaming.value) return
+  const floorIndex = messages.value.findIndex((message) => message.id === floor.id)
+  runtime?.emit('tts.speak.requested', {
+    sessionId: isCardDomain.value ? card.value?.id ?? '' : conversation.value?.id ?? '',
+    kind: props.domain,
+    messageId: floor.id,
+    floorIndex,
+    text: floor.content,
+  })
 }
 
 const restartSession = async (): Promise<void> => {
@@ -1002,12 +1184,40 @@ const restartSession = async (): Promise<void> => {
             发送第一条消息开始对话
           </p>
           <div
-            v-for="message in messages"
+            v-for="(message, floorIndex) in messages"
             :key="message.id"
-            class="flex"
-            :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
+            class="flex flex-col"
+            :class="message.role === 'user' ? 'items-end' : 'items-start'"
           >
+            <!-- M4-c in-place editor (plan §2): saving rewrites the stored floor. -->
             <div
+              v-if="editingFloorId === message.id"
+              class="w-full max-w-[85%] rounded-bubble-ai border border-primary bg-card p-2"
+            >
+              <textarea
+                v-model="editDraft"
+                rows="3"
+                class="w-full resize-y rounded-input border border-line bg-bg px-2 py-1.5 text-sm leading-relaxed text-ink outline-none focus:border-primary"
+              />
+              <div class="mt-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="rounded-input border border-line px-2 py-1 text-xs text-ink-2"
+                  @click="cancelEditFloor"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="rounded-input bg-primary px-2 py-1 text-xs font-bold text-on-primary"
+                  @click="saveEditFloor"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+            <div
+              v-else
               class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
               :class="[
                 message.role === 'user'
@@ -1063,6 +1273,78 @@ const restartSession = async (): Promise<void> => {
                 v-if="isStreamingFloor(message)"
                 class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
               />
+            </div>
+            <!-- M4-c floor action row (RP-Hub shape, plan D1/D2): persistent
+                 under every floor; the last assistant floor adds the swipe
+                 group and regenerate. Hidden while streaming. -->
+            <div
+              v-if="!streaming && editingFloorId !== message.id"
+              class="mt-0.5 flex items-center gap-0.5"
+            >
+              <template v-if="isLastAssistantFloor(message)">
+                <template v-if="(message.candidates?.length ?? 0) > 1">
+                  <button
+                    type="button"
+                    class="floor-act"
+                    :class="{ 'opacity-40': (message.activeIndex ?? 0) <= 0 }"
+                    :aria-label="`切换到上一候选(${(message.activeIndex ?? 0) + 1}/${message.candidates?.length})`"
+                    @click="switchCandidate(message, -1)"
+                  >
+                    ‹
+                  </button>
+                  <span class="font-mono text-[10px] text-ink-3">{{ (message.activeIndex ?? 0) + 1 }}/{{ message.candidates?.length }}</span>
+                  <button
+                    type="button"
+                    class="floor-act"
+                    :class="{ 'opacity-40': (message.activeIndex ?? 0) >= (message.candidates?.length ?? 1) - 1 }"
+                    :aria-label="`切换到下一候选(${(message.activeIndex ?? 0) + 1}/${message.candidates?.length})`"
+                    @click="switchCandidate(message, 1)"
+                  >
+                    ›
+                  </button>
+                </template>
+                <button
+                  type="button"
+                  class="floor-act text-primary"
+                  aria-label="重新生成(追加候选)"
+                  @click="regenerateLast(message)"
+                >
+                  ⟳
+                </button>
+              </template>
+              <button
+                type="button"
+                class="floor-act"
+                :aria-label="`编辑第 ${floorIndex + 1} 楼`"
+                @click="startEditFloor(message)"
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                class="floor-act"
+                :aria-label="`复制第 ${floorIndex + 1} 楼`"
+                @click="copyFloor(message)"
+              >
+                ⧉
+              </button>
+              <button
+                v-if="message.role === 'assistant' && ttsActive"
+                type="button"
+                class="floor-act"
+                :aria-label="`朗读第 ${floorIndex + 1} 楼`"
+                @click="toggleSpeakFloor(message)"
+              >
+                🔊
+              </button>
+              <button
+                type="button"
+                class="floor-act text-danger"
+                :aria-label="`删除第 ${floorIndex + 1} 楼及其后`"
+                @click="deleteFloorFrom(message)"
+              >
+                🗑
+              </button>
             </div>
           </div>
         </div>
@@ -1154,6 +1436,23 @@ const restartSession = async (): Promise<void> => {
 </template>
 
 <style scoped>
+/* M4-c floor action row: 24px+ hit targets, quiet until touched. */
+.floor-act {
+  min-width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--color-ink-3, #93a69d);
+}
+.floor-act:active {
+  background: rgba(23, 168, 139, 0.12);
+  color: var(--color-primary, #17a88b);
+}
+
 /* M3-s panel frames: full-width slots above/below the floor text; the inner
  * iframe is created via v-html so it needs a deep rule (v-html content is
  * outside scoped-data attributes). */

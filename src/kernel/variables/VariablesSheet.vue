@@ -125,7 +125,12 @@ const saveTemplate = async (entry: CardUiTemplate): Promise<void> => {
 }
 
 const load = async (): Promise<void> => {
-  snapshot.value = (await store?.get(props.cardId)) ?? null
+  const loaded = (await store?.get(props.cardId)) ?? null
+  // The parent's live projection is candidate-aware (M4-c); the raw store
+  // replay is not — prefer the live state/events whenever it is connected.
+  snapshot.value = props.live && loaded
+    ? { ...loaded, state: props.live.state, events: props.live.events }
+    : loaded
   drafts.value = {}
   templateDrafts.value = {}
 }

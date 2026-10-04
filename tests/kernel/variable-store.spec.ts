@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import type { VariableSetEvent } from '@contracts'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
 import { replayVariableState } from '@/kernel/variables/variable-engine'
-import { createVariableStore, replayTemplateStateAtFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import { createVariableStore, replayTemplateStateAtFloor, filterCandidateEvents, eventsBeforeFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
 
 const DEFAULTS = [
   { name: '好感度', value: 10, description: '当前好感' },
@@ -189,5 +190,54 @@ describe('replayTemplateStateAtFloor · M3-s 逐楼快照 floor attribution', ()
     const result = replayTemplateStateAtFloor(eventsOf(after), 'tpl-1', INITIAL, floorOf, 2) as Record<string, unknown>
     result.hp = 0
     expect(INITIAL.hp).toBe(10)
+  })
+})
+
+describe('M4-c · candidate tagging, rollback and filtered replay', () => {
+  const seed = [{ name: '好感度', value: 10 }]
+
+  it('retagUntaggedEvents re-tags only the target floor; tagged rows stay put', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-9', seed)
+    await store.apply('cc-9', [{ name: '好感度', raw: '+1' }], { source: 'ai', messageId: 'm-1' })
+    await store.apply('cc-9', [{ name: '好感度', raw: '+2' }], { source: 'ai', messageId: 'm-1', candidateIndex: 1 })
+
+    const snapshot = await store.retagUntaggedEvents('cc-9', 'm-1', 0)
+    expect(snapshot.events.map((event) => event.candidateIndex)).toEqual([0, 1])
+    // Idempotent: a second retag of the same floor changes nothing.
+    const again = await store.retagUntaggedEvents('cc-9', 'm-1', 3)
+    expect(again.events.map((event) => event.candidateIndex)).toEqual([0, 1])
+  })
+
+  it('rollbackFloors drops every event of the removed floors and keeps the rest', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-9', seed)
+    await store.apply('cc-9', [{ name: '好感度', raw: '+1' }], { source: 'ai', messageId: 'm-1' })
+    await store.apply('cc-9', [{ name: '好感度', raw: '+5' }], { source: 'ai', messageId: 'm-2' })
+
+    const snapshot = await store.rollbackFloors('cc-9', ['m-user', 'm-2'])
+    expect(snapshot.events).toHaveLength(1)
+    expect(snapshot.state['好感度']).toMatchObject({ value: 11 })
+    // Idempotent.
+    expect((await store.rollbackFloors('cc-9', ['m-2'])).events).toHaveLength(1)
+  })
+
+  it('filterCandidateEvents keeps untagged rows and active-candidate rows only', () => {
+    // Pure-function shape probes: partial stubs cast to the contract event.
+    const event = (candidateIndex?: number) => ({ candidateIndex }) as unknown as VariableSetEvent
+    const events = [event(undefined), event(0), event(1), event(0)]
+    expect(filterCandidateEvents(events, () => 0)).toEqual([events[0], events[1], events[3]])
+    // Floors without candidates never filter (resolver returns undefined).
+    expect(filterCandidateEvents(events, () => undefined)).toEqual(events)
+  })
+
+  it('eventsBeforeFloor cuts at the first event of the target floor', () => {
+    const events = [
+      { messageId: 'm-1' },
+      { messageId: 'm-2' },
+      { messageId: 'm-2' },
+    ] as unknown as VariableSetEvent[]
+    expect(eventsBeforeFloor(events, 'm-2')).toEqual([{ messageId: 'm-1' }])
+    expect(eventsBeforeFloor(events, 'm-x')).toEqual(events)
   })
 })
