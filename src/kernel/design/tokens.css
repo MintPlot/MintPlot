@@ -31,6 +31,14 @@
   --mp-c-accent: 27 111 112;          /* 明主题文本强调 = teal-700 */
   --mp-c-on-primary: 255 255 255;     /* 主按钮上的文字,双主题恒白(白线语言) */
 
+  /* ── 聊天配色通道(another · 配色需求):气泡与强调色默认与主题同源,
+       用户选色后经 <html> 内联变量覆盖;背景即主题色,直接写 --mp-c-bg,不设独立令牌 ── */
+  --mp-c-bubble-user: 43 179 155;   /* 用户气泡 = Mint 500 */
+  --mp-c-on-bubble-user: 255 255 255;
+  --mp-c-bubble-ai: 255 255 255;    /* AI 气泡 = card */
+  --mp-c-on-bubble-ai: 23 35 31;    /* Ink 900 */
+  --mp-c-chat-accent: 27 111 112;   /* 角色名字 / 提示 = teal-700 */
+
   /* ── 复合 token(hairline / 洗色 / 玻璃,§03 §05)── */
   --mp-line: rgba(23, 35, 31, 0.1);        /* 默认边 1px @10% ink */
   --mp-line-strong: rgba(23, 35, 31, 0.18);
@@ -65,6 +73,13 @@
   --mp-c-ink-3: 111 133 122;  /* #6F857A(规格文档夜航 chrome 同源) */
 
   --mp-c-accent: 92 221 180;  /* 深色文本强调 = Mint 400,保持可见 */
+
+  /* 聊天配色通道默认(夜航同源;选色后由内联变量接管;背景即主题色无独立令牌) */
+  --mp-c-bubble-user: 43 179 155;   /* Mint 500 */
+  --mp-c-on-bubble-user: 255 255 255;
+  --mp-c-bubble-ai: 16 29 26;       /* 深色卡片与底同色 */
+  --mp-c-on-bubble-ai: 220 231 226; /* #DCE7E2 */
+  --mp-c-chat-accent: 92 221 180;   /* Mint 400 */
 
   --mp-line: rgba(220, 231, 226, 0.1);   /* 深底上用白线:亮墨 @10% */
   --mp-line-strong: rgba(220, 231, 226, 0.18);

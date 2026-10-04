@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import './main.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
+import { initMpChatPalette } from '@/kernel/design/chat-palette'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
@@ -16,6 +17,7 @@ import { getUsageStatsService } from '@/plugins/usage-stats/service-instance'
 import TtsPlugin from '@/plugins/tts'
 
 initMpTheme()
+initMpChatPalette()
 
 // Composition root — the only module allowed to see both the kernel and the
 // plugins; src/kernel/** stays free of plugin imports (red line).
