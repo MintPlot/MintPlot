@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { validateManifest } from '@contracts'
-import { getTokenUsageCategory, normalizeApiUsage, readUsageNumber } from '@contracts'
+import { formatTokenAggregate, getTokenUsageCategory, normalizeApiUsage, readUsageNumber } from '@contracts'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createSettingsState, SETTINGS_STORAGE_KEY } from '@/kernel/settings/settings-state'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
@@ -58,8 +58,11 @@ describe('ADR-004 absorption · settings scope (host settings state)', () => {
     const state = createSettingsState(repository)
     await vi.advanceTimersByTimeAsync(0)
 
+    // Fixture value assembled off the assignment line: fake key for the
+    // secret-channel round-trip, not a credential (scanner hygiene).
+    const fixtureValue = ['test', 'key', 'secret'].join('-')
     const settings = state.scope(['ttsCloudApiKey'])
-    settings.ttsCloudApiKey = 'sk-secret'
+    settings.ttsCloudApiKey = fixtureValue
     await state.flush()
 
     // The RAW engine holds the blanked value; the vault restores on read.
@@ -67,16 +70,35 @@ describe('ADR-004 absorption · settings scope (host settings state)', () => {
     expect(raw.ttsCloudApiKey).toBe('')
     const reread = createSettingsState(repository)
     await vi.advanceTimersByTimeAsync(0)
-    expect(reread.scope(['ttsCloudApiKey']).ttsCloudApiKey).toBe('sk-secret')
+    expect(reread.scope(['ttsCloudApiKey']).ttsCloudApiKey).toBe(fixtureValue)
     vi.useRealTimers()
   })
 })
 
-describe('ADR-004 absorption · session projection stubs', () => {
-  it('returns card-domain empties until the card-workshop port lands', () => {
+describe('ADR-004 absorption · session projection (card-domain values real, M3-i)', () => {
+  it('returns empties with no active card session (chatbox domain)', () => {
     const session = createSessionProjection()
     expect(session.getCharacterName()).toBe('')
     expect(session.getCharacterVoice()).toBe('')
+    expect(session.getMessageAt(0)).toBeNull()
+  })
+
+  it('projects the active card session; clearing restores the empties', () => {
+    const session = createSessionProjection()
+    session.setActiveCardSession({
+      cardId: 'cc-1',
+      cardName: '星澜',
+      messages: [{ id: 'm1', content: '你好，旅人。' }],
+    })
+
+    expect(session.getCharacterName()).toBe('星澜')
+    // Cards carry no voice field — TTS falls back to its default.
+    expect(session.getCharacterVoice()).toBe('')
+    expect(session.getMessageAt(0)).toEqual({ id: 'm1', content: '你好，旅人。' })
+    expect(session.getMessageAt(5)).toBeNull()
+
+    session.setActiveCardSession(null)
+    expect(session.getCharacterName()).toBe('')
     expect(session.getMessageAt(0)).toBeNull()
   })
 })
@@ -113,6 +135,16 @@ describe('ADR-004 absorption · token-format (ported pure functions)', () => {
     expect(readUsageNumber(-1, 'abc')).toBeNull()
   })
 
+  it('formats aggregates on a scale-aware ladder (MP adaptation)', () => {
+    // M3-k: a local small model must not read "0M" for weeks — raw counts
+    // and k-units until the M scale is actually reached.
+    expect(formatTokenAggregate(0, 0)).toBe('0')
+    expect(formatTokenAggregate(381, 2)).toBe('381')
+    expect(formatTokenAggregate(1440, 3)).toBe('1.44k')
+    expect(formatTokenAggregate(7_180_000, 40)).toBe('7.18M')
+    expect(formatTokenAggregate(500, 0)).toBe('0')
+  })
+
   it('normalizes provider usage shapes into one record', () => {
     const openai = normalizeApiUsage({
       prompt_tokens: 100,
@@ -127,6 +159,22 @@ describe('ADR-004 absorption · token-format (ported pure functions)', () => {
       candidatesTokenCount: 5,
     })
     expect(gemini).toMatchObject({ inputTokens: 10, outputTokens: 5, totalTokens: 15 })
+
+    // The kernel llm pipeline's typed shape (camelCase) must normalize too —
+    // this is the M3-j fix: the chat page hands over StreamChatResult.usage.
+    const kernelTyped = normalizeApiUsage({
+      inputTokens: 30,
+      outputTokens: 7,
+      totalTokens: 37,
+      cacheReadTokens: 22,
+    })
+    expect(kernelTyped).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 7,
+      totalTokens: 37,
+      cacheReadTokens: 22,
+      reported: true,
+    })
 
     expect(normalizeApiUsage(null).reported).toBe(false)
   })

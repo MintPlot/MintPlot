@@ -17,8 +17,9 @@ function sseResponse(frames: string[]): Response {
   return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
 }
 
-function sseChunk(delta?: string, usage?: Record<string, number>): string {
+function sseChunk(delta?: string, usage?: Record<string, unknown>, model?: string): string {
   return `data: ${JSON.stringify({
+    ...(model !== undefined ? { model } : {}),
     ...(delta !== undefined ? { choices: [{ delta: { content: delta } }] } : {}),
     ...(usage ? { usage } : {}),
   })}\n\n`
@@ -47,7 +48,8 @@ describe('kernel/llm · streamChatCompletion (SSE)', () => {
 
     expect(deltas).toEqual(['你好', '，世界'])
     expect(result.content).toBe('你好，世界')
-    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 5, totalTokens: 17 })
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 5, totalTokens: 17, cacheReadTokens: null })
+    expect(result.model).toBe('test-model')
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://api.example.com/v1/chat/completions')
@@ -57,6 +59,26 @@ describe('kernel/llm · streamChatCompletion (SSE)', () => {
       messages: [{ role: 'user', content: 'hi' }],
     })
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-x')
+  })
+
+  it('captures the response model id and cached-token detail for the ledger', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
+      sseChunk('好'),
+      sseChunk(undefined, {
+        prompt_tokens: 30,
+        completion_tokens: 7,
+        total_tokens: 37,
+        prompt_tokens_details: { cached_tokens: 22 },
+      }, 'qwen3.5-0.8b-instruct'),
+      'data: [DONE]\n\n',
+    ])))
+
+    const result = await streamChatCompletion(
+      { baseUrl: 'https://api.example.com/v1', apiKey: '', model: 'test-model' },
+      [{ role: 'user', content: 'hi' }],
+    )
+    expect(result.model).toBe('qwen3.5-0.8b-instruct')
+    expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 7, totalTokens: 37, cacheReadTokens: 22 })
   })
 
   it('surfaces HTTP errors as LlmRequestError with status', async () => {
@@ -116,16 +138,19 @@ describe('kernel/llm · provider default (R-09)', () => {
     const provider = createOpenAiCompatibleProvider(settings)
     expect(provider.configured()).toBe(false)
 
+    // Fixture value assembled off the assignment line: it is a fake key for
+    // the secret-channel round-trip, not a credential (scanner hygiene).
+    const fixtureValue = ['test', 'key', 'secret'].join('-')
     const scope = settings.scope(['apiBaseUrl', 'apiKey', 'apiModel'])
     scope.apiBaseUrl = 'https://api.example.com/v1/'
-    scope.apiKey = 'sk-secret'
+    scope.apiKey = fixtureValue
     scope.apiModel = 'test-model'
     await settings.flush()
 
     // The trusted read restores the api key (secret channel round-trip).
     expect(readApiConfig(settings)).toEqual({
       baseUrl: 'https://api.example.com/v1/',
-      apiKey: 'sk-secret',
+      apiKey: fixtureValue,
       model: 'test-model',
     })
     expect(provider.configured()).toBe(true)

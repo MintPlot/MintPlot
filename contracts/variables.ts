@@ -20,8 +20,18 @@ export const VARIABLE_EXPAND_POINT = 'variable-expand' as const
 
 export const CARD_PANEL_SECTION_PERMISSION = 'card.panel.section' as const
 
-/** Variable values are string or number — no nested structures in v1. */
-export type VariableValue = string | number
+/**
+ * Variable values (M3-r revision): nested JSON trees join the flat scalars —
+ * the ui-template replacement carries card state like `stats.physique.val`
+ * and `equipment[]`, so plain objects and arrays are first-class. v1's
+ * `string | number` remains the flat subset; booleans pass through unchanged
+ * inside trees.
+ */
+export interface VariableTree {
+  [key: string]: VariableValue
+}
+
+export type VariableValue = string | number | boolean | VariableTree | VariableValue[]
 
 /** How a variable update entered the system (review v1.0 Q3). */
 export type VariableSetSource = 'ai' | 'manual' | 'regex'

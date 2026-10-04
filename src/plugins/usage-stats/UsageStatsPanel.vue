@@ -5,8 +5,13 @@
 import { computed } from 'vue'
 import { formatTokenAggregate, formatTokenCount, formatTokenUsageTime } from '@contracts'
 import { getUsageStatsService } from './service-instance'
+import type { TokenUsageRecord } from './service'
 
 const service = computed(() => getUsageStatsService())
+
+/** Card name / conversation title carried by the record, if any. */
+const attributionLabel = (record: TokenUsageRecord): string =>
+  [record.characterName, record.detail].filter(Boolean).join(' · ')
 </script>
 
 <template>
@@ -59,7 +64,7 @@ const service = computed(() => getUsageStatsService())
                 : 'text-ink-3'"
               @click="service.tokenUsageFilter.value = category"
             >
-              {{ { all: '全部', chat: '主对话', memory: '记忆系统', variables: '变量分析' }[category] }}
+              {{ { all: '全部', chat: '对话', memory: '记忆系统', variables: '变量分析' }[category] }}
             </button>
           </div>
           <div class="relative flex-none">
@@ -123,28 +128,25 @@ const service = computed(() => getUsageStatsService())
           </div>
         </div>
 
-        <div class="mb-6 rounded-card border border-line bg-card">
-          <div class="grid grid-cols-2">
-            <div class="relative border-r border-line p-4">
-              <p class="flex items-center gap-2 text-[11px] font-medium text-ink-3">
-                <span class="h-1.5 w-1.5 rounded-full bg-primary" />
-                输入
-              </p>
-              <p class="mt-2 flex items-end gap-1 font-mono leading-none">
-                <span class="text-lg font-bold text-ink">{{ formatTokenAggregate(service.tokenUsageStats.value.inputTokens, service.tokenUsageStats.value.inputTokensReports) }}</span>
-                <span class="text-base font-normal text-ink-3">{{ formatTokenAggregate(service.tokenUsageStats.value.cacheReadTokens, service.tokenUsageStats.value.cacheReadTokensReports) }}</span>
-              </p>
-            </div>
-            <div class="relative p-4">
-              <p class="flex items-center gap-2 text-[11px] font-medium text-ink-3">
-                <span class="h-1.5 w-1.5 rounded-full bg-primary" />
-                输出
-              </p>
-              <p class="mt-2 flex items-end gap-1 font-mono leading-none">
-                <span class="text-lg font-bold text-ink">{{ formatTokenAggregate(service.tokenUsageStats.value.outputTokens, service.tokenUsageStats.value.outputTokensReports) }}</span>
-              </p>
-            </div>
-          </div>
+        <div class="mb-6 flex items-center gap-5 rounded-card border border-line bg-card px-3.5 py-2.5">
+          <span class="flex items-baseline gap-1.5">
+            <span class="flex items-center gap-1.5 text-[11px] font-medium text-ink-3">
+              <span class="h-1.5 w-1.5 rounded-full bg-primary" />
+              输入
+            </span>
+            <span class="font-mono text-sm font-bold leading-none text-ink">{{ formatTokenAggregate(service.tokenUsageStats.value.inputTokens, service.tokenUsageStats.value.inputTokensReports) }}</span>
+            <span
+              v-if="service.tokenUsageStats.value.cacheReadTokens > 0"
+              class="font-mono text-xs leading-none text-ink-3"
+            >{{ formatTokenAggregate(service.tokenUsageStats.value.cacheReadTokens, service.tokenUsageStats.value.cacheReadTokensReports) }}</span>
+          </span>
+          <span class="flex items-baseline gap-1.5">
+            <span class="flex items-center gap-1.5 text-[11px] font-medium text-ink-3">
+              <span class="h-1.5 w-1.5 rounded-full bg-primary" />
+              输出
+            </span>
+            <span class="font-mono text-sm font-bold leading-none text-ink">{{ formatTokenAggregate(service.tokenUsageStats.value.outputTokens, service.tokenUsageStats.value.outputTokensReports) }}</span>
+          </span>
         </div>
 
         <div class="mb-3 flex items-center justify-between">
@@ -161,49 +163,35 @@ const service = computed(() => getUsageStatsService())
           <article
             v-for="record in service.displayedTokenUsageHistory.value"
             :key="record.id"
-            class="rounded-card border border-line bg-card p-4"
+            class="rounded-card border border-line bg-card px-3.5 py-2.5"
           >
-            <div class="mb-3 flex items-start gap-3">
-              <div class="min-w-0 flex-1">
-                <div class="flex min-w-0 items-center gap-2">
-                  <span class="flex flex-shrink-0 items-center gap-1.5 text-sm font-semibold text-ink-2">
-                    <span class="h-1.5 w-1.5 rounded-full bg-primary" />
-                    {{ service.getTokenUsageTypeLabel(record.type) }}
-                  </span>
-                  <span
-                    class="min-w-0 flex-1 truncate text-sm text-ink-2"
-                    :title="record.model"
-                  >{{ record.model || '未知模型' }}</span>
-                </div>
-                <p
-                  v-if="record.characterName || record.detail"
-                  class="mt-1.5 min-w-0 truncate text-xs text-ink-3"
-                >
-                  {{ [record.characterName, record.detail].filter(Boolean).join(' · ') }}
-                </p>
-              </div>
-              <time class="flex-shrink-0 text-xs text-ink-3">{{ formatTokenUsageTime(record.timestamp) }}</time>
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="flex flex-shrink-0 items-center gap-1.5 text-xs font-semibold text-ink-2">
+                <span class="h-1.5 w-1.5 rounded-full bg-primary" />
+                {{ service.getTokenUsageTypeLabel(record.type) }}
+              </span>
+              <span class="min-w-0 flex-1 truncate text-xs text-ink-2">
+                {{ attributionLabel(record) }}
+              </span>
+              <time class="flex-shrink-0 text-[11px] text-ink-3">{{ formatTokenUsageTime(record.timestamp) }}</time>
             </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div class="rounded-input border border-line bg-bg px-3 py-3">
-                <p class="flex items-center gap-1.5 text-xs font-medium text-ink-3">
-                  <span class="h-1.5 w-1.5 rounded-full bg-primary" />
-                  输入
-                </p>
-                <p class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                  <span class="text-base font-bold text-ink">{{ formatTokenCount(record.inputTokens) }}</span>
-                  <span class="text-sm font-normal text-ink-3">{{ formatTokenCount(record.cacheReadTokens) }}</span>
-                </p>
-              </div>
-              <div class="rounded-input border border-line bg-bg px-3 py-3">
-                <p class="flex items-center gap-1.5 text-xs font-medium text-ink-3">
-                  <span class="h-1.5 w-1.5 rounded-full bg-primary" />
-                  输出
-                </p>
-                <p class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                  <span class="text-base font-bold text-ink">{{ formatTokenCount(record.outputTokens) }}</span>
-                </p>
-              </div>
+            <div class="mt-1.5 flex min-w-0 items-center gap-3">
+              <span class="flex-shrink-0 font-mono text-xs text-ink">
+                <span class="mr-1 font-sans text-[11px] text-ink-3">输入</span>{{ formatTokenCount(record.inputTokens) }}
+              </span>
+              <span class="flex-shrink-0 font-mono text-xs text-ink">
+                <span class="mr-1 font-sans text-[11px] text-ink-3">输出</span>{{ formatTokenCount(record.outputTokens) }}
+              </span>
+              <span
+                v-if="(record.cacheReadTokens ?? 0) > 0"
+                class="flex-shrink-0 font-mono text-xs text-ink-3"
+              >
+                <span class="mr-1 font-sans text-[11px]">缓存</span>{{ formatTokenCount(record.cacheReadTokens) }}
+              </span>
+              <span
+                class="min-w-0 flex-1 truncate text-right text-[11px] text-ink-3"
+                :title="record.model"
+              >{{ record.model || '未知模型' }}</span>
             </div>
           </article>
 

@@ -28,7 +28,7 @@ function makeServices(characterName = 'TestChar', confirmProbe?: { calls: { titl
   const services: KernelServices = {
     storage: createKvStore(createPrefixedEngine(createMemoryEngine(), MP_STORAGE_PREFIX)),
     settings: createMemorySettingsState(),
-    session: { getCharacterName: () => characterName, getCharacterVoice: () => '', getMessageAt: () => null },
+    session: { getCharacterName: () => characterName, getCharacterVoice: () => '', getMessageAt: () => null, setActiveCardSession: () => undefined },
     ledger: createSessionLedger(),
     bus,
     seams,
@@ -111,6 +111,90 @@ describe('usage-stats · service behavior (ported, mock ctx)', () => {
 
     await runtime.deactivate('usage-stats')
     expect(getUsageStatsService()).toBeNull()
+  })
+
+  it('explicit meta (model / characterName / detail) wins over the live projection', async () => {
+    const { service, runtime } = await activatePlugin('投影角色')
+    await flush()
+
+    // Kernel chat page shape (M3-j): typed camelCase usage + explicit meta.
+    service.recordApiUsage(
+      { inputTokens: 30, outputTokens: 7, totalTokens: 37, cacheReadTokens: null },
+      { type: 'chat', model: 'test-model', characterName: '星澜' },
+    )
+    service.recordApiUsage(
+      { inputTokens: 5, outputTokens: 2, totalTokens: 7, cacheReadTokens: null },
+      { type: 'chat', model: 'test-model', detail: '天空为什么是蓝的?' },
+    )
+    await flush()
+
+    // Newest first: the chatbox record keeps the projection fallback for
+    // characterName but carries the conversation title; the card record names
+    // the card explicitly. CamelCase usage must not normalize to zeros.
+    expect(service.tokenUsageHistory.value[0]).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 2,
+      model: 'test-model',
+      detail: '天空为什么是蓝的?',
+      characterName: '投影角色',
+    })
+    expect(service.tokenUsageHistory.value[1]).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 7,
+      characterName: '星澜',
+      detail: '',
+    })
+
+    await runtime.deactivate('usage-stats')
+  })
+
+  it('labels by raw type: card-domain records read 角色卡 and filter with the chat category', async () => {
+    const { service, runtime } = await activatePlugin('TestChar')
+    await flush()
+
+    expect(service.getTokenUsageTypeLabel('chat')).toBe('对话')
+    expect(service.getTokenUsageTypeLabel('card')).toBe('角色卡')
+    expect(service.getTokenUsageTypeLabel('summary')).toBe('记忆系统')
+    expect(service.getTokenUsageTypeLabel('embedding')).toBe('记忆系统')
+    expect(service.getTokenUsageTypeLabel('ui_template')).toBe('变量分析')
+    expect(service.getTokenUsageTypeLabel('ui_template_batch')).toBe('变量分析')
+    expect(service.getTokenUsageTypeLabel('anything-else')).toBe('对话')
+
+    // The card type still rides the chat category for the filter tabs.
+    service.recordApiUsage({ inputTokens: 8, outputTokens: 3, totalTokens: 11 }, { type: 'card', model: 'm', characterName: '星澜' })
+    await flush()
+    expect(service.tokenUsageHistory.value[0]?.type).toBe('card')
+    service.tokenUsageFilter.value = 'chat'
+    expect(service.filteredTokenUsageHistory.value).toHaveLength(1)
+    service.tokenUsageFilter.value = 'all'
+
+    await runtime.deactivate('usage-stats')
+  })
+
+  it('retypes persisted chat records that carry a character name to card (M3-l migration)', async () => {
+    const record = (id: string, type: string, characterName: string) => ({
+      id, timestamp: 1, type, model: 'm', detail: '', characterName,
+      inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null,
+      cacheWriteTokens: 0, reasoningTokens: null, reported: true,
+    })
+    const services = makeServices('TestChar')
+    // Preload the plugin-namespaced ledger the way pre-M3-l builds wrote it.
+    await services.storage.set('plug:usage-stats:token_usage_history', [
+      record('card-era', 'chat', '星澜'),
+      record('chatbox-era', 'chat', ''),
+    ])
+    const runtime = createPluginRuntime(services)
+    runtime.load(UsageStatsPlugin)
+    await runtime.activate('usage-stats')
+    const service = getUsageStatsService()
+    if (!service) throw new Error('usage-stats service not mounted')
+    await flush()
+
+    // A 'chat' record with a character name can only be a card-domain send —
+    // the chatbox projection never reports one. Idempotent for the rest.
+    expect(service.tokenUsageHistory.value.map((entry) => entry.type)).toEqual(['card', 'chat'])
+
+    await runtime.deactivate('usage-stats')
   })
 
   it('register view joins the plugin view registry and revokes on deactivate', async () => {

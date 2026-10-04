@@ -1,0 +1,12 @@
+{
+  "id": "variables",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "变量系统",
+    "description": "角色卡会话的状态账本：AI 标签块落账、{{getvar}} 宏展开、聊天页变量面板"
+  },
+  "sessions": ["card"],
+  "permissions": []
+}

@@ -235,12 +235,29 @@ export interface PluginSeams {
 }
 
 /**
- * Read-only diagnostics projection for the owning plugin (request journal
- * excerpts, hook invocations, quota state). Shape is draft until the M2
- * runtime defines the journal surface; `pluginId` is the one stable anchor.
+ * One diagnostic entry a plugin journals into the kernel error hub (M3-err3
+ * formalization — the draft `{pluginId}` placeholder is retired). Entries are
+ * attributed to the plugin automatically; the hub applies its own clamps,
+ * dedup and storm caps, so plugins cannot flood the journal.
+ */
+export interface PluginDiagnosticEntry {
+  severity?: 'info' | 'warn' | 'error'
+  action: string
+  /** ≤200-char plaintext summary; conversation content never belongs here. */
+  message: string
+  /** Unified error code (`MP-<DOMAIN>-<NNN>`) when the plugin has one. */
+  code?: string
+  context?: Record<string, string | number | boolean>
+}
+
+/**
+ * Diagnostics projection for the owning plugin. `pluginId` is the stable
+ * attribution anchor; `record` lands in the kernel error hub (category
+ * 'plugin') and surfaces on the settings-page diagnostics section.
  */
 export interface PluginDiagnostics {
   readonly pluginId: string
+  record(entry: PluginDiagnosticEntry): void
 }
 
 /**

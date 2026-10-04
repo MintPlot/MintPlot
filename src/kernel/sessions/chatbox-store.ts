@@ -21,6 +21,13 @@ export interface ChatboxMessage extends StoredMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   ts: number
+  /** Swipe candidates (M4-c): regenerate appends; `content` always mirrors
+   *  the active candidate. Absent = single-candidate legacy floor. */
+  candidates?: string[]
+  activeIndex?: number
+  /** User-attached images (M4-c/M4-d): the dataUrl persists with the floor;
+   *  `description` is the vision-model text (empty in direct-vision mode). */
+  imageAttachments?: Array<{ dataUrl: string; description: string }>
 }
 
 export interface ChatboxConversation {

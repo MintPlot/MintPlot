@@ -16,6 +16,7 @@
 
 import type { KvEngine } from '@/kernel/store/kv-store'
 import { createLocalStorageEngine } from '@/kernel/store/kv-store'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 
 export const MP_IDB_NAME = 'mintplot'
 export const MP_IDB_VERSION = 1
@@ -102,6 +103,16 @@ export function createDefaultEngine(): KvEngine {
       } catch (error) {
         degraded = true
         console.error('[idb-engine] IndexedDB unavailable; degrading to localStorage for this session:', error)
+        // M3-err1: the degrade is a data-safety event — journal it (fatal,
+        // MP-STORE-001) so the graded-popups path surfaces the modal (D11).
+        errorHub.record({
+          severity: 'fatal',
+          category: 'storage',
+          action: 'idb_degraded',
+          code: 'MP-STORE-001',
+          message: 'IndexedDB 不可用,已降级为 localStorage(本会话)',
+          context: { reason: String((error as Error)?.message ?? '').slice(0, 200) },
+        })
       }
     }
     return operation(fallback)

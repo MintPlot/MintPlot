@@ -1,17 +1,20 @@
 /**
  * LLM provider seam default (R-09: the kernel owns the interface and the
  * default implementation) — an OpenAI-compatible provider whose config comes
- * from the host settings store (`apiBaseUrl` / `apiKey` / `apiModel`; the
- * key is restored by the trusted repository read). Plugins override via
+ * from the host settings store through the M4-b profile resolution
+ * (`apiProfiles` + `apiActiveProfileId`, legacy flat trio as read fallback;
+ * keys ride the secret channel). Plugins override via
  * ctx.registerSeamProvider('llm.provider', …); consumers resolve through
  * ctx.seams or the registry.
  */
 
+import { resolveApiConfig } from '@/kernel/llm/api-profiles'
+import type { ApiConfigSnapshot } from '@/kernel/llm/api-profiles'
 import type { LlmChatMessage, LlmRequestConfig, LlmUsage } from '@/kernel/llm/chat-completions'
 import { streamChatCompletion } from '@/kernel/llm/chat-completions'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 
-export const API_SETTINGS_KEYS = ['apiBaseUrl', 'apiKey', 'apiModel'] as const
+export const API_SETTINGS_KEYS = ['apiBaseUrl', 'apiKey', 'apiModel', 'apiProfiles', 'apiActiveProfileId'] as const
 
 export interface LlmProvider {
   readonly providerId: 'openai-compatible'
@@ -21,23 +24,14 @@ export interface LlmProvider {
       signal?: AbortSignal
       onDelta?: (delta: string) => void
     },
-  ): Promise<{ content: string; usage: LlmUsage | null }>
+  ): Promise<{ content: string; usage: LlmUsage | null; model?: string }>
   configured(): boolean
 }
 
-export interface ApiConfigSnapshot {
-  baseUrl: string
-  apiKey: string
-  model: string
-}
+export type { ApiConfigSnapshot } from '@/kernel/llm/api-profiles'
 
 export function readApiConfig(settings: SettingsState): ApiConfigSnapshot {
-  const snapshot = settings.snapshot()
-  return {
-    baseUrl: String(snapshot.apiBaseUrl ?? ''),
-    apiKey: String(snapshot.apiKey ?? ''),
-    model: String(snapshot.apiModel ?? ''),
-  }
+  return resolveApiConfig(settings.snapshot())
 }
 
 export function createOpenAiCompatibleProvider(settings: SettingsState): LlmProvider {

@@ -1,23 +1,38 @@
 <script setup lang="ts">
-// 角色 tab(M3-f):角色卡工坊第一块真实拼图 —— 导卡。PNG(chara/ccv3 tEXt
-// 文本块)或 JSON 文件 → 解析归一 → character store 落库;列表 = 库投影。
-// 进卡开剧情(chat:card:<id> 会话)随卡玩法批次接入。
+// 角色 tab(M3-f 导卡 + M3-i 进卡开玩 + M3-m 封面网格):PNG(chara/ccv3 tEXt
+// 文本块)或 JSON 文件 → 解析归一 → character store 落库;PNG 卡文件本身就是
+// 封面画,随导入存成 data URL(`character:cover:<id>`,JSON 卡无图走占位猫)。
+// 列表 = 双列封面网格,点卡直接进入该卡的对话(D2,RP 式:无详情页无会话
+// 列表,进卡即接续);删除连带清掉该卡会话与封面。
 import { inject, onMounted, ref } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
-import { CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
-import { CharacterCardError, parseCharacterCardFile } from '@/kernel/characters/character-card'
+import { CARD_SESSION_STORE_KEY, CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
+import { openConversation } from '@/kernel/app/chat-router'
+import { CharacterCardError, isPngBytes, parseCharacterCardFile } from '@/kernel/characters/character-card'
 import type { CharacterCardSummary } from '@/kernel/characters/character-store'
 import { uiService } from '@/kernel/ui/toasts'
 
 const store = inject(CHARACTER_STORE_KEY, null)
+const cardSessions = inject(CARD_SESSION_STORE_KEY, null)
 
 const cards = ref<CharacterCardSummary[]>([])
+const covers = ref<Record<string, string>>({})
 const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+
+const loadCovers = async (list: CharacterCardSummary[]): Promise<void> => {
+  if (!store) return
+  await Promise.all(list.map(async (card) => {
+    if (covers.value[card.id] !== undefined) return
+    const url = await store.getCover(card.id)
+    if (url) covers.value[card.id] = url
+  }))
+}
 
 const refresh = async (): Promise<void> => {
   if (!store) return
   cards.value = await store.list()
+  await loadCovers(cards.value)
   loading.value = false
 }
 
@@ -39,7 +54,8 @@ const importFile = async (event: Event): Promise<void> => {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer())
     const parsed = parseCharacterCardFile(bytes)
-    const stored = await store.import(parsed)
+    // A PNG card file is its own cover artwork; JSON files carry no image.
+    const stored = await store.import(parsed, isPngBytes(bytes) ? bytes : undefined)
     uiService.toast('shell', `已导入「${stored.name}」`, { tone: 'success' })
     await refresh()
   } catch (error) {
@@ -47,20 +63,24 @@ const importFile = async (event: Event): Promise<void> => {
   }
 }
 
+const openCard = (card: CharacterCardSummary): void => {
+  openConversation(card.id, 'card')
+}
+
 const removeCard = async (card: CharacterCardSummary): Promise<void> => {
   if (!store) return
   const confirmed = await uiService.confirm('shell', {
     title: '删除角色卡',
-    message: `确定删除「${card.name}」吗?`,
+    message: `确定删除「${card.name}」吗?它的会话记录将一并删除。`,
     confirmLabel: '删除',
   })
   if (!confirmed) return
   await store.remove(card.id)
+  // Cascade: the card's session dies with it (no orphan card sessions).
+  await cardSessions?.remove(card.id)
+  delete covers.value[card.id]
   await refresh()
 }
-
-const snippetOf = (card: CharacterCardSummary): string =>
-  (card.description || card.spec).slice(0, 80)
 </script>
 
 <template>
@@ -103,28 +123,45 @@ const snippetOf = (card: CharacterCardSummary): string =>
       v-else
       class="min-h-0 flex-1 overflow-y-auto"
     >
-      <ul class="mx-auto max-w-xl">
-        <li
+      <div class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4">
+        <div
           v-for="card in cards"
           :key="card.id"
-          class="flex items-start gap-3 border-b border-line px-4 py-3"
+          class="relative aspect-[2/3] overflow-hidden rounded-xl border border-line bg-card shadow-sm"
         >
-          <span class="min-w-0 flex-1">
-            <span class="block truncate text-sm text-ink">{{ card.name }}</span>
-            <span class="mt-0.5 block truncate text-xs text-ink-3">{{ snippetOf(card) }}</span>
-          </span>
-          <span class="flex-shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-3">
-            {{ card.spec === 'v1' ? 'V1' : card.spec === 'chara_card_v3' ? 'V3' : 'V2' }}
-          </span>
           <button
             type="button"
-            class="flex-shrink-0 text-xs text-ink-3 active:text-danger"
-            @click="removeCard(card)"
+            class="absolute inset-0 h-full w-full text-left"
+            :aria-label="`进入「${card.name}」的对话`"
+            @click="openCard(card)"
           >
-            删除
+            <img
+              v-if="covers[card.id]"
+              :src="covers[card.id]"
+              :alt="card.name"
+              class="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+            >
+            <span
+              v-else
+              class="absolute inset-0 flex items-center justify-center bg-bg"
+            >
+              <MintCat class="h-12 w-12 text-ink-3" />
+            </span>
+            <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8">
+              <span class="block truncate text-sm text-white">{{ card.name }}</span>
+            </span>
           </button>
-        </li>
-      </ul>
+          <button
+            type="button"
+            class="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-xs leading-none text-white backdrop-blur-sm active:text-danger"
+            :aria-label="`删除角色卡「${card.name}」`"
+            @click.stop="removeCard(card)"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 </template>

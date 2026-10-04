@@ -15,7 +15,12 @@ import SettingsView from '@/kernel/app/views/SettingsView.vue'
 import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
+import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
+import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
+import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
+import ConfirmDialogHost from '@/kernel/ui/ConfirmDialogHost.vue'
+import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
 
 // Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
 // projection of the registry, not hardcoded; from M2+ the card workshop (characters tab)
@@ -53,6 +58,15 @@ disposers.push(
   registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection, placement: 'settings' }, 10),
   registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection, placement: 'settings' }, 20),
   registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
+  // M3-err2: the error hub's troubleshooting face — export is manual only.
+  registerSettingsSection('kernel', { id: 'diagnostics', title: '诊断', component: DiagnosticsSection, placement: 'settings' }, 40),
+  // M3-w followups: 变量分析 / 提示词预设 fold into their plugin's tools-area
+  // entry (user call). The HOST registers these under the plugins' ids — the
+  // section components live kernel-side and the red line forbids plugins
+  // importing kernel modules, so the composition root is the legitimate
+  // registration site.
+  registerSettingsSection('variables', { id: 'variables-analysis', title: '变量分析', component: TemplateAnalysisSection, placement: 'plugin' }, 10),
+  registerSettingsSection('presets', { id: 'presets', title: '预设设置', component: PresetSection, placement: 'plugin' }, 10),
 )
 
 onUnmounted(() => {
@@ -64,10 +78,10 @@ const activeId = ref(tabs.value[0]?.id ?? '')
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? tabs.value[0])
 
 // Full-screen chat page: the tab bar hides while a conversation is open.
+// M3-i: the route kind picks the domain — one session-page skeleton serves
+// chatbox and card conversations alike.
 const chatRoute = useChatRoute()
-const chatConversationId = computed(() =>
-  chatRoute.value.view === 'chat' ? chatRoute.value.conversationId : '',
-)
+const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.value : null))
 </script>
 
 <template>
@@ -80,7 +94,7 @@ const chatConversationId = computed(() =>
     </div>
 
     <nav
-      v-show="!chatConversationId"
+      v-show="!chatOverlay"
       class="shrink-0 border-t border-line bg-card"
       aria-label="主导航"
     >
@@ -108,11 +122,14 @@ const chatConversationId = computed(() =>
     </nav>
 
     <ChatSessionView
-      v-if="chatConversationId"
-      :key="chatConversationId"
-      :conversation-id="chatConversationId"
+      v-if="chatOverlay"
+      :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
+      :domain="chatOverlay.kind"
+      :conversation-id="chatOverlay.conversationId"
     />
 
     <ToastHost />
+    <ConfirmDialogHost />
+    <FatalErrorHost />
   </div>
 </template>

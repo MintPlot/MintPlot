@@ -7,7 +7,9 @@
  *  - ui.confirm takes an options object; ui.toast takes {tone};
  *  - the shell projection (toggleMobileMenu) is NOT absorbed — MP's
  *    four-tab shell has no mobile menu, the header menu button is dropped;
- *  - record type via session projection (card-domain stub returns '').
+ *  - record type via session projection; since M3-j the kernel chat page
+ *    passes explicit meta (model / characterName / detail), which wins over
+ *    the live projection read.
  */
 
 import { computed, ref, watch } from 'vue'
@@ -75,9 +77,20 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
     () => tokenUsageTimeFilterOptions.find((option) => option.value === tokenUsageTimeFilter.value)?.label ?? '全部',
   )
 
+  // One-time retyping (M3-l): chatbox sends never carry a character name —
+  // the card-session projection is the only source — so a persisted 'chat'
+  // record with a character name can only be a card-domain send made before
+  // the 'card' type existed. Idempotent; persists back when anything changed.
+  const retypeCardRecord = (record: TokenUsageRecord): TokenUsageRecord =>
+    record.type === 'chat' && record.characterName ? { ...record, type: 'card' } : record
+
   // Startup hydration: the plugin-namespaced key.
   void ctx.storage.get<TokenUsageRecord[]>(HISTORY_KEY).then((saved) => {
-    if (Array.isArray(saved)) tokenUsageHistory.value = saved
+    if (Array.isArray(saved)) {
+      const migrated = saved.map(retypeCardRecord)
+      tokenUsageHistory.value = migrated
+      if (migrated.some((record, index) => record !== saved[index])) void saveTokenUsageHistoryNow()
+    }
   }).catch((error) => console.error('[usage-stats] history load failed:', error))
 
   let saveQueue = Promise.resolve()
@@ -98,7 +111,9 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
       type: meta.type || 'chat',
       model: String(meta.model || ''),
       detail: String(meta.detail || ''),
-      characterName: ctx.session.getCharacterName(),
+      // Explicit meta wins (kernel callers know their session); the live
+      // session projection stays the fallback for callers that don't say.
+      characterName: meta.characterName || ctx.session.getCharacterName(),
       ...normalized,
     })
     saveTokenUsageHistoryNow().catch((error) => console.error('[usage-stats] history save failed:', error))
@@ -153,11 +168,17 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
     tokenUsagePage.value = Math.min(tokenUsagePage.value, pageCount)
   })
 
+  // Label by raw record type (M3-l): card-domain requests record type 'card'
+  // so the log distinguishes 对话 vs 角色卡; category-level types keep the
+  // ported labels and unknown types fall back to the chat category.
   const getTokenUsageTypeLabel = (type: string): string => ({
-    chat: '主对话',
-    memory: '记忆系统',
-    variables: '变量分析',
-  })[getTokenUsageCategory(type)] ?? '主对话'
+    chat: '对话',
+    card: '角色卡',
+    summary: '记忆系统',
+    embedding: '记忆系统',
+    ui_template: '变量分析',
+    ui_template_batch: '变量分析',
+  })[type] ?? '对话'
 
   // Inline control panel "latest usage" bar: the most recent main-chat
   // request (tool continuations, summary/embedding/ui-template excluded).

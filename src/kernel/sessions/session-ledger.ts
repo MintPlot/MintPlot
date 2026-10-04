@@ -6,6 +6,7 @@
  */
 
 import type { Disposer, SessionEvent, SessionEventFilter } from '@contracts'
+import { errorHub } from '@/kernel/diagnostics/error-hub'
 
 export interface SessionLedger {
   append(event: SessionEvent): void
@@ -40,6 +41,14 @@ export function createSessionLedger(): SessionLedger {
           subscription.handler(event)
         } catch (error) {
           console.error('[session-ledger] subscriber threw; isolation kept:', error)
+          errorHub.record({
+            severity: 'warn',
+            category: 'runtime',
+            action: 'ledger_subscriber_threw',
+            code: 'MP-RUN-007',
+            message: error instanceof Error ? error.message || error.name : String(error ?? 'unknown'),
+            context: { sessionKind: event.sessionKind },
+          })
         }
       }
     },

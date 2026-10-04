@@ -42,6 +42,13 @@ export default definePlugin({
     const service = createTtsService(ctx)
     setTtsService(service)
 
+    // M4-c floor speak button: the kernel chat page emits the intent with the
+    // floor text (red line — the view never imports this plugin); the bus
+    // subscription auto-unsubscribes with the activation bag.
+    ctx.on('tts.speak.requested', (event) => {
+      void service.toggleSpeakContent({ id: event.messageId, content: event.text })
+    })
+
     ctx.onDeactivate(() => {
       setTtsService(null)
     })
