@@ -7,6 +7,7 @@ import type { DiagnosticRecord } from '@/kernel/diagnostics/error-hub'
 import { errorCodeLabel } from '@/kernel/diagnostics/error-codes'
 import { installRequestDiagnostics } from '@/kernel/diagnostics/request-diagnostics'
 import { uiService } from '@/kernel/ui/toasts'
+import { copyText as copyToClipboard } from '@/kernel/app/ui/clipboard'
 
 // The seam API is idempotent: same window instance, same backing hub.
 const journal = installRequestDiagnostics(errorHub)
@@ -50,12 +51,10 @@ const formatTime = (ts: number): string => {
 }
 
 async function copyText(text: string, label: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    uiService.toast('shell', `已复制${label}`, { tone: 'success' })
-  } catch {
-    uiService.toast('shell', `复制失败:${label}不可用`, { tone: 'error' })
-  }
+  const succeeded = await copyToClipboard(text)
+  uiService.toast('shell', succeeded ? `已复制${label}` : `复制失败:${label}不可用`, {
+    tone: succeeded ? 'success' : 'error',
+  })
 }
 
 const copySummary = (): void => {

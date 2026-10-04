@@ -47,6 +47,7 @@ import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/te
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
+import { copyText } from '@/kernel/app/ui/clipboard'
 // M3-q variables: tag-block parsing/ledger on the card domain only — the
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
@@ -204,7 +205,12 @@ const onChatImageSelected = async (event: Event): Promise<void> => {
         pendingImages.value = pendingImages.value.map((image) => image.id === id ? { ...image, ...patch } : image)
       }
       try {
-        patchInto({ dataUrl: await compressImageFile(file) })
+        // Capture the compressed dataUrl locally — `pending` is the ORIGINAL
+        // object (patchInto replaces array slots with copies), so reading
+        // pending.dataUrl here would always send an empty image to the
+        // vision model (description mode never worked).
+        const dataUrl = await compressImageFile(file)
+        patchInto({ dataUrl })
         if (activeVisionCapable()) {
           patchInto({ status: 'ready' })
           return
@@ -212,7 +218,7 @@ const onChatImageSelected = async (event: Event): Promise<void> => {
         const config = resolveApiConfig(settingsState?.snapshot() ?? {})
         const description = await describeImage(
           { baseUrl: config.baseUrl, apiKey: config.apiKey, visionModel: readVisionModel() },
-          pending.dataUrl,
+          dataUrl,
         )
         patchInto({ description, status: 'ready' })
       } catch (error) {
@@ -604,11 +610,12 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
+  }
   // M3-w: message-role presets ride as standalone prefill messages right
-  // after the system block, in array order (RP prefill slot).
+  // after the system block, in array order (RP prefill slot). Outside the
+  // system-prompt guard — prefills must survive an empty system prompt.
   for (const prefill of presetPrefills) {
     result.push({ role: prefill.role, content: expandRequestText(prefill.content) })
-  }
   }
   // M3-v: prompt-side omission switch (D7) — a floor that IS a frontend
   // HTML document is replaced by a marker in the request; display keeps the
@@ -1167,12 +1174,10 @@ const saveEditFloor = async (): Promise<void> => {
 }
 
 const copyFloor = async (floor: ChatboxMessage): Promise<void> => {
-  try {
-    await navigator.clipboard.writeText(floor.content)
-    uiService.toast('shell', '已复制楼层原文', { tone: 'success' })
-  } catch {
-    uiService.toast('shell', '复制失败:剪贴板不可用', { tone: 'error' })
-  }
+  const succeeded = await copyText(floor.content)
+  uiService.toast('shell', succeeded ? '已复制楼层原文' : '复制失败:剪贴板不可用', {
+    tone: succeeded ? 'success' : 'error',
+  })
 }
 
 /** Speak (D5): the kernel emits an intent; the tts plugin toggles reading.

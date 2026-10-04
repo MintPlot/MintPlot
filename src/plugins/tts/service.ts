@@ -288,7 +288,7 @@ export function createTtsService(ctx: PluginContext): TtsService {
     }
     if (ttsPlayingMessageId.value !== null) await stopSpeaking()
     if (!settings.ttsEnabled) {
-      ctx.ui.toast('请先在设置中开启语音朗读', { tone: 'info' })
+      ctx.ui.toast('请先在「工具 → 插件 → 语音朗读」开启语音朗读', { tone: 'info' })
       return
     }
     const text = ttsSpeakTextFor(msg)
