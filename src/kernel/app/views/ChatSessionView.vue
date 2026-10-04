@@ -1303,7 +1303,7 @@ const restartSession = async (): Promise<void> => {
         <div class="mx-auto flex max-w-xl flex-col gap-3">
           <p
             v-if="messages.length === 0"
-            class="py-12 text-center text-xs text-ink-3"
+            class="py-12 text-center text-xs text-chat-accent"
           >
             发送第一条消息开始对话
           </p>
@@ -1345,8 +1345,8 @@ const restartSession = async (): Promise<void> => {
               class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
               :class="[
                 message.role === 'user'
-                  ? 'rounded-bubble-user bg-primary text-on-primary'
-                  : 'border border-line bg-card text-ink',
+                  ? 'rounded-bubble-user bg-chat-bubble-user text-chat-on-bubble-user'
+                  : 'border border-line bg-chat-bubble-ai text-chat-on-bubble-ai',
                 floorUsesHtmlFrame(message) || floorHasPanels(message) ? 'w-full max-w-none' : 'max-w-[85%]',
               ]"
             >

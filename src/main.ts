@@ -3,6 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app'
 import './main.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
+import { initMpChatPalette } from '@/kernel/design/chat-palette'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
@@ -44,6 +45,7 @@ import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
 
 initMpTheme()
+initMpChatPalette()
 
 // Error hub first (M3-err1): the journal is the last thing allowed to die,
 // so its nets and seam go up before anything else can throw. Persistence

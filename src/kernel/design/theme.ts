@@ -1,34 +1,66 @@
 import { ref } from 'vue'
 
-export type MpTheme = 'light' | 'dark'
-
 /**
- * 主题机制(M0-c):明 / 夜航墨绿双主题,经 <html>.dark 切换(Tailwind darkMode: 'class')。
- * 默认跟随系统 prefers-color-scheme;M0 不做存储纪律 —— 偏好持久化随 M2+ 设置器官入驻。
+ * 主题机制(仿 Edge 外观):浅色 / 深色 / 跟随系统三档偏好,持久化于
+ * localStorage(Edge 同款纪律:外观偏好属壳层,不进 mp_settings 插件域)。
+ * `pref` 是用户选择,`theme` 是解析后的实际明暗 —— 跟随系统档实时响应
+ * prefers-color-scheme 变化;`.dark` 类切换走 Tailwind darkMode: 'class'。
  */
-const theme = ref<MpTheme>(
-  typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light',
-)
+export type MpTheme = 'light' | 'dark'
+export type MpThemePref = 'light' | 'dark' | 'system'
 
-function applyTheme(value: MpTheme): void {
-  document.documentElement.classList.toggle('dark', value === 'dark')
+const PREF_KEY = 'mp_theme_pref'
+
+const prefersDark = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-color-scheme: dark)').matches
+
+function readPref(): MpThemePref {
+  if (typeof localStorage === 'undefined') return 'system'
+  const saved = localStorage.getItem(PREF_KEY)
+  return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
+}
+
+const pref = ref<MpThemePref>(readPref())
+const theme = ref<MpTheme>(pref.value === 'system' ? (prefersDark() ? 'dark' : 'light') : pref.value)
+
+function applyResolved(): void {
+  document.documentElement.classList.toggle('dark', theme.value === 'dark')
+}
+
+let media: MediaQueryList | null = null
+
+function bindSystemMedia(): void {
+  if (media !== null || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  media = window.matchMedia('(prefers-color-scheme: dark)')
+  const onChange = (event: MediaQueryListEvent): void => {
+    if (pref.value !== 'system') return
+    theme.value = event.matches ? 'dark' : 'light'
+    applyResolved()
+  }
+  // 老内核只有 addListener(Capacitor WebView 兜底)
+  if (typeof media.addEventListener === 'function') media.addEventListener('change', onChange)
+  else media.addListener(onChange)
 }
 
 export function useMpTheme() {
-  const setTheme = (value: MpTheme): void => {
-    theme.value = value
-    applyTheme(value)
+  const setPref = (value: MpThemePref): void => {
+    pref.value = value
+    try {
+      localStorage.setItem(PREF_KEY, value)
+    } catch {
+      /* 持久化失败不阻断切换 */
+    }
+    theme.value = value === 'system' ? (prefersDark() ? 'dark' : 'light') : value
+    applyResolved()
   }
-  const toggleTheme = (): void => {
-    setTheme(theme.value === 'dark' ? 'light' : 'dark')
-  }
-  return { theme, setTheme, toggleTheme }
+  const setTheme = (value: MpTheme): void => setPref(value)
+  const toggleTheme = (): void => setPref(theme.value === 'dark' ? 'light' : 'dark')
+  return { pref, theme, setPref, setTheme, toggleTheme }
 }
 
 export function initMpTheme(): void {
-  applyTheme(theme.value)
+  bindSystemMedia()
+  applyResolved()
 }

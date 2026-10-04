@@ -21,6 +21,15 @@ export default {
           DEFAULT: 'rgb(var(--mp-c-accent) / <alpha-value>)',
           wash: 'var(--mp-accent-wash)',
         },
+        // 聊天配色通道(another):真源在 tokens.css,用户选色经内联变量覆盖;
+        // 背景即主题色(bg 令牌本身),不设独立 chat 背景
+        chat: {
+          accent: 'rgb(var(--mp-c-chat-accent) / <alpha-value>)',
+          'bubble-user': 'rgb(var(--mp-c-bubble-user) / <alpha-value>)',
+          'on-bubble-user': 'rgb(var(--mp-c-on-bubble-user) / <alpha-value>)',
+          'bubble-ai': 'rgb(var(--mp-c-bubble-ai) / <alpha-value>)',
+          'on-bubble-ai': 'rgb(var(--mp-c-on-bubble-ai) / <alpha-value>)',
+        },
         'on-primary': 'rgb(var(--mp-c-on-primary) / <alpha-value>)',
         line: {
           DEFAULT: 'var(--mp-line)',
