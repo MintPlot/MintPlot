@@ -115,3 +115,26 @@ describe('M3-err1 · 聊天页错误条(D3:错误不写历史)', () => {
     expect(errorHub.all().filter((record) => record.action === 'request_failed')).toHaveLength(0)
   })
 })
+
+describe('M4-e follow-up · 空回复守卫(MP-CHAT-003)', () => {
+  beforeEach(() => {
+    errorHub.clear()
+  })
+
+  it('干净结束但零内容的流按失败呈现:错误条出现、空楼不落库、枢纽带码入账', async () => {
+    // 本地思考引擎只吐 reasoning 或旧版吞掉的上游错误帧 → content 为空;
+    // 静默无楼层曾经是唯一表现,现在必须是一条可见错误。
+    const stream = vi.fn().mockResolvedValue({ content: '', usage: null, model: 'thinking-model' })
+    const { wrapper, chatboxStore, conversationId } = await mountSession(stream)
+
+    await sendDraft(wrapper, '你好')
+
+    expect(wrapper.text()).toContain('请求失败:模型返回了空回复')
+    const stored = await chatboxStore.get(conversationId)
+    expect(stored!.messages).toHaveLength(1)
+    expect(stored!.messages[0]!.role).toBe('user')
+    const record = errorHub.all().at(-1)!
+    expect(record.code).toBe('MP-CHAT-003')
+    expect(record.category).toBe('chat')
+  })
+})

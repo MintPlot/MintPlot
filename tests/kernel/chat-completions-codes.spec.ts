@@ -31,3 +31,39 @@ describe('kernel/llm · unified error codes on LlmRequestError (M3-err1)', () =>
     ).rejects.toMatchObject({ code: 'MP-NET-002', status: 429 })
   })
 })
+
+describe('kernel/llm · upstream SSE error frames (M4-e follow-up)', () => {
+  it('an event:error data frame rejects with MP-NET-005 carrying the upstream message', async () => {
+    // LM Studio with a strict chat template reports mid-stream failures as an
+    // error frame instead of an HTTP status — unrecognized, it used to end as
+    // a silent empty turn.
+    const frame = [
+      'event: error',
+      `data: ${JSON.stringify({ error: { message: 'Jinja Exception: System message must be at the beginning' } })}`,
+      '',
+    ].join('\n')
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(frame))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+    await expect(
+      streamChatCompletion({ baseUrl: 'https://api.example.com/v1', apiKey: '', model: 'm' }, [{ role: 'user', content: 'hi' }]),
+    ).rejects.toMatchObject({ code: 'MP-NET-005', message: expect.stringContaining('System message must be at the beginning') })
+  })
+
+  it('a plain-string upstream error also surfaces', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: 'engine overloaded' })}\n\n`))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+    await expect(
+      streamChatCompletion({ baseUrl: 'https://api.example.com/v1', apiKey: '', model: 'm' }, [{ role: 'user', content: 'hi' }]),
+    ).rejects.toMatchObject({ code: 'MP-NET-005', message: expect.stringContaining('engine overloaded') })
+  })
+})

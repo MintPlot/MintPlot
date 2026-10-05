@@ -26,7 +26,8 @@ import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
-import type { LlmChatMessage, LlmContentPart, LlmRequestError } from '@/kernel/llm/chat-completions'
+import type { LlmChatMessage, LlmContentPart } from '@/kernel/llm/chat-completions'
+import { LlmRequestError } from '@/kernel/llm/chat-completions'
 import { resolveApiConfig } from '@/kernel/llm/api-profiles'
 import {
   CHAT_IMAGE_MAX_BYTES,
@@ -953,6 +954,12 @@ const streamAssistantInto = async (
         void scrollToBottom()
       },
     })
+    // A stream that settles cleanly with zero content (thinking-only local
+    // engines, upstream error frames older builds swallowed) is a failure the
+    // user must see — never a silent no-op turn (D3 would drop the floor).
+    if (!result.content.trim()) {
+      throw new LlmRequestError('模型返回了空回复', undefined, 'MP-CHAT-003')
+    }
     floor.content = result.content
     succeeded = true
     if (result.usage) {

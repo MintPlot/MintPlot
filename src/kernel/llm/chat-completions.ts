@@ -123,6 +123,10 @@ interface ChatCompletionChunk {
     total_tokens?: number
     prompt_tokens_details?: { cached_tokens?: number } | null
   } | null
+  /** Upstream error frame: LM Studio / OpenAI-compatible engines ride an
+   *  `event: error` line whose data JSON carries an error object instead of
+   *  a completion chunk. Unrecognized, it used to end as a silent empty turn. */
+  error?: unknown
 }
 
 export async function streamChatCompletion(
@@ -187,6 +191,16 @@ export async function streamChatCompletion(
         chunk = JSON.parse(payload) as ChatCompletionChunk
       } catch {
         return // keep-alive comments / partial frames are skipped
+      }
+      if (chunk.error) {
+        // Upstream engines (LM Studio strict chat templates, guarded
+        // gateways) report mid-stream failures as an error frame — surfacing
+        // it beats ending as a silent empty turn.
+        const raw = chunk.error
+        const detail = typeof raw === 'string'
+          ? raw
+          : String((raw as { message?: unknown })?.message ?? JSON.stringify(raw))
+        throw new LlmRequestError(`上游模型错误: ${detail.slice(0, 200)}`, undefined, 'MP-NET-005')
       }
       const delta = chunk.choices?.[0]?.delta?.content
       if (delta) {
