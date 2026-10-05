@@ -19,6 +19,7 @@ import { createSettingsState, SETTINGS_STORAGE_KEY } from '@/kernel/settings/set
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
 import { createSecretsVault } from '@/kernel/secrets/vault'
+import { mirrorSecretBundleIntoVault } from '@/kernel/secrets/vault-feed'
 import { createPlatformSecretChannel } from '@/kernel/secrets/platform-secret-channel'
 import { createPlatformCapability } from '@/kernel/app/platform'
 import { uiService } from '@/kernel/ui/toasts'
@@ -53,17 +54,7 @@ export function createKernel(): MpKernel {
   const vault = createSecretsVault()
   const feedVaultFromChannel = async (): Promise<void> => {
     const raw = await secretChannel.getSecret(`config:${SETTINGS_STORAGE_KEY}`)
-    if (!raw) return
-    let secrets: Record<string, unknown>
-    try {
-      secrets = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      return
-    }
-    for (const [path, value] of Object.entries(secrets)) {
-      const field = path.split('/').filter(Boolean).pop()
-      if (field && typeof value === 'string') vault.setSecret(field, value)
-    }
+    mirrorSecretBundleIntoVault(raw, vault)
   }
   const settings = createSettingsState({
     ...repository,
