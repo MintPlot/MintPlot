@@ -1,0 +1,12 @@
+{
+  "id": "memory",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "记忆系统",
+    "description": "滚动摘要 + 角色档案：旧对话自动整理进 <role_memory>，窗口外楼层不再进请求"
+  },
+  "sessions": ["card"],
+  "permissions": []
+}

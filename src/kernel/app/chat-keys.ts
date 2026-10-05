@@ -14,6 +14,7 @@ import type { VariableStore } from '@/kernel/variables/variable-store'
 import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import type { RegexStore } from '@/kernel/regex/regex-store'
 import type { PresetStore } from '@/kernel/presets/preset-store'
+import type { MemoryStore } from '@/kernel/memory/memory-store'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
 
@@ -34,6 +35,10 @@ export const REGEX_STORE_KEY: InjectionKey<RegexStore> = Symbol('regex-store')
 
 /** Prompt presets (M3-w) — app-level configuration, every domain. */
 export const PRESET_STORE_KEY: InjectionKey<PresetStore> = Symbol('preset-store')
+
+/** Rolling-summary memory ledger (M4-e, `memory:<kind>:<id>`) — card domain
+ *  first (the plugin declares sessions:['card']). */
+export const MEMORY_STORE_KEY: InjectionKey<MemoryStore> = Symbol('memory-store')
 
 /**
  * Host session projection — the card session page activates card-domain

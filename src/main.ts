@@ -15,6 +15,7 @@ import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createRegexStore } from '@/kernel/regex/regex-store'
 import { createPresetStore } from '@/kernel/presets/preset-store'
+import { createMemoryStore } from '@/kernel/memory/memory-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { createPlatformSecretChannel } from '@/kernel/secrets/platform-secret-channel'
 import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
@@ -34,6 +35,7 @@ import {
   WORLDBOOK_STORE_KEY,
   REGEX_STORE_KEY,
   PRESET_STORE_KEY,
+  MEMORY_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
@@ -43,6 +45,7 @@ import VariablesPlugin from '@/plugins/variables'
 import WorldinfoPlugin from '@/plugins/worldinfo'
 import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
+import MemoryPlugin from '@/plugins/memory'
 
 initMpTheme()
 initMpColorFamily()
@@ -97,6 +100,9 @@ const worldbookStore = createWorldbookStore(createStorageRepository(createDefaul
 const regexStore = createRegexStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 // Prompt presets (M3-w) — app-level; the seed sync runs on first read.
 const presetStore = createPresetStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
+// Rolling-summary memory ledger (M4-e, `memory:<kind>:<id>` reserved key)
+// — card domain first; the plugin is the tools-area toggle surface.
+const memoryStore = createMemoryStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -115,6 +121,9 @@ kernel.runtime.load(VariablesPlugin)
 kernel.runtime.load(WorldinfoPlugin)
 kernel.runtime.load(RegexPlugin)
 kernel.runtime.load(PresetsPlugin)
+// Memory system (M4-e): same serviceless shape — the summary pipeline,
+// ledger and injection engine stay kernel-side; the plugin is the toggle.
+kernel.runtime.load(MemoryPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
@@ -165,6 +174,7 @@ app.provide(VARIABLE_STORE_KEY, variableStore)
 app.provide(WORLDBOOK_STORE_KEY, worldbookStore)
 app.provide(REGEX_STORE_KEY, regexStore)
 app.provide(PRESET_STORE_KEY, presetStore)
+app.provide(MEMORY_STORE_KEY, memoryStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)
