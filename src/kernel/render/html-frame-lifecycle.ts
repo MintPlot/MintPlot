@@ -20,10 +20,14 @@ const activeFrames = new Set<HTMLIFrameElement>()
 // as any slot frees.
 const pendingVisible = new Set<HTMLIFrameElement>()
 let reactivating = false
+let activating = false
 let observer: IntersectionObserver | null = null
 
 const retryPendingActivation = (): void => {
-  if (reactivating || activeFrames.size >= limits.activeIframes) return
+  // `activating`: a suspend can run mid-activation (via freeSlot) — the slot
+  // it frees is about to be claimed by that very activation, so retrying
+  // here would overfill the budget. Wait until the activation has settled.
+  if (reactivating || activating || activeFrames.size >= limits.activeIframes) return
   reactivating = true
   try {
     for (const frame of pendingVisible) {
@@ -53,7 +57,9 @@ const suspend = (frame: HTMLIFrameElement | undefined, forced = false): void => 
 }
 
 const freeSlot = (preferredFrame: HTMLIFrameElement): void => {
-  if (activeFrames.size >= limits.activeIframes) return
+  // Evict only AT capacity — activating under budget must never touch a live
+  // frame (an inverted guard here would blank visible frames on every scroll).
+  if (activeFrames.size < limits.activeIframes) return
   const all = [...activeFrames]
   const victim = all.find((frame) => frame !== preferredFrame && !visible.get(frame))
     ?? all.find((frame) => frame !== preferredFrame)
@@ -64,12 +70,20 @@ const freeSlot = (preferredFrame: HTMLIFrameElement): void => {
 
 const activate = (frame: HTMLIFrameElement): void => {
   if (activeFrames.has(frame)) return
-  freeSlot(frame)
-  const source = sources.get(frame)
-  if (!source) return
-  frame.classList.remove('html-frame-suspended')
-  frame.srcdoc = source
-  activeFrames.add(frame)
+  activating = true
+  try {
+    freeSlot(frame)
+    const source = sources.get(frame)
+    if (!source) return
+    frame.classList.remove('html-frame-suspended')
+    frame.srcdoc = source
+    activeFrames.add(frame)
+  } finally {
+    activating = false
+  }
+  // A frame queued by this activation's eviction may now fit — retried after
+  // the activation has settled, never mid-flight (see retryPendingActivation).
+  retryPendingActivation()
 }
 
 const observeFrame = (frame: Element): void => {
@@ -86,6 +100,11 @@ const scan = (root: Node): void => {
   if (root instanceof Element) root.querySelectorAll('iframe.executable-html-frame').forEach(observeFrame)
   for (const frame of [...activeFrames]) {
     if (!frame.isConnected) activeFrames.delete(frame)
+  }
+  // Queued frames are held by a strong Set — prune detached ones here too,
+  // not only inside the retry drain.
+  for (const frame of [...pendingVisible]) {
+    if (!frame.isConnected) pendingVisible.delete(frame)
   }
 }
 
