@@ -73,6 +73,11 @@ describe('kernel/llm · stream timeout is idle, not absolute', () => {
     )
 
     const pending = streamChatCompletion(CONFIG, USER)
+    // Attach the settled-assertion BEFORE advancing timers: the rejection
+    // fires inside the timer-advance microtask drain, and a late handler
+    // would surface as an unhandled rejection (CI-visible, platform-timing
+    // dependent).
+    const settled = expect(pending).resolves.toMatchObject({ content: '一二', model: 'm' })
     await vi.advanceTimersByTimeAsync(1) // fetch resolves, pump starts
 
     remote.send(sse('{"model":"m","choices":[{"delta":{"content":"一"}}]}'))
@@ -84,7 +89,7 @@ describe('kernel/llm · stream timeout is idle, not absolute', () => {
     remote.send(sse('[DONE]'))
     remote.close()
 
-    await expect(pending).resolves.toMatchObject({ content: '一二', model: 'm' })
+    await settled
   })
 
   it('aborts with MP-NET-001 when the stream stalls past the idle window', async () => {
@@ -99,11 +104,13 @@ describe('kernel/llm · stream timeout is idle, not absolute', () => {
     )
 
     const pending = streamChatCompletion(CONFIG, USER)
+    // Assertion attached before the timer advance — see the note above.
+    const settled = expect(pending).rejects.toMatchObject({ code: 'MP-NET-001', message: '请求超时' })
     await vi.advanceTimersByTimeAsync(1)
     remote.send(sse('{"choices":[{"delta":{"content":"半"}}]}'))
     // One productive frame re-arms the window; then silence for 120s.
     await vi.advanceTimersByTimeAsync(120_000)
 
-    await expect(pending).rejects.toMatchObject({ code: 'MP-NET-001', message: '请求超时' })
+    await settled
   })
 })
