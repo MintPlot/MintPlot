@@ -93,7 +93,10 @@ export function createUpdateCheckerService(ctx: PluginContext): UpdateCheckerSer
         if (attempt > 1) {
           ctx.ui.toast(`重试下载第 ${attempt} / ${maxRetries} 次...`, { durationMs: 2000 })
         }
-        ctx.ui.toast('正在下载更新...', { durationMs: 0 })
+        // Transient status toasts — sticky (durationMs: 0) toasts here were
+        // never dismissed (the plugin toast API returns void, so the handle
+        // was lost) and stacked forever across retries.
+        ctx.ui.toast('正在下载更新...', { durationMs: 2000 })
         const dlResult = await downloadApk((fraction) => {
           downloadProgress.value = fraction
         })
@@ -103,7 +106,7 @@ export function createUpdateCheckerService(ctx: PluginContext): UpdateCheckerSer
           ctx.ui.toast(`下载失败: ${dlResult.error}`, { durationMs: 5000 })
           return
         }
-        ctx.ui.toast('正在安装...', { durationMs: 0 })
+        ctx.ui.toast('正在安装...', { durationMs: 2000 })
         const installResult = await saveAndInstallApk(dlResult.data!, dlResult.tag!)
         if (installResult.error) {
           ctx.ui.toast(`安装失败: ${installResult.error}`, { durationMs: 5000 })

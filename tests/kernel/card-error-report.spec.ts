@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
-import { EXECUTABLE_FRAME_CHANNEL, buildExecutableHtmlDocument, createExecutableHtmlIframe, startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { EXECUTABLE_FRAME_CHANNEL, buildExecutableHtmlDocument, createExecutableHtmlIframe, setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
+import { limits } from '@/kernel/runtime/runtime-policy'
 
 beforeEach(() => {
   errorHub.clear()
@@ -41,6 +42,29 @@ describe('kernel/render · card script error reporting (M3-err1, MP-CARD-001)', 
     // Height reporting still works alongside (regression guard).
     postFromFrame(iframe.contentWindow, { source: EXECUTABLE_FRAME_CHANNEL, type: 'height', value: 300 })
     expect(iframe.style.height).toBe('300px')
+    iframe.remove()
+  })
+
+  it('enforces the documented slash length cap host-side; oversized posts journal and never dispatch', () => {
+    startExecutableFrameHost()
+    const iframe = createExecutableHtmlIframe('<p>hi</p>')
+    document.body.appendChild(iframe)
+
+    const received: string[] = []
+    setExecutableFrameSlashHandler((command) => received.push(command))
+
+    const oversized = 'x'.repeat(limits.frameSlashMaxLength + 1)
+    postFromFrame(iframe.contentWindow, { source: EXECUTABLE_FRAME_CHANNEL, type: 'slash', command: oversized })
+    expect(received).toEqual([])
+    const record = errorHub.all().at(-1)!
+    expect(record.code).toBe('MP-CARD-001')
+    expect(record.message).toContain(String(limits.frameSlashMaxLength))
+
+    // At the cap it still goes through.
+    const atCap = 'y'.repeat(limits.frameSlashMaxLength)
+    postFromFrame(iframe.contentWindow, { source: EXECUTABLE_FRAME_CHANNEL, type: 'slash', command: atCap })
+    expect(received).toEqual([atCap])
+    setExecutableFrameSlashHandler(null)
     iframe.remove()
   })
 })

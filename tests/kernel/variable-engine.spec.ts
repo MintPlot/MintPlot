@@ -261,6 +261,19 @@ describe('kernel/variables · ui_template_updates protocol (M3-r)', () => {
     expect(rooted.nextState).toEqual({ b: 2 })
   })
 
+  it('hard-rejects prototype-dangerous path segments (allow-lists degenerate to allow-all on empty state)', () => {
+    const state: Record<string, unknown> = { hp: 10 }
+    const { nextState, rejectedKeys } = applyTemplateUpdates(state, [
+      { variables: { '__proto__.polluted': 'x', 'constructor.prototype.boom': 1, prototype: 2 } },
+    ])
+
+    expect(rejectedKeys).toEqual(['__proto__.polluted', 'constructor.prototype.boom', 'prototype'])
+    expect(nextState).toMatchObject({ hp: 10 })
+    // Object.prototype untouched — the write never escapes the state object.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    expect(({} as Record<string, unknown>).boom).toBeUndefined()
+  })
+
   it('routes updates by id, then name, then the sole active template', () => {
     const templates = [
       { id: 't1', name: '面板一' },

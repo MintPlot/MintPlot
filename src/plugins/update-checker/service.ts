@@ -161,12 +161,20 @@ export async function downloadApk(progressCallback?: (fraction: number) => void)
     journal.input({ kind: 'release_download', summary: `v${tag}` })
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
+    // IDLE deadline: the timer re-arms on every received chunk. The old
+    // clear-right-after-fetch left the body read loop with no deadline at
+    // all — a stalled connection hung the download forever.
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const armIdleTimeout = (): void => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
+      timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
+    }
+    armIdleTimeout()
 
     try {
       const response = await fetch(downloadUrl, { signal: controller.signal })
-      clearTimeout(timeoutId)
       if (!response.ok) {
+        if (timeoutId !== undefined) clearTimeout(timeoutId)
         const hint = response.status === 404 ? 'APK not found for this version' : `HTTP ${response.status}`
         journal.fail(new Error(hint))
         return { data: null, tag: null, error: hint }
@@ -174,6 +182,7 @@ export async function downloadApk(progressCallback?: (fraction: number) => void)
       const contentLength = Number(response.headers.get('Content-Length')) || 0
       journal.behavior({ name: 'download_started', result: 'ok', meta: { expectedBytes: contentLength } })
       if (contentLength > 0 && contentLength < MIN_APK_SIZE) {
+        if (timeoutId !== undefined) clearTimeout(timeoutId)
         const small = { error: `Server response too small (${Math.round(contentLength / 1024)}KB), aborting` }
         journal.fail(new Error(small.error))
         return { data: null, tag: null, error: small.error }
@@ -185,6 +194,7 @@ export async function downloadApk(progressCallback?: (fraction: number) => void)
 
       for (;;) {
         const result = await reader.read()
+        armIdleTimeout()
         if (result.done) break
         chunks.push(result.value)
         receivedLength += result.value.length
@@ -210,6 +220,7 @@ export async function downloadApk(progressCallback?: (fraction: number) => void)
         allChunks.set(chunk, position)
         position += chunk.length
       }
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
       journal.behavior({ name: 'download_finished', result: 'ok', meta: { receivedBytes: receivedLength } })
       journal.output({ totalChars: 0 }) // no "chars" for binary
       journal.complete()

@@ -15,6 +15,7 @@
   "dependencies": {
     "@capacitor/android": "^7.6.9",
     "@capacitor/app": "^7.1.2",
+    "@capacitor/clipboard": "^7.0.4",
     "@capacitor/core": "^7.6.9",
     "dompurify": "^3.4.16",
     "jquery": "^3.7.1",

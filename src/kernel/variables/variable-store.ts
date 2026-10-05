@@ -147,6 +147,9 @@ export function createVariableStore(repository: StorageRepository): VariableStor
     typeof value === 'string' && value.length > VARIABLE_VALUE_MAX_LENGTH
       ? value.slice(0, VARIABLE_VALUE_MAX_LENGTH)
       : value
+  // Serializes apply() read-modify-write pairs (errors isolated per call —
+  // a failed apply must not poison the chain for the next one).
+  let applyChain: Promise<unknown> = Promise.resolve()
 
   return {
     async ensure(cardId, defaults) {
@@ -169,37 +172,48 @@ export function createVariableStore(repository: StorageRepository): VariableStor
     },
 
     async apply(cardId, updates, options) {
-      const record =
-        (await repository.get<VariableRecord>(keyOf(cardId))) ?? { seed: [], events: [] }
-      if (updates.length > 0) {
-        const state = replayVariableState(record.seed, record.events)
-        for (const update of updates) {
-          const before = state[update.name]?.value ?? null
-          const resolved = resolveUpdateValue(update.raw, before)
-          // Deleting an absent variable and rewriting the same value are not
-          // facts worth a ledger row (structural equality for trees).
-          if (resolved === null ? before === null : (before !== null && sameValue(before, resolved))) continue
-          const event: VariableSetEvent = {
-            id: newEventId(),
-            ts: Date.now(),
-            kind: 'variable.set',
-            pluginId: 'variables',
-            sessionId: cardId,
-            sessionKind: 'card',
-            name: update.name,
-            before,
-            after: resolved === null ? null : clampEventValue(resolved),
-            source: options.source,
-            ...(options.messageId ? { messageId: options.messageId } : {}),
-            ...(options.candidateIndex !== undefined ? { candidateIndex: options.candidateIndex } : {}),
+      // Serialized read-modify-write: two overlapping applies (AI reply vs a
+      // manual sheet save) each read the same record and the last write would
+      // silently drop the loser's ledger events — one IDB transaction per
+      // operation gives no atomicity across the pair.
+      // Delta semantics (M4-c contract): deltas resolve against the FULL
+      // ledger — the new candidate CONTINUES the live state; candidate
+      // isolation happens at replay time (filterCandidateEvents in the view).
+      const run = applyChain.then(async () => {
+        const record =
+          (await repository.get<VariableRecord>(keyOf(cardId))) ?? { seed: [], events: [] }
+        if (updates.length > 0) {
+          const state = replayVariableState(record.seed, record.events)
+          for (const update of updates) {
+            const before = state[update.name]?.value ?? null
+            const resolved = resolveUpdateValue(update.raw, before)
+            // Deleting an absent variable and rewriting the same value are not
+            // facts worth a ledger row (structural equality for trees).
+            if (resolved === null ? before === null : (before !== null && sameValue(before, resolved))) continue
+            const event: VariableSetEvent = {
+              id: newEventId(),
+              ts: Date.now(),
+              kind: 'variable.set',
+              pluginId: 'variables',
+              sessionId: cardId,
+              sessionKind: 'card',
+              name: update.name,
+              before,
+              after: resolved === null ? null : clampEventValue(resolved),
+              source: options.source,
+              ...(options.messageId ? { messageId: options.messageId } : {}),
+              ...(options.candidateIndex !== undefined ? { candidateIndex: options.candidateIndex } : {}),
+            }
+            record.events.push(event)
+            if (event.after === null) delete state[update.name]
+            else state[update.name] = { value: event.after, updatedAt: event.ts, sourceEventId: event.id }
           }
-          record.events.push(event)
-          if (event.after === null) delete state[update.name]
-          else state[update.name] = { value: event.after, updatedAt: event.ts, sourceEventId: event.id }
+          await repository.set(keyOf(cardId), record)
         }
-        await repository.set(keyOf(cardId), record)
-      }
-      return toSnapshot(cardId, record)
+        return toSnapshot(cardId, record)
+      })
+      applyChain = run.then(() => undefined, () => undefined)
+      return run
     },
 
     async rollbackFloors(cardId, messageIds) {

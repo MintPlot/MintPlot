@@ -90,18 +90,26 @@ export function createTtsService(ctx: PluginContext): TtsService {
     { id: 'cloud', name: '云端 API', desc: 'OpenAI 兼容接口，按量计费', available: true },
   ] as const
   let ttsStateListener: ((payload: { state: string }) => void) | null = null
+  let cloudStateListener: ((payload: { state: string }) => void) | null = null
+
+  // ONE closure shared by both engines — ensureTtsEngineListeners can run on
+  // every status refresh / speak, and the cloud engine's listener set does
+  // not dedupe: a fresh closure per call accumulated unboundedly.
+  const handleEngineEnd = (payload: { state: string }): void => {
+    if (payload && (payload.state === 'done' || payload.state === 'error' || payload.state === 'stop')) {
+      if (ttsPlayingMessageId.value !== null) ttsPlayingMessageId.value = null
+    }
+  }
 
   const ensureTtsEngineListeners = (): void => {
-    const handleEnd = (payload: { state: string }): void => {
-      if (payload && (payload.state === 'done' || payload.state === 'error' || payload.state === 'stop')) {
-        if (ttsPlayingMessageId.value !== null) ttsPlayingMessageId.value = null
-      }
-    }
     if (!ttsStateListener && systemEngine?.onState) {
-      ttsStateListener = handleEnd
+      ttsStateListener = handleEngineEnd
       systemEngine.onState(ttsStateListener)
     }
-    if (cloudEngine?.onState) cloudEngine.onState(handleEnd)
+    if (!cloudStateListener && cloudEngine?.onState) {
+      cloudStateListener = handleEngineEnd
+      cloudEngine.onState(cloudStateListener)
+    }
   }
 
   // Push the persisted cloud provider fields into the engine. The API key
@@ -139,8 +147,10 @@ export function createTtsService(ctx: PluginContext): TtsService {
   const ttsCloudModelOptions = computed(() => getTtsProviderById(String(settings.ttsCloudProviderId ?? ''))?.models ?? [])
 
   // Keep the engine's provider snapshot and the settings status line in
-  // step while the user edits cloud fields.
-  watch(() => [settings.ttsCloudBaseUrl, settings.ttsCloudApiKey, settings.ttsCloudModel, settings.ttsCloudProviderId], () => {
+  // step while the user edits cloud fields. The watcher handle is disposed
+  // on deactivation — activate() runs outside any effect scope, so without
+  // an explicit stop the deactivated plugin kept reacting to setting edits.
+  const stopSettingsWatch = watch(() => [settings.ttsCloudBaseUrl, settings.ttsCloudApiKey, settings.ttsCloudModel, settings.ttsCloudProviderId], () => {
     if (settings.ttsService === 'cloud') void refreshTtsStatus()
   })
 
@@ -288,7 +298,7 @@ export function createTtsService(ctx: PluginContext): TtsService {
     }
     if (ttsPlayingMessageId.value !== null) await stopSpeaking()
     if (!settings.ttsEnabled) {
-      ctx.ui.toast('请先在设置中开启语音朗读', { tone: 'info' })
+      ctx.ui.toast('请先在「工具 → 插件 → 语音朗读」开启语音朗读', { tone: 'info' })
       return
     }
     const text = ttsSpeakTextFor(msg)
@@ -297,9 +307,14 @@ export function createTtsService(ctx: PluginContext): TtsService {
       return
     }
     try {
-      await speakTtsText(text)
+      // Mark the playing floor BEFORE awaiting — the cloud engine's speak()
+      // resolves only after the whole chunked playback, so a post-await
+      // assignment landed after the done event and stuck forever (stop taps
+      // started a second overlapping synthesis instead of stopping).
       ttsPlayingMessageId.value = msg.id
+      await speakTtsText(text)
     } catch (error) {
+      if (ttsPlayingMessageId.value === msg.id) ttsPlayingMessageId.value = null
       console.warn('[tts] speak failed:', error)
       ctx.ui.toast(`朗读失败: ${String((error as Error)?.message || error)}`, { tone: 'error' })
     }
@@ -337,6 +352,19 @@ export function createTtsService(ctx: PluginContext): TtsService {
       ctx.ui.toast(`朗读失败: ${String((error as Error)?.message || error)}`, { tone: 'error' })
     }
   }
+
+  // Deactivation must stop playback and release reactive work: the engines
+  // are module-level singletons holding a live Audio element / utterance —
+  // without this, toggling the plugin off left the audio playing with the
+  // speak handler already unsubscribed (no way to stop it).
+  ctx.onDeactivate(() => {
+    stopSettingsWatch()
+    void stopSpeaking()
+  })
+
+  // Resolve the engine status eagerly — the status line otherwise reads
+  // 「语音引擎检测中…」 until the first speak happens to run a refresh.
+  void refreshTtsStatus()
 
   return {
     // Settings whitelist projection (TtsSettings template v-model binds

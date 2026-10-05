@@ -137,7 +137,15 @@ export async function streamChatCompletion(
   const controller = new AbortController()
   const onAbort = (): void => controller.abort()
   options.signal?.addEventListener('abort', onAbort, { once: true })
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  // IDLE timeout, not an absolute cap: every received frame re-arms the timer,
+  // so a slow-but-productive stream (long RP replies, reasoning models) is
+  // never killed mid-generation — only a truly stalled connection aborts.
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const armIdleTimeout = (): void => {
+    if (timeout !== undefined) clearTimeout(timeout)
+    timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  }
+  armIdleTimeout()
 
   let content = ''
   let usage: LlmUsage | null = null
@@ -172,6 +180,7 @@ export async function streamChatCompletion(
     if (!response.body) throw new LlmRequestError('响应没有可读流', undefined, 'MP-NET-004')
 
     await readSseStream(response.body, (payload) => {
+      armIdleTimeout()
       if (payload === '[DONE]') return
       let chunk: ChatCompletionChunk
       try {
