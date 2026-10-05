@@ -121,6 +121,10 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
     async remove(cardId) {
       await repository.deleteChat(scopeOf(cardId))
       await repository.remove(metaKeyOf(cardId))
+      // M4-e: the card's memory ledger is session-scoped data — it dies with
+      // the session (card removal and 清空重开 alike; idempotent there, the
+      // view resets memory through the same repository contract).
+      await repository.deleteMemoryFragments(scopeOf(cardId))
       baselines.delete(cardId)
     },
 

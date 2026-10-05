@@ -37,6 +37,17 @@ describe('card session store · one session per card (chat:card keys)', () => {
     expect(await engine.get('chatmeta:card:cc-1')).toBeNull()
   })
 
+  it('remove cascades to the session-scoped memory ledger (M4-e follow-up)', async () => {
+    const engine = createMemoryEngine()
+    const store = createCardSessionStore(createStorageRepository(engine))
+    await store.create({ id: 'cc-3', name: '有记忆的卡', firstMes: '嗨' })
+    await engine.set('memory:card:cc-3', JSON.stringify({ short: '摘要', long: '', profile: { characters: [], relations: [], openPlots: [] }, batches: [], anchor: 0 }))
+
+    await store.remove('cc-3')
+
+    expect(await engine.get('memory:card:cc-3')).toBeNull()
+  })
+
   it('a card without a greeting opens floorless', async () => {
     const store = createCardSessionStore(createStorageRepository(createMemoryEngine()))
     const session = await store.create({ id: 'cc-2', name: '无开场白', firstMes: '' })
