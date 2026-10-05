@@ -239,3 +239,49 @@ describe('usage-stats · service behavior (ported, mock ctx)', () => {
     expect(accepted.tokenUsageHistory.value).toHaveLength(0)
   })
 })
+
+describe('usage-stats · persisted history cap (PR #2 hardening)', () => {
+  it('caps the history at 1000 records and keeps the newest, not the oldest', async () => {
+    // The confirm-dialog test leaves its runtime active and the view registry
+    // is a global sink — reuse the mounted service instead of colliding.
+    let service = getUsageStatsService()
+    let deactivate: (() => Promise<void>) | null = null
+    if (!service) {
+      const activated = await activatePlugin()
+      service = activated.service
+      deactivate = async (): Promise<void> => {
+        await activated.runtime.deactivate('usage-stats')
+      }
+    }
+    await flush()
+
+    // Pre-seed near the cap (recording 1000+ rows one by one would pay a full
+    // persistence write each and blow the test budget).
+    service!.tokenUsageHistory.value = Array.from({ length: 999 }, (_, index) => ({
+      id: `seed-${index}`,
+      timestamp: 1_000 + index,
+      type: 'chat',
+      model: 'old',
+      detail: '',
+      characterName: 'TestChar',
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      reported: false,
+    }))
+    service!.recordApiUsage({ prompt_tokens: 1 }, { type: 'chat', model: 'm-new-1' })
+    service!.recordApiUsage({ prompt_tokens: 2 }, { type: 'chat', model: 'm-new-2' })
+    await flush()
+
+    expect(service!.tokenUsageHistory.value).toHaveLength(1000)
+    // unshift → newest first: the trim must keep recent records.
+    expect(service!.tokenUsageHistory.value[0]?.model).toBe('m-new-2')
+    expect(service!.tokenUsageHistory.value[1]?.model).toBe('m-new-1')
+    expect(service!.tokenUsageHistory.value[999]?.model).toBe('old')
+
+    await deactivate?.()
+  })
+})

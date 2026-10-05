@@ -28,6 +28,15 @@ describe('regex projection (M3-v, dual field families)', () => {
     expect(c).toMatchObject({ pattern: 'foo', flags: 'i' })
   })
 
+  it('explicit enabled:false stays disabled (was coerced back on by `enabled === true || !disabled`)', () => {
+    const [a, b] = projectRegexScripts([
+      { name: '作者停用', regex: 'x', replacement: '', enabled: false },
+      { name: '显式开启', regex: 'y', replacement: '', enabled: true },
+    ])
+    expect(a!.enabled).toBe(false)
+    expect(b!.enabled).toBe(true)
+  })
+
   it('defaults: flags g, placement [1,2], both flags false, malformed entries skipped', () => {
     const [script] = projectRegexScripts([{ name: '裸', regex: 'x', replacement: 'y' }])
     expect(script).toMatchObject({ flags: 'g', placement: [1, 2], markdownOnly: false, promptOnly: false, minDepth: null, maxDepth: null })
