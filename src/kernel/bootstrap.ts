@@ -15,7 +15,7 @@ import { createKvStore, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
 import type { KvStore } from '@/kernel/store/kv-store'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
-import { createSettingsState } from '@/kernel/settings/settings-state'
+import { createSettingsState, SETTINGS_STORAGE_KEY } from '@/kernel/settings/settings-state'
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSessionProjection } from '@/kernel/sessions/session-projection'
 import { createSecretsVault } from '@/kernel/secrets/vault'
@@ -43,18 +43,47 @@ export function createKernel(): MpKernel {
   // chat:<kind>:<id>); the repository adds secret extraction on top, backed by
   // the platform secret channel (ADR-005: encrypted at rest via the shell
   // bridge, session-only memory without the native shell).
-  const repository = createStorageRepository(createDefaultEngine(), createPlatformSecretChannel())
+  const secretChannel = createPlatformSecretChannel()
+  const repository = createStorageRepository(createDefaultEngine(), secretChannel)
+  // Vault feed (M3 key input face): `ctx.secrets.use(key)` loans values users
+  // type into secret-shaped settings fields, but nothing wrote the vault —
+  // cloud TTS stayed unconfigured forever. Mirror the channel's field values
+  // into the vault at boot and after every settings write (the write path
+  // re-extracts secrets, so the channel is always the freshest source).
+  const vault = createSecretsVault()
+  const feedVaultFromChannel = async (): Promise<void> => {
+    const raw = await secretChannel.getSecret(`config:${SETTINGS_STORAGE_KEY}`)
+    if (!raw) return
+    let secrets: Record<string, unknown>
+    try {
+      secrets = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      return
+    }
+    for (const [path, value] of Object.entries(secrets)) {
+      const field = path.split('/').filter(Boolean).pop()
+      if (field && typeof value === 'string') vault.setSecret(field, value)
+    }
+  }
+  const settings = createSettingsState({
+    ...repository,
+    async set(key, value) {
+      await repository.set(key, value)
+      if (key === SETTINGS_STORAGE_KEY) void feedVaultFromChannel()
+    },
+  })
+  void feedVaultFromChannel()
   const services: KernelServices = {
     // ADR-003 default engine ladder: bare idb -> localStorage session fallback,
     // under MP's mp_ data prefix (plugin namespaces).
     storage: createKvStore(createPrefixedEngine(createDefaultEngine(), MP_STORAGE_PREFIX)),
-    settings: createSettingsState(repository),
+    settings,
     session: createSessionProjection(),
     ledger: createSessionLedger(),
     bus,
     seams,
     hooks: createHookRegistry(),
-    secrets: createSecretsVault(),
+    secrets: vault,
     platform: createPlatformCapability(),
     ui: uiService,
     views: pluginViewsSink,

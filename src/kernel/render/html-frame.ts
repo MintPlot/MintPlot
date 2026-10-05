@@ -191,6 +191,19 @@ export function startExecutableFrameHost(): void {
       return
     }
     if (data.type === 'slash' && typeof data.command === 'string' && data.command.trim()) {
+      // Enforce the documented cap on untrusted card-injected instructions —
+      // the limit existed in runtime-policy but was never applied, so a card
+      // could push a megabyte-sized user turn into the request.
+      if (data.command.length > limits.frameSlashMaxLength) {
+        errorHub.record({
+          severity: 'error',
+          category: 'card',
+          action: 'script_error',
+          code: 'MP-CARD-001',
+          message: `triggerSlash command rejected: exceeds ${limits.frameSlashMaxLength} chars`,
+        })
+        return
+      }
       slashHandler?.(data.command)
     }
   })

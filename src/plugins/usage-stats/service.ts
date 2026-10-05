@@ -62,6 +62,9 @@ export interface UsageStatsService {
 export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
   // --- Ledger and display state (ported from RP app.mjs / useUiState) ---
   const tokenUsageHistory = ref<TokenUsageRecord[]>([])
+  // Persisted-record cap: the history must not grow without bound (each send
+  // re-serializes the whole array into IndexedDB).
+  const USAGE_HISTORY_CAP = 1000
   const tokenUsagePage = ref(1)
   const tokenUsageFilter = ref('all')
   const tokenUsageTimeFilter = ref('all')
@@ -116,6 +119,11 @@ export function createUsageStatsService(ctx: PluginContext): UsageStatsService {
       characterName: meta.characterName || ctx.session.getCharacterName(),
       ...normalized,
     })
+    // Cap the history — unbounded growth made every send pay an ever-larger
+    // JSON clone + IndexedDB write (the UI aggregates by time range anyway).
+    if (tokenUsageHistory.value.length > USAGE_HISTORY_CAP) {
+      tokenUsageHistory.value.splice(USAGE_HISTORY_CAP)
+    }
     saveTokenUsageHistoryNow().catch((error) => console.error('[usage-stats] history save failed:', error))
   }
 

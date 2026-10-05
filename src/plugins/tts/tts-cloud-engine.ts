@@ -190,6 +190,7 @@ const playAudioUrl = (url: string, utteranceId: string): Promise<void> => new Pr
   const cleanup = (): void => {
     audio.removeEventListener('ended', onEnded)
     audio.removeEventListener('error', onError)
+    audio.removeEventListener('pause', onPause)
     if (activeAudio === audio) activeAudio = null
   }
   const onEnded = (): void => {
@@ -202,8 +203,19 @@ const playAudioUrl = (url: string, utteranceId: string): Promise<void> => new Pr
     releaseUrl(url)
     reject(new Error('Audio playback failed'))
   }
+  // stop() pauses the element mid-playback — without this listener the
+  // promise never settled (pause fires neither ended nor error), leaking the
+  // speak() frame and leaving the journal open for the whole session.
+  const onPause = (): void => {
+    if (state.currentUtteranceId !== utteranceId) {
+      cleanup()
+      releaseUrl(url)
+      resolve()
+    }
+  }
   audio.addEventListener('ended', onEnded)
   audio.addEventListener('error', onError)
+  audio.addEventListener('pause', onPause)
   // A stop() between chunk generations surfaces as an aborted fetch or a
   // paused element; treat a paused element without error as a clean stop.
   audio.play().then(() => {

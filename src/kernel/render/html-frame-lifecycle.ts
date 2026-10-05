@@ -14,22 +14,52 @@ import { limits } from '@/kernel/runtime/runtime-policy'
 const sources = new WeakMap<HTMLIFrameElement, string>()
 const visible = new WeakMap<HTMLIFrameElement, boolean>()
 const activeFrames = new Set<HTMLIFrameElement>()
+// Frames force-suspended while STILL intersecting (slot pressure): suspension
+// freezes their height, so the IntersectionObserver never re-fires for them
+// and they would stay blank forever. They queue here and re-activate as soon
+// as any slot frees.
+const pendingVisible = new Set<HTMLIFrameElement>()
+let reactivating = false
 let observer: IntersectionObserver | null = null
 
-const suspend = (frame: HTMLIFrameElement | undefined): void => {
+const retryPendingActivation = (): void => {
+  if (reactivating || activeFrames.size >= limits.activeIframes) return
+  reactivating = true
+  try {
+    for (const frame of pendingVisible) {
+      if (!frame.isConnected || !visible.get(frame)) {
+        pendingVisible.delete(frame)
+        continue
+      }
+      pendingVisible.delete(frame)
+      activate(frame)
+      return
+    }
+  } finally {
+    reactivating = false
+  }
+}
+
+const suspend = (frame: HTMLIFrameElement | undefined, forced = false): void => {
   if (!frame || !activeFrames.has(frame)) return
   const height = Math.max(80, Math.round(frame.getBoundingClientRect().height || 0))
   frame.style.height = `${height}px`
   frame.classList.add('html-frame-suspended')
   frame.srcdoc = '<!doctype html><html><body></body></html>'
   activeFrames.delete(frame)
+  if (forced) pendingVisible.add(frame)
+  else pendingVisible.delete(frame)
+  retryPendingActivation()
 }
 
 const freeSlot = (preferredFrame: HTMLIFrameElement): void => {
-  if (activeFrames.size < limits.activeIframes) return
+  if (activeFrames.size >= limits.activeIframes) return
   const all = [...activeFrames]
-  const inactive = all.find((frame) => frame !== preferredFrame && !visible.get(frame))
-  suspend(inactive ?? all.find((frame) => frame !== preferredFrame))
+  const victim = all.find((frame) => frame !== preferredFrame && !visible.get(frame))
+    ?? all.find((frame) => frame !== preferredFrame)
+  // forced = the victim was still intersecting: it must re-activate when a
+  // slot frees, otherwise it stays a blank frozen frame while on screen.
+  suspend(victim, victim !== undefined && visible.get(victim) === true)
 }
 
 const activate = (frame: HTMLIFrameElement): void => {

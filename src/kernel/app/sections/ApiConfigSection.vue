@@ -30,6 +30,8 @@ const fetchingModelsId = ref('')
 const status = ref<'unknown' | 'checking' | 'connected' | 'error'>('unknown')
 const statusLatency = ref(0)
 const statusError = ref('')
+// Monotonic probe token — only the latest probe may write the status lights.
+let probeSequenceCounter = 0
 
 const profileOrder = computed(() => Object.keys(profiles.value))
 
@@ -67,8 +69,12 @@ const probe = async (): Promise<void> => {
     statusError.value = ''
     return
   }
+  // Sequence guard: a slow probe from a previous profile must never
+  // overwrite the status of the profile the user just switched to.
+  const probeSequence = ++probeSequenceCounter
   status.value = 'checking'
   const result = await checkProfileConnectivity({ baseUrl: config.baseUrl, apiKey: config.apiKey })
+  if (probeSequence !== probeSequenceCounter) return
   status.value = result.ok ? 'connected' : 'error'
   statusLatency.value = result.latencyMs
   statusError.value = result.error ?? ''

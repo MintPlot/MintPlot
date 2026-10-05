@@ -61,7 +61,11 @@ export function projectRegexScript(raw: unknown, uid: number): RegexScript | nul
   }
   if (!pattern) return null
   const disabled = source.disabled === true
-  const enabled = source.enabled === true || !disabled
+  // Explicit fields win in order (enabled → disabled → default-on). The old
+  // `source.enabled === true || !disabled` coerced an explicit enabled:false
+  // into enabled whenever no `disabled` key existed — author-disabled scripts
+  // ran anyway.
+  const enabled = source.enabled === undefined ? !disabled : source.enabled === true
   // Placement values are NUMERIC roles (1 user / 2 assistant) — stringified
   // entries are coerced back so includes() matches.
   const placementRaw = Array.isArray(source.placement)
@@ -78,7 +82,7 @@ export function projectRegexScript(raw: unknown, uid: number): RegexScript | nul
     flags,
     replacement: toText(source.replaceString ?? source.replacement),
     placement: placement.includes(1) || placement.includes(2) ? placement : [1, 2],
-    enabled: source.enabled === undefined && source.disabled === undefined ? true : enabled,
+    enabled,
     markdownOnly,
     promptOnly,
     minDepth: typeof source.minDepth === 'number' ? source.minDepth : null,

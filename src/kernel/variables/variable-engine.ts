@@ -324,6 +324,9 @@ function mergeValue(existing: unknown, patch: unknown): unknown {
  *  known from the current state, the initial state, or an object-form
  *  schema; a string schema contributes no keys. No known keys at all →
  *  everything allowed; `$root` always allowed. */
+/** Path segments that must never be written however the allow-list resolves. */
+const UNSAFE_STATE_KEY = /^(?:__proto__|constructor|prototype)$/
+
 function isAllowedKey(
   key: string,
   state: Record<string, unknown>,
@@ -376,6 +379,15 @@ export function applyTemplateUpdates(
       }
       const parts = splitPath(key)
       if (parts.length === 0) continue
+      // Hard block on prototype-dangerous segments, regardless of the
+      // allow-list (which degenerates to allow-all for empty-state
+      // templates): `target['__proto__']` hands back Object.prototype and the
+      // leaf write would pollute it for the whole session — model output must
+      // not escape the state object model.
+      if (parts.some((part) => UNSAFE_STATE_KEY.test(part))) {
+        rejectedKeys.push(key)
+        continue
+      }
       let target: Record<string, unknown> = nextState
       for (let index = 0; index < parts.length - 1; index += 1) {
         const part = parts[index]!

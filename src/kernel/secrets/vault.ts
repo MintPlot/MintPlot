@@ -23,7 +23,9 @@ export function createSecretsVault(): SecretsVault {
     },
     async use<T>(key: string, fn: (secret: string) => MaybePromise<T>): Promise<T> {
       const secret = secrets.get(key)
-      if (secret === undefined) {
+      // An empty string means the user cleared the field — as good as unset
+      // (the vault feed mirrors cleared fields so stale loans never resolve).
+      if (secret === undefined || secret === '') {
         throw new Error(`[secrets] secret "${key}" is not set`)
       }
       return await fn(secret)
