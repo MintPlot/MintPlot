@@ -1,10 +1,12 @@
 /**
- * 剪贴板工具(M3 修复):Android WebView 里 navigator.clipboard 经常未实现或
- * 被权限策略拒绝(用户看到「复制失败:剪贴板不可用」),因此按可靠性降级:
- *   1. Capacitor 原生剪贴板(真机上最可靠);
- *   2. Web Clipboard API(桌面 / 安全上下文);
- *   3. execCommand('copy') 兜底(用户手势窗口内同步执行,WebView 有效)。
- * 返回是否成功,由调用方负责提示文案。
+ * Clipboard helper — in the Android WebView navigator.clipboard is often
+ * missing or denied by the permissions policy (users saw the copy-failure
+ * toast), so writes fall through by reliability:
+ *   1. Capacitor native clipboard (most reliable on device);
+ *   2. Web Clipboard API (desktop / secure contexts);
+ *   3. execCommand('copy') last resort (synchronous inside the user-gesture
+ *      window, works in the WebView).
+ * Returns whether the write succeeded; callers own the toast copy.
  */
 import { Capacitor } from '@capacitor/core'
 import { Clipboard } from '@capacitor/clipboard'
@@ -16,7 +18,7 @@ export async function copyText(text: string): Promise<boolean> {
       await Clipboard.write({ string: text })
       return true
     } catch {
-      /* 原生剪贴板失败,继续降级 */
+      // Native clipboard failed — fall through to the Web API.
     }
   }
   if (navigator.clipboard) {
@@ -24,7 +26,7 @@ export async function copyText(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text)
       return true
     } catch {
-      /* Web Clipboard 失败,继续降级 */
+      // Web Clipboard failed — fall through to execCommand.
     }
   }
   try {
