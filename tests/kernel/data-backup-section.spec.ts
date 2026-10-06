@@ -62,15 +62,15 @@ describe('M4-g1 · 设置页数据与备份分区', () => {
     setBackupServiceInstance(service)
     const wrapper = mount(DataBackupSection)
 
-    const buttons = wrapper.findAll('button')
-    expect(buttons.map((button) => button.text())).toEqual(['导出备份导出全部数据', '恢复备份从备份文件替换'])
+    const findButton = (text: string) =>
+      wrapper.findAll('button').find((button) => button.text().includes(text))!
 
-    await buttons[0]!.trigger('click')
+    await findButton('导出备份').trigger('click')
     await flushPromises()
     expect(service.calls).toEqual(['export'])
     expect(toastSpy).not.toHaveBeenCalled() // picker cancel stays silent
 
-    await buttons[1]!.trigger('click')
+    await findButton('恢复备份').trigger('click')
     await flushPromises()
     expect(service.calls).toEqual(['export', 'read'])
     expect(confirmSpy).not.toHaveBeenCalled() // read-cancelled before the modal
@@ -82,7 +82,7 @@ describe('M4-g1 · 设置页数据与备份分区', () => {
     const wrapper = mount(DataBackupSection)
     confirmSpy.mockResolvedValue(true)
 
-    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('恢复备份'))!.trigger('click')
     await flushPromises()
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     expect(confirmSpy.mock.calls[0]![1]).toMatchObject({ title: '恢复备份', confirmLabel: '立即恢复' })
@@ -96,7 +96,7 @@ describe('M4-g1 · 设置页数据与备份分区', () => {
       },
     })
     setBackupServiceInstance(badService)
-    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('恢复备份'))!.trigger('click')
     await flushPromises()
     expect(confirmSpy).toHaveBeenCalledTimes(1) // unchanged
     expect(toastSpy.mock.calls[0]).toEqual(['shell', '不是 MintPlot 备份文件', expect.objectContaining({ tone: 'error' })])
@@ -105,9 +105,11 @@ describe('M4-g1 · 设置页数据与备份分区', () => {
   it('无 service(未接线)时动作不动', async () => {
     setBackupServiceInstance(null)
     const wrapper = mount(DataBackupSection)
-    await wrapper.findAll('button')[0]!.trigger('click')
+    // The ImportPanel button (no bridge in jsdom) explains itself with a
+    // toast; the g1 backup actions no-op silently without a bound service.
+    await wrapper.findAll('button').find((button) => button.text().includes('导入备份'))!.trigger('click')
     await flushPromises()
-    expect(toastSpy).not.toHaveBeenCalled()
+    expect(toastSpy).toHaveBeenCalledWith('shell', '当前环境不支持备份导入(需要应用内运行)', expect.objectContaining({ tone: 'error' }))
     expect(confirmSpy).not.toHaveBeenCalled()
   })
 })

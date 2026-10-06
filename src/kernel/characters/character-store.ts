@@ -33,6 +33,12 @@ export interface CharacterStore {
   /** Persists a parsed card, assigning id + import timestamp. A PNG card's
    *  own bytes ride along as its cover data URL. */
   import(card: ParsedCharacterCard, cover?: Uint8Array): Promise<CharacterCard>
+  /** Replaces the card's embedded worldbook object (M4-g2 asset mounting —
+   *  ST worldbook imports merge into it). Missing card → no-op returning null. */
+  updateBook(id: string, book: unknown): Promise<CharacterCard | null>
+  /** Replaces the card's raw extensions object (M4-g2: regex mounting).
+   *  Missing card → no-op returning null. */
+  updateExtensions(id: string, extensions: Record<string, unknown>): Promise<CharacterCard | null>
   remove(id: string): Promise<void>
   /** Cover data URL, or null when the card has no stored artwork. */
   getCover(id: string): Promise<string | null>
@@ -72,6 +78,27 @@ export function createCharacterStore(repository: StorageRepository): CharacterSt
       ids.unshift(stored.id)
       await repository.set(CHARACTER_INDEX_KEY, ids)
       return stored
+    },
+
+    async updateBook(id, book) {
+      const card = await repository.get<CharacterCard>(cardKeyOf(id))
+      if (!card) return null
+      // Preserve unknown book-level fields (M3-u verbatim discipline): merge
+      // into the existing object when it is one, else start fresh.
+      const existing = typeof card.book === 'object' && card.book !== null && !Array.isArray(card.book)
+        ? (card.book as Record<string, unknown>)
+        : {}
+      const next: CharacterCard = { ...card, book: { ...existing, ...(book as Record<string, unknown>) } }
+      await repository.set(cardKeyOf(id), next)
+      return next
+    },
+
+    async updateExtensions(id, extensions) {
+      const card = await repository.get<CharacterCard>(cardKeyOf(id))
+      if (!card) return null
+      const next: CharacterCard = { ...card, extensions }
+      await repository.set(cardKeyOf(id), next)
+      return next
     },
 
     async remove(id) {

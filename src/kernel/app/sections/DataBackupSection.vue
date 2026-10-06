@@ -1,12 +1,13 @@
 <script setup lang="ts">
-// 数据与备份分区(M4-g1 plan D4):MP 自有全量导出 / 恢复(全量替换 +
-// reload)两个动作,RP 备份导入随 M4-g2 入驻。秘密通道键不随备份走
-// (AndroidKeyStore 绑设备,同 RP apiKey 不入备份的推理);诊断日志易逝
-// 不导出(plan D5)。恢复覆盖范围在确认模态里列明,失败不落任何写入。
+// 数据与备份分区(M4-g1 plan D4 / M4-g2):MP 自有全量导出 / 恢复(全量
+// 替换 + reload)+ 统一导入面板(RP 备份 / 酒馆备份 / 散装资产)。秘密通道
+// 键不随备份走(AndroidKeyStore 绑设备,同 RP apiKey 不入备份的推理);
+// 诊断日志易逝不导出(plan D5)。恢复覆盖范围在确认模态里列明。
 import { ref } from 'vue'
 import { getBackupServiceInstance } from '@/kernel/dataio/backup-service-instance'
 import { BackupEnvelopeError } from '@/kernel/dataio/backup-envelope'
 import { uiService } from '@/kernel/ui/toasts'
+import ImportPanel from '@/kernel/app/sections/ImportPanel.vue'
 
 const busy = ref(false)
 
@@ -67,6 +68,7 @@ const restoreBackup = async (): Promise<void> => {
 
 <template>
   <div class="space-y-2">
+    <ImportPanel />
     <button
       type="button"
       class="flex w-full items-center justify-between rounded-input border border-line bg-card px-3 py-2.5 text-left text-sm text-ink transition-colors hover:bg-bg active:bg-bg"
