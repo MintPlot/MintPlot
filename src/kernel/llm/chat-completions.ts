@@ -9,6 +9,8 @@
  * ignore it simply report nothing (usage-stats skips absent usage).
  */
 
+import { extractNativeReasoning } from '@/kernel/cot/cot-parser'
+
 /** Multimodal content part (M4-d): direct-vision requests send the user turn
  *  as text + image_url parts; providers without vision reject with their own
  *  error (surfaces through the normal error bar). */
@@ -51,6 +53,10 @@ export interface LlmUsage {
 
 export interface StreamChatResult {
   content: string
+  /** Native thinking text (M4-f) — `reasoning_content`-family fields outside
+   *  `content` (DeepSeek/LM Studio, OpenRouter, …). Empty when the provider
+   *  sends none; tag-based <think>/<cot> stays inside `content`. */
+  reasoning: string
   usage: LlmUsage | null
   /** Model id as reported by the response, falling back to the request config. */
   model: string
@@ -59,6 +65,8 @@ export interface StreamChatResult {
 export interface StreamChatOptions {
   signal?: AbortSignal
   onDelta?: (delta: string) => void
+  /** Native reasoning deltas (M4-f) — the thinking stream as it arrives. */
+  onReasoningDelta?: (delta: string) => void
 }
 
 export class LlmRequestError extends Error {
@@ -116,7 +124,7 @@ function readSseStream(body: ReadableStream<Uint8Array>, onChunk: (payload: stri
 
 interface ChatCompletionChunk {
   model?: string
-  choices?: { delta?: { content?: string } }[]
+  choices?: { delta?: Record<string, unknown>; message?: Record<string, unknown> }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -152,6 +160,7 @@ export async function streamChatCompletion(
   armIdleTimeout()
 
   let content = ''
+  let reasoning = ''
   let usage: LlmUsage | null = null
   let model = config.model.trim()
   try {
@@ -202,10 +211,21 @@ export async function streamChatCompletion(
           : String((raw as { message?: unknown })?.message ?? JSON.stringify(raw))
         throw new LlmRequestError(`上游模型错误: ${detail.slice(0, 200)}`, undefined, 'MP-NET-005')
       }
-      const delta = chunk.choices?.[0]?.delta?.content
-      if (delta) {
-        content += delta
-        options.onDelta?.(delta)
+      const choice = chunk.choices?.[0]
+      const delta = choice?.delta
+      const deltaContent = delta ? (delta as { content?: unknown }).content : undefined
+      if (typeof deltaContent === 'string' && deltaContent) {
+        content += deltaContent
+        options.onDelta?.(deltaContent)
+      }
+      // M4-f: reasoning rides the delta OUTSIDE content — providers disagree
+      // on the key (reasoning_content / reasoning / thinking, …), the
+      // extractor accepts the whole family. Reasoning chunks may also arrive
+      // on the choice level (some gateways), so both are probed.
+      const deltaReasoning = extractNativeReasoning(delta) || extractNativeReasoning(choice)
+      if (deltaReasoning) {
+        reasoning += deltaReasoning
+        options.onReasoningDelta?.(deltaReasoning)
       }
       if (chunk.model) model = chunk.model
       if (chunk.usage) {
@@ -217,13 +237,13 @@ export async function streamChatCompletion(
         }
       }
     })
-    return { content, usage, model }
+    return { content, reasoning, usage, model }
   } catch (error) {
     if (error instanceof LlmRequestError) throw error
     if ((error as Error)?.name === 'AbortError') {
       // Distinguish the caller's abort (return partial) from the timeout.
       if (options.signal?.aborted) {
-        return { content, usage, model }
+        return { content, reasoning, usage, model }
       }
       throw new LlmRequestError('请求超时', undefined, 'MP-NET-001')
     }
@@ -236,7 +256,7 @@ export async function streamChatCompletion(
 
 interface ChatCompletionResponse {
   model?: string
-  choices?: { message?: { content?: string } }[]
+  choices?: { message?: Record<string, unknown> }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -299,8 +319,10 @@ export async function completeChatCompletion(
       throw new LlmRequestError(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`, response.status)
     }
     const data = (await response.json()) as ChatCompletionResponse
+    const message = data.choices?.[0]?.message
     return {
-      content: data.choices?.[0]?.message?.content ?? '',
+      content: message ? String((message as { content?: unknown }).content ?? '') : '',
+      reasoning: extractNativeReasoning(message),
       usage: normalizeUsage(data.usage),
       model: data.model ?? config.model.trim(),
     }

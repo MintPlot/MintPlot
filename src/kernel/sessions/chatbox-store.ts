@@ -28,6 +28,16 @@ export interface ChatboxMessage extends StoredMessage {
   /** User-attached images (M4-c/M4-d): the dataUrl persists with the floor;
    *  `description` is the vision-model text (empty in direct-vision mode). */
   imageAttachments?: Array<{ dataUrl: string; description: string }>
+  /** Native thinking text (M4-f) — reasoning_content-family stream fields,
+   *  persisted per floor. Tag-based <think>/<cot> stays inside `content`
+   *  (verbatim-storage discipline); this field is the wire-only channel. */
+  reasoning?: string
+  /** Thinking-card open state (M4-f), persisted per floor; absent = default
+   *  (open while the floor is streaming, collapsed once finished). */
+  cotOpen?: boolean
+  /** Native reasoning per swipe candidate (M4-f), index-aligned with
+   *  `candidates`. Absent/legacy floors = no per-candidate thinking. */
+  candidateReasoning?: string[]
 }
 
 export interface ChatboxConversation {

@@ -75,6 +75,10 @@ import {
   projectRegexScripts,
 } from '@/kernel/regex/regex-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
+// M4-f CoT layer: tag parsing + native reasoning display; the COT preset
+// content syncs into the preset store as a managed entry. Plugin = the toggle.
+import { parseCot } from '@/kernel/cot/cot-parser'
+import { syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
 import {
   buildWorldbookInjections,
   projectWorldbook,
@@ -159,6 +163,10 @@ const memoryState = shallowRef<MemoryState | null>(null)
 const memoryStatus = ref('')
 const memoryBusy = ref(false)
 const showMemory = ref(false)
+// CoT layer (M4-f): same gating shape — dormant = no thinking card, no COT
+// preset sync, no request-side strip (raw tag passthrough). Native reasoning
+// still rides the kernel stream capture; it just stays unshown.
+const cotActive = ref(true)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
@@ -454,6 +462,9 @@ onMounted(async () => {
     if (presetsActive.value) {
       presetSnapshot.value = (await presetStore?.ensure()) ?? null
     }
+    // M4-f: the CoT layer gates on its own plugin the same way.
+    const cotPluginState = runtime === null ? 'active' : runtime.stateOf('cot')
+    cotActive.value = cotPluginState === 'active' || cotPluginState === 'degraded'
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -506,6 +517,12 @@ const isStreamingFloor = (message: ChatboxMessage): boolean =>
  *  rewrite user input in the request. */
 const renderFloor = (message: ChatboxMessage): string => {
   let content = message.content
+  // M4-f: thinking tags leave the display projection first (stored floor keeps
+  // them verbatim — 落库纪律). HTML-frame floors render whole in the sandbox
+  // iframe; tag surgery there could corrupt the document, so they skip CoT.
+  if (cotActive.value && !contentUsesHtmlFrame(content)) {
+    content = parseCot(content, !isStreamingFloor(message)).main
+  }
   if (isCardDomain.value && variablesActive.value) content = stripVariableBlocks(content)
   const assistantFloor = message.role === 'assistant'
   if (isCardDomain.value && regexActive.value && assistantFloor && cardRegexScripts.value.length > 0) {
@@ -519,6 +536,53 @@ const renderFloor = (message: ChatboxMessage): string => {
   }
   return renderMessageHtml(content, macroContext.value, !isStreamingFloor(message))
 }
+
+/** M4-f thinking card: native reasoning (wire field) plus tag-based
+ *  <think>/<cot> parsed from stored content, as two independent sections —
+ *  providers deliver either or both (RP timeline collapsed to its thinking
+ *  steps; tool-call steps have no MP counterpart). `live` = still receiving
+ *  that section. */
+interface FloorThinkingSection {
+  id: string
+  title: string
+  text: string
+  chars: number
+  live: boolean
+}
+
+const floorThinkingSections = (message: ChatboxMessage): FloorThinkingSection[] => {
+  if (message.role !== 'assistant' || !cotActive.value || contentUsesHtmlFrame(message.content)) return []
+  const streamingFloor = isStreamingFloor(message)
+  const sections: FloorThinkingSection[] = []
+  const reasoning = String(message.reasoning ?? '').trim()
+  if (reasoning) {
+    sections.push({ id: 'native', title: '原生思考', text: reasoning, chars: reasoning.length, live: streamingFloor && !message.content })
+  }
+  const info = parseCot(message.content, !streamingFloor)
+  if (info.cot) {
+    sections.push({ id: 'cot', title: '分析过程', text: info.cot, chars: info.cot.length, live: streamingFloor && !info.isFinished })
+  }
+  return sections
+}
+
+/** Default open while the floor is streaming, collapsed once finished; a
+ *  user toggle persists per floor (RP isSummaryOpen semantics). */
+const isCotCardOpen = (message: ChatboxMessage): boolean =>
+  message.cotOpen !== undefined ? message.cotOpen : isStreamingFloor(message) && floorThinkingSections(message).length > 0
+
+const cotCardLive = (message: ChatboxMessage): boolean => floorThinkingSections(message).some((section) => section.live)
+
+const toggleCotCard = (message: ChatboxMessage): void => {
+  message.cotOpen = !isCotCardOpen(message)
+  void persistSession()
+}
+
+const renderThinkingText = (text: string): string => renderMessageHtml(text, macroContext.value, true)
+
+/** Request/consumer projection: the reply without its thinking blocks (RP
+ *  strips CoT from history before sending). Plugin-off keeps raw passthrough;
+ *  the stored floor is never rewritten. */
+const stripCotText = (text: string): string => (cotActive.value ? parseCot(text).main : text)
 
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
 
@@ -589,7 +653,9 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
     const scanText = floors
       .filter((message) => message.role !== 'system')
       .slice(-Math.max(1, settings.scanDepth))
-      .map((message) => stripVariableBlocks(message.content))
+      // M4-f: the scan mirrors what the model sees in history — thinking is
+      // stripped from the request projection, so it must not trigger entries.
+      .map((message) => stripVariableBlocks(stripCotText(message.content)))
       .join('\n')
     const artifact = buildWorldbookInjections({
       book: card.value.book,
@@ -665,7 +731,11 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
     : false
   const promptScripts = isCardDomain.value && regexActive.value ? cardRegexScripts.value : []
   const rewritePromptFloor = (content: string, role: 'user' | 'assistant', depth: number): string => {
-    let next = isCardDomain.value && variablesActive.value ? stripVariableBlocks(content) : content
+    // M4-f: thinking leaves the request projection first (RP strips CoT from
+    // history before sending — both domains). Full-HTML floors skip tag
+    // surgery; the omission marker below handles them wholesale.
+    let next = cotActive.value && !isFullHtmlDocument(content) ? parseCot(content).main : content
+    if (isCardDomain.value && variablesActive.value) next = stripVariableBlocks(next)
     if (promptOmitHtml && isFullHtmlDocument(next)) return HTML_FLOOR_OMISSION_MARKER
     if (promptScripts.length > 0) {
       next = applyRegexPipeline(next, {
@@ -882,7 +952,8 @@ const runTemplateAnalysisPipeline = async (targetFloor: ChatboxMessage, force = 
     .map((message) => ({
       role: message.role as 'user' | 'assistant',
       name: message.role === 'user' ? readUserInfo().name : card.value!.name,
-      content: stripVariableBlocks(message.content),
+      // M4-f: the analysis reads prose — thinking blocks stay out.
+      content: stripVariableBlocks(stripCotText(message.content)),
     }))
   const config = {
     baseUrl: apiConfig.baseUrl,
@@ -953,14 +1024,27 @@ const streamAssistantInto = async (
         floor.content += delta
         void scrollToBottom()
       },
+      // M4-f: native reasoning streams into its own floor field — the wire
+      // capture runs regardless of the plugin toggle (data is not recoverable
+      // later); the display card is what the toggle gates.
+      onReasoningDelta: (delta) => {
+        floor.reasoning = (floor.reasoning ?? '') + delta
+      },
     })
     // A stream that settles cleanly with zero content (thinking-only local
     // engines, upstream error frames older builds swallowed) is a failure the
     // user must see — never a silent no-op turn (D3 would drop the floor).
+    // Reasoning-only replies get their own wording (M4-f): the model spent
+    // its budget thinking and never wrote the prose.
     if (!result.content.trim()) {
-      throw new LlmRequestError('模型返回了空回复', undefined, 'MP-CHAT-003')
+      throw new LlmRequestError(
+        result.reasoning?.trim() ? '模型只输出了思考内容，没有正文' : '模型返回了空回复',
+        undefined,
+        'MP-CHAT-003',
+      )
     }
     floor.content = result.content
+    floor.reasoning = result.reasoning ?? ''
     succeeded = true
     if (result.usage) {
       // Attribution: the record must say which session it came from — the
@@ -1047,9 +1131,32 @@ const streamAssistantInto = async (
   return succeeded
 }
 
+/** M4-f: COT preset content sync before the request assembles — the managed
+ *  'COT' entry and the 破限预注入 · AI prefill rewrites track live state
+ *  (model / memory / variable analysis). Idempotent; a failed sync must never
+ *  block the send (assembly proceeds with whatever the store holds). */
+const syncCotPresetsIfActive = async (): Promise<void> => {
+  if (!cotActive.value || !presetStore || !settingsState) return
+  try {
+    await syncCotPresetEntries(presetStore, {
+      model: resolveApiConfig(settingsState.snapshot()).model,
+      memoryEnabled: isCardDomain.value && memoryActive.value,
+      variablesAnalysisEnabled:
+        isCardDomain.value
+        && variablesActive.value
+        && activeTemplates.value.length > 0
+        && readTemplateAnalysisSettings(settingsState).mainModelAnalysis,
+    })
+    presetSnapshot.value = await presetStore.get()
+  } catch (error) {
+    console.error('[cot] preset sync failed:', error)
+  }
+}
+
 const runAssistantTurn = async (): Promise<void> => {
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!provider) return
+  await syncCotPresetsIfActive()
   const assistantFloor: ChatboxMessage = {
     id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     role: 'assistant',
@@ -1120,6 +1227,7 @@ const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
   if (streaming.value || !isLastAssistantFloor(floor)) return
   const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
   if (!provider || !sessionLoaded.value) return
+  await syncCotPresetsIfActive()
   if (isCardDomain.value && card.value && variablesActive.value) {
     await variableStore?.retagUntaggedEvents(card.value.id, floor.id, floor.activeIndex ?? 0)
   }
@@ -1127,8 +1235,16 @@ const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
     floor.candidates = [floor.content]
     floor.activeIndex = 0
   }
+  // M4-f: per-candidate reasoning alignment — backfill the previous
+  // candidate's slot (first regen on a legacy floor) so switching candidates
+  // never shows one candidate's thinking under another's prose.
+  if (!floor.candidateReasoning || floor.candidateReasoning.length !== floor.candidates.length) {
+    const prev = floor.activeIndex ?? 0
+    floor.candidateReasoning = floor.candidates.map((_, index) => (index === prev ? floor.reasoning ?? '' : ''))
+  }
   const prevIndex = floor.activeIndex ?? 0
   const prevContent = floor.candidates[prevIndex] ?? floor.content
+  const prevReasoning = floor.reasoning ?? ''
   const newIndex = floor.candidates.length
   // The request sees the ledger AS OF before this floor (variables partition,
   // worldbook scan, macros) — the floor itself is being rewritten.
@@ -1140,6 +1256,8 @@ const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
   }
   floor.activeIndex = newIndex
   floor.candidates.push('')
+  floor.candidateReasoning!.push('')
+  floor.reasoning = ''
   const ok = await streamAssistantInto(
     floor,
     buildRequestMessages(messages.value.slice(0, -1)),
@@ -1147,12 +1265,15 @@ const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
   )
   if (ok) {
     floor.candidates[newIndex] = floor.content
+    floor.candidateReasoning![newIndex] = floor.reasoning ?? ''
     floor.activeIndex = newIndex
   } else {
     // Aborted or failed: drop the placeholder candidate, restore the previous.
     floor.candidates.pop()
+    floor.candidateReasoning!.pop()
     floor.activeIndex = prevIndex
     floor.content = prevContent
+    floor.reasoning = prevReasoning
     const restored = isCardDomain.value && card.value ? await variableStore?.get(card.value.id) : null
     if (restored) absorbVariableSnapshot(restored)
   }
@@ -1167,6 +1288,8 @@ const switchCandidate = async (floor: ChatboxMessage, direction: -1 | 1): Promis
   if (next < 0 || next >= floor.candidates.length) return
   floor.activeIndex = next
   floor.content = floor.candidates[next] ?? ''
+  // M4-f: the thinking card follows the candidate (parallel reasoning slots).
+  floor.reasoning = floor.candidateReasoning?.[next] ?? ''
   await persistSession()
   if (isCardDomain.value && card.value && variablesActive.value) {
     const snapshot = await variableStore?.get(card.value.id)
@@ -1225,7 +1348,9 @@ const maybeRunMemoryPipeline = async (force = false): Promise<void> => {
     const floors: SummaryFloor[] = messages.value.map((message) => ({
       role: message.role === 'user' ? 'user' : 'assistant',
       name: message.role === 'user' ? readUserInfo().name : card.value!.name,
-      content: stripVariableBlocks(message.content),
+      // M4-f: the summary consumes prose — thinking blocks never enter the
+      // memory pipeline (RP feeds parseCot().main the same way).
+      content: stripVariableBlocks(stripCotText(message.content)),
     }))
     const result = await runRollingSummary({
       config: { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model },
@@ -1317,7 +1442,9 @@ const toggleSpeakFloor = (floor: ChatboxMessage): void => {
     kind: props.domain,
     messageId: floor.id,
     floorIndex,
-    text: floor.content,
+    // M4-f (plan D4): read the prose, not the thinking — tag-based CoT strips
+    // from the spoken text (native reasoning never lives in content).
+    text: stripCotText(floor.content),
   })
 }
 
@@ -1506,6 +1633,50 @@ const restartSession = async (): Promise<void> => {
                   class="w-full cursor-zoom-in rounded-input border border-line object-cover"
                   @click="viewerImage = image.dataUrl"
                 >
+              </div>
+              <!-- M4-f thinking card: native reasoning + tag-based CoT in one
+                   collapsible card above the prose (RP timeline shape, two
+                   sections max). Open while streaming by default; the toggle
+                   persists per floor. -->
+              <div
+                v-if="floorThinkingSections(message).length > 0"
+                class="mb-1 overflow-hidden rounded-input border border-line bg-bg"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between px-2.5 py-1.5 text-left"
+                  :aria-expanded="isCotCardOpen(message)"
+                  @click="toggleCotCard(message)"
+                >
+                  <span
+                    class="flex items-center gap-1.5 text-xs font-bold"
+                    :class="cotCardLive(message) ? 'text-chat-accent' : 'text-ink-2'"
+                  >
+                    <span v-if="cotCardLive(message)">⏳</span>
+                    <span v-else>💡</span>
+                    <span>{{ cotCardLive(message) ? '思考中…' : '思考' }}</span>
+                  </span>
+                  <span class="text-[10px] text-ink-3">{{ isCotCardOpen(message) ? '收起' : '展开' }}</span>
+                </button>
+                <div
+                  v-if="isCotCardOpen(message)"
+                  class="border-t border-line px-2.5 py-2"
+                >
+                  <div
+                    v-for="section in floorThinkingSections(message)"
+                    :key="section.id"
+                    class="mb-2 last:mb-0"
+                  >
+                    <div class="mb-1 flex items-center justify-between text-[10px] font-bold text-ink-3">
+                      <span>{{ section.title }}</span>
+                      <span>{{ section.chars }} 字</span>
+                    </div>
+                    <div
+                      class="markdown-body text-[13px] leading-relaxed text-ink-2"
+                      v-html="renderThinkingText(section.text)"
+                    />
+                  </div>
+                </div>
               </div>
               <div
                 v-for="frame in floorPanels(message).top"

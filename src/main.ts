@@ -46,6 +46,7 @@ import WorldinfoPlugin from '@/plugins/worldinfo'
 import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
 import MemoryPlugin from '@/plugins/memory'
+import CotPlugin from '@/plugins/cot'
 
 initMpTheme()
 initMpColorFamily()
@@ -124,6 +125,9 @@ kernel.runtime.load(PresetsPlugin)
 // Memory system (M4-e): same serviceless shape — the summary pipeline,
 // ledger and injection engine stay kernel-side; the plugin is the toggle.
 kernel.runtime.load(MemoryPlugin)
+// Thinking layer (M4-f): same serviceless shape — parser/builder/preset-sync
+// stay kernel-side; the plugin is the tools-area toggle surface.
+kernel.runtime.load(CotPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').

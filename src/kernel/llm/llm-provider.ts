@@ -23,8 +23,17 @@ export interface LlmProvider {
     options: {
       signal?: AbortSignal
       onDelta?: (delta: string) => void
+      /** Native reasoning deltas (M4-f) — optional, older providers omit. */
+      onReasoningDelta?: (delta: string) => void
     },
-  ): Promise<{ content: string; usage: LlmUsage | null; model?: string }>
+  ): Promise<{
+    content: string
+    /** Native thinking text; optional so third-party providers stay source-
+     *  compatible (the default implementation always sets it, '' when none). */
+    reasoning?: string
+    usage: LlmUsage | null
+    model?: string
+  }>
   configured(): boolean
 }
 
