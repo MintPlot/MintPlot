@@ -109,7 +109,9 @@ public class MpBackupPlugin extends Plugin {
                 ZipEntry entry = items.nextElement();
                 if (entry.isDirectory()) continue;
                 JSObject item = new JSObject();
-                item.put("name", entry.getName());
+                // Some Windows packers emit backslash separators (non-standard
+                // but common) — normalize so prefix matching works everywhere.
+                item.put("name", entry.getName().replace('\\', '/'));
                 item.put("size", entry.getSize());
                 entries.put(item);
             }
@@ -137,6 +139,9 @@ public class MpBackupPlugin extends Plugin {
         }
         try {
             ZipEntry entry = open.zipFile.getEntry(entryName);
+            if (entry == null && entryName.contains("/")) {
+                entry = open.zipFile.getEntry(entryName.replace('/', '\\'));
+            }
             if (entry == null) throw new IllegalStateException("Entry not found: " + entryName);
             long size = entry.getSize();
             if (size > MAX_ENTRY_BYTES) throw new IllegalStateException("Entry too large: " + size);
@@ -169,6 +174,9 @@ public class MpBackupPlugin extends Plugin {
         File cacheCopy = null;
         try {
             ZipEntry entry = open.zipFile.getEntry(entryName);
+            if (entry == null && entryName.contains("/")) {
+                entry = open.zipFile.getEntry(entryName.replace('/', '\\'));
+            }
             if (entry == null) throw new IllegalStateException("Database entry not found: " + entryName);
             File cacheDir = new File(getContext().getCacheDir(), "import-" + UUID.randomUUID());
             if (!cacheDir.mkdirs()) throw new IllegalStateException("Unable to create import directory");
