@@ -284,7 +284,11 @@ export const buildRpImportPlan = (
     }
   }
 
-  const characters = asArray(kv.get('characters')) as RpCharacterRecord[]
+  // RP stores its keys under an `rp_hub_` prefix (storageKey wrapper) — real
+  // v161-era backups carry rp_hub_characters etc.; accept the bare form too
+  // (synthetic samples, future format drift).
+  const kvKey = (name: string): string => (kv.has(`rp_hub_${name}`) ? `rp_hub_${name}` : name)
+  const characters = asArray(kv.get(kvKey('characters'))) as RpCharacterRecord[]
   const warnings: string[] = []
   const selected = new Set(selectedUuids)
   const chosen = options.listAll
@@ -299,16 +303,16 @@ export const buildRpImportPlan = (
     }
   }
 
-  const globalWorldInfo = options.includeGlobals ? asArray(kv.get('global_worldinfo')).map(worldInfoExportEntry) : []
-  const globalRegex = options.includeGlobals ? asArray(kv.get('global_regex')).map(regexExportEntry) : []
-  const globalUiTemplates = options.includeGlobals ? asArray(kv.get('global_ui_templates')).map(uiTemplateExportEntry) : []
+  const globalWorldInfo = options.includeGlobals ? asArray(kv.get(kvKey('global_worldinfo'))).map(worldInfoExportEntry) : []
+  const globalRegex = options.includeGlobals ? asArray(kv.get(kvKey('global_regex'))).map(regexExportEntry) : []
+  const globalUiTemplates = options.includeGlobals ? asArray(kv.get(kvKey('global_ui_templates'))).map(uiTemplateExportEntry) : []
   if ((globalWorldInfo.length || globalRegex.length || globalUiTemplates.length) && chosen.length === 0 && options.includeGlobals) {
     warnings.push('RP 全局世界书/正则/UI模板将随选中的卡挂载；未选卡则不导入')
   }
 
   const presets: RpImportPreset[] = []
   if (options.includePresets) {
-    for (const raw of asArray(kv.get('presets'))) {
+    for (const raw of asArray(kv.get(kvKey('presets')))) {
       const record = asRecord(raw)
       const name = String(record.name ?? '').trim()
       const content = String(record.content ?? '')
@@ -324,9 +328,9 @@ export const buildRpImportPlan = (
     try {
       const card = mapRpCharacterCard(record)
       const floors = mapRpFloors(chatRows, rpUuid)
-      const summaries = asRecord(kv.get(`memory_summaries_${rpUuid}`)) as RpMemorySummaries
+      const summaries = asRecord(kv.get(kvKey(`memory_summaries_${rpUuid}`))) as RpMemorySummaries
       const hasSummaries = Object.keys(summaries).length > 0
-      const profile = asRecord(kv.get(`memory_profile_${rpUuid}`)) as RpMemoryProfile
+      const profile = asRecord(kv.get(kvKey(`memory_profile_${rpUuid}`))) as RpMemoryProfile
       const hasProfile = Object.keys(profile).length > 0
       // Globals mount into THIS card's extensions (never overwrite the
       // card's own embedded assets).
