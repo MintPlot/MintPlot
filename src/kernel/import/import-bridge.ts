@@ -11,7 +11,9 @@ export interface ArchiveEntryInfo {
 }
 
 export interface ImportBridge {
-  zipOpen(): Promise<{ sessionId: string; entries: ArchiveEntryInfo[] }>
+  /** Opens an archive the WEBVIEW already holds as bytes (the file input's
+   *  result) — no SAF round-trip, so no double-picker hazard. */
+  zipOpen(bytes: Uint8Array): Promise<{ sessionId: string; entries: ArchiveEntryInfo[] }>
   zipRead(sessionId: string, entryName: string): Promise<Uint8Array>
   sqliteOpen(sessionId: string, entryName: string): Promise<string>
   kvAll(sqliteSessionId: string): Promise<Array<{ key: string; json: string | null }>>
@@ -27,7 +29,7 @@ export class ImportBridgeUnavailableError extends Error {
 }
 
 interface MpBackupBridge {
-  zipOpen(): Promise<{ sessionId?: string; entries?: ArchiveEntryInfo[] }>
+  zipFromBytes(call: { base64: string }): Promise<{ sessionId?: string; entries?: ArchiveEntryInfo[] }>
   zipRead(call: { sessionId: string; entryName: string }): Promise<{ base64?: string }>
   sqliteOpen(call: { sessionId: string; entryName: string }): Promise<{ sqliteSessionId?: string }>
   kvAll(call: { sqliteSessionId: string }): Promise<{ rows?: Array<{ key: string; json: string | null }> }>
@@ -42,14 +44,24 @@ const base64ToBytes = (base64: string): Uint8Array => {
   return bytes
 }
 
+/** Chunked base64 for handing archive bytes across the bridge. */
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK))
+  }
+  return btoa(binary)
+}
+
 export const resolveImportBridge = (): ImportBridge | null => {
   const plugins = (window as { Capacitor?: { Plugins?: Record<string, unknown> } }).Capacitor?.Plugins
   const bridge = plugins?.MpBackup
   if (!bridge || typeof bridge !== 'object') return null
   const native = bridge as MpBackupBridge
   return {
-    async zipOpen() {
-      const opened = await native.zipOpen()
+    async zipOpen(bytes) {
+      const opened = await native.zipFromBytes({ base64: bytesToBase64(bytes) })
       if (!opened.sessionId) throw new ImportBridgeUnavailableError()
       return { sessionId: opened.sessionId, entries: opened.entries ?? [] }
     },

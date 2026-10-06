@@ -77,17 +77,17 @@ const onFilesChosen = async (event: Event): Promise<void> => {
 
   const single = files[0]!
   if (files.length === 1 && /\.(zip|backup)$/i.test(single.name)) {
-    await inspectArchive(active)
+    await inspectArchive(active, new Uint8Array(await single.arrayBuffer()))
     return
   }
   await inspectLoose(active, files)
 }
 
-const inspectArchive = async (active: ImportService): Promise<void> => {
+const inspectArchive = async (active: ImportService, bytes: Uint8Array): Promise<void> => {
   phase.value = 'inspecting'
   statusText.value = '正在识别备份文件…'
   try {
-    const found = await active.inspectArchive()
+    const found = await active.inspectArchive(bytes)
     inspection.value = found
     if (found.source === 'rp') {
       if (!found.databaseEntryName) throw new Error('备份缺少数据库文件')

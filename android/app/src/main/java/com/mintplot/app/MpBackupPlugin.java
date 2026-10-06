@@ -1,20 +1,15 @@
 package com.mintplot.app;
 
-import android.app.Activity;
-import android.content.Intent;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
-import android.net.Uri;
 import android.util.Base64;
 
-import androidx.activity.result.ActivityResult;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.BufferedOutputStream;
@@ -71,36 +66,24 @@ public class MpBackupPlugin extends Plugin {
         }
     }
 
+    /** Opens an archive from bytes the WebView already holds (the file
+     *  input's result) — the bridge never touches SAF itself; the earlier
+     *  design re-opened a second picker and orphaned the first promise. */
     @PluginMethod
-    public void zipOpen(PluginCall call) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        startActivityForResult(call, intent, "zipOpenResult");
-    }
-
-    @ActivityCallback
-    private void zipOpenResult(PluginCall call, ActivityResult activityResult) {
-        if (call == null) return;
-        if (activityResult.getResultCode() != Activity.RESULT_OK
-                || activityResult.getData() == null
-                || activityResult.getData().getData() == null) {
-            call.reject("cancelled");
+    public void zipFromBytes(PluginCall call) {
+        String base64 = call.getString("base64");
+        if (base64 == null || base64.isEmpty()) {
+            call.reject("base64 is required");
             return;
         }
-        Uri uri = activityResult.getData().getData();
         File cacheCopy = null;
         ZipFile zipFile = null;
         try {
             File cacheDir = new File(getContext().getCacheDir(), "import-" + UUID.randomUUID());
             if (!cacheDir.mkdirs()) throw new IllegalStateException("Unable to create import directory");
             cacheCopy = new File(cacheDir, "archive.zip");
-            byte[] buffer = new byte[64 * 1024];
-            try (InputStream input = getContext().getContentResolver().openInputStream(uri);
-                 OutputStream output = new java.io.BufferedOutputStream(new FileOutputStream(cacheCopy))) {
-                if (input == null) throw new IllegalStateException("Unable to open archive");
-                int read;
-                while ((read = input.read(buffer)) > 0) output.write(buffer, 0, read);
+            try (OutputStream output = new java.io.BufferedOutputStream(new FileOutputStream(cacheCopy))) {
+                output.write(Base64.decode(base64, Base64.NO_WRAP));
             }
             zipFile = new ZipFile(cacheCopy);
             JSArray entries = new JSArray();
