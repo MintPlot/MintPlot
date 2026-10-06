@@ -94,41 +94,46 @@ public class MpBackupPlugin extends Plugin {
             return;
         }
         Uri uri = activityResult.getData().getData();
-        File cacheCopy = null;
-        ZipFile zipFile = null;
-        try {
-            File cacheDir = new File(getContext().getCacheDir(), "import-" + UUID.randomUUID());
-            if (!cacheDir.mkdirs()) throw new IllegalStateException("Unable to create import directory");
-            cacheCopy = new File(cacheDir, "archive.zip");
-            byte[] buffer = new byte[64 * 1024];
-            try (InputStream input = getContext().getContentResolver().openInputStream(uri);
-                 OutputStream output = new java.io.BufferedOutputStream(new FileOutputStream(cacheCopy))) {
-                if (input == null) throw new IllegalStateException("Unable to open archive");
-                int read;
-                while ((read = input.read(buffer)) > 0) output.write(buffer, 0, read);
+        // A real backup is ~100 MB — the streaming copy must never run on the
+        // UI thread (it froze the app and starved the WebView for a minute).
+        final PluginCall retainedCall = call;
+        new Thread(() -> {
+            File cacheCopy = null;
+            ZipFile zipFile = null;
+            try {
+                File cacheDir = new File(getContext().getCacheDir(), "import-" + UUID.randomUUID());
+                if (!cacheDir.mkdirs()) throw new IllegalStateException("Unable to create import directory");
+                cacheCopy = new File(cacheDir, "archive.zip");
+                byte[] buffer = new byte[64 * 1024];
+                try (InputStream input = getContext().getContentResolver().openInputStream(uri);
+                     OutputStream output = new java.io.BufferedOutputStream(new FileOutputStream(cacheCopy))) {
+                    if (input == null) throw new IllegalStateException("Unable to open archive");
+                    int read;
+                    while ((read = input.read(buffer)) > 0) output.write(buffer, 0, read);
+                }
+                ZipFile openedZip = new ZipFile(cacheCopy);
+                JSArray entries = new JSArray();
+                java.util.Enumeration<? extends ZipEntry> items = openedZip.entries();
+                while (items.hasMoreElements()) {
+                    ZipEntry entry = items.nextElement();
+                    if (entry.isDirectory()) continue;
+                    JSObject item = new JSObject();
+                    item.put("name", entry.getName().replace('\\', '/'));
+                    item.put("size", entry.getSize());
+                    entries.put(item);
+                }
+                String sessionId = UUID.randomUUID().toString();
+                openZips.put(sessionId, new OpenZip(openedZip, cacheCopy));
+                JSObject result = new JSObject();
+                result.put("sessionId", sessionId);
+                result.put("entries", entries);
+                retainedCall.resolve(result);
+            } catch (Exception error) {
+                if (zipFile != null) closeQuietly(zipFile, null);
+                deleteRecursively(cacheCopy == null ? null : cacheCopy.getParentFile());
+                retainedCall.reject("Unable to read archive", error);
             }
-            zipFile = new ZipFile(cacheCopy);
-            JSArray entries = new JSArray();
-            java.util.Enumeration<? extends ZipEntry> items = zipFile.entries();
-            while (items.hasMoreElements()) {
-                ZipEntry entry = items.nextElement();
-                if (entry.isDirectory()) continue;
-                JSObject item = new JSObject();
-                item.put("name", entry.getName().replace('\\', '/'));
-                item.put("size", entry.getSize());
-                entries.put(item);
-            }
-            String sessionId = UUID.randomUUID().toString();
-            openZips.put(sessionId, new OpenZip(zipFile, cacheCopy));
-            JSObject result = new JSObject();
-            result.put("sessionId", sessionId);
-            result.put("entries", entries);
-            call.resolve(result);
-        } catch (Exception error) {
-            if (zipFile != null) closeQuietly(zipFile, null);
-            deleteRecursively(cacheCopy == null ? null : cacheCopy.getParentFile());
-            call.reject("Unable to read archive", error);
-        }
+        }, "mp-backup-copy").start();
     }
 
     /** Opens an archive from bytes the WebView already holds (loose small
