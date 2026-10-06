@@ -253,18 +253,28 @@ public class MpBackupPlugin extends Plugin {
         }
     }
 
-    /** kv_store as [{key, json}] — the RP key-value mirror. */
+    /** kv_store as [{key, json}] — the RP key-value mirror. Values can exceed
+     *  CursorWindow's 2 MB row cap (a single character card with a 130k-char
+     *  greeting), so keys are listed via a cursor and each value is read
+     *  through SQLiteStatement.simpleQueryForString — the same workaround
+     *  RP's own getValue uses. */
     @PluginMethod
     public void kvAll(PluginCall call) {
         OpenDatabase open = requireDatabase(call);
         if (open == null) return;
         try {
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            try (Cursor cursor = open.database.query("kv_store", new String[]{"key"}, null, null, null, null, "key")) {
+                while (cursor.moveToNext()) keys.add(cursor.getString(0));
+            }
             JSArray rows = new JSArray();
-            try (Cursor cursor = open.database.query("kv_store", new String[]{"key", "json"}, null, null, null, null, "key")) {
-                while (cursor.moveToNext()) {
+            try (android.database.sqlite.SQLiteStatement statement = open.database.compileStatement("SELECT json FROM kv_store WHERE key = ?")) {
+                for (String key : keys) {
+                    statement.bindString(1, key);
+                    String json = statement.simpleQueryForString();
                     JSObject row = new JSObject();
-                    row.put("key", cursor.getString(0));
-                    row.put("json", cursor.getString(1));
+                    row.put("key", key);
+                    row.put("json", json);
                     rows.put(row);
                 }
             }
