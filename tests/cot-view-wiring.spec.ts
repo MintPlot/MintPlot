@@ -33,6 +33,7 @@ import { createKvStore, createPrefixedEngine, MP_STORAGE_PREFIX } from '@/kernel
 import { createMemorySettingsState } from './helpers/memory-settings'
 import CotPlugin from '@/plugins/cot'
 import TtsPlugin from '@/plugins/tts'
+import PresetsPlugin from '@/plugins/presets'
 import { createPluginRuntime } from '@/kernel/runtime/runtime'
 import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
@@ -241,5 +242,34 @@ describe('M4-f · CoT 视图接线', () => {
     expect(JSON.stringify(streamCalls[1])).toContain('停用下的思考')
     const snapshot = await app.presetStore.get()
     expect(snapshot.entries.find((entry) => entry.name === 'COT')).toBeUndefined()
+  })
+
+  it('预设活而 cot 停用:COT 条目不装配进请求,预注入预填块退回种子', async () => {
+    const runtime = createPluginRuntime(makeRuntimeServices())
+    runtime.load(PresetsPlugin)
+    runtime.load(CotPlugin) // NOT activated
+    await runtime.activate('presets')
+    const app = mountApp({ runtime })
+    // Simulate a prior active sync: managed COT entry + a rewritten prefill.
+    await app.presetStore.syncManagedEntry({ name: 'COT', content: '<thinking_protocol>引导</thinking_protocol>', role: 'system' })
+    const snapshot = await app.presetStore.get()
+    const prefill1 = snapshot.entries.find((entry) => entry.name === '破限预注入 · AI 1')!
+    await app.presetStore.setEntryEnabled(prefill1.id, true)
+    await app.presetStore.syncManagedEntry({ name: '破限预注入 · AI 1', content: '<cot>预填块</cot>我会克服这些困难', role: 'assistant' })
+    await enterCard(app)
+
+    nextReply = '（测试回复）'
+    await sendTurn(app.wrapper, '你好')
+
+    const request = JSON.stringify(streamCalls[0])
+    expect(request).not.toContain('<thinking_protocol>')
+    expect(request).not.toContain('<cot>预填块</cot>')
+    // The dormant send reverted the prefill rewrite to its seed content.
+    const after = await app.presetStore.get()
+    const reverted = after.entries.find((entry) => entry.name === '破限预注入 · AI 1')!
+    expect(reverted.content.startsWith('<cot>')).toBe(false)
+    expect(reverted.content).toContain('我会克服这些困难')
+    // The managed entry survives in the store (re-activation re-syncs it).
+    expect((await app.presetStore.get()).entries.find((entry) => entry.name === 'COT')).toBeDefined()
   })
 })

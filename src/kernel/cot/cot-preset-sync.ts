@@ -29,6 +29,19 @@ export interface CotSyncInput {
   variablesAnalysisEnabled: boolean
 }
 
+/** Reverts the prefill rewrites to their seed content (call when the CoT
+ *  layer goes dormant: the request-side assembly filters the managed COT
+ *  entry itself, but a surviving prefill rewrite would still carry the
+ *  pre-opened thinking block into requests). Idempotent via content compare;
+ *  user-deleted entries stay deleted. */
+export const revertCotPrefillEntries = async (store: PresetStore): Promise<void> => {
+  for (const name of COT_PREFILL_NAMES) {
+    const seed = DEFAULT_PRESET_DEFINITIONS.find((definition) => definition.name === name)
+    if (!seed) continue
+    await store.syncManagedEntry({ name, content: seed.content, role: seed.role }, { createIfMissing: false })
+  }
+}
+
 export const syncCotPresetEntries = async (store: PresetStore, input: CotSyncInput): Promise<void> => {
   const base = {
     memoryEnabled: input.memoryEnabled,

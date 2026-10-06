@@ -78,7 +78,7 @@ import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
 import { parseCot } from '@/kernel/cot/cot-parser'
-import { syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
+import { COT_PRESET_NAME, revertCotPrefillEntries, syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
 import {
   buildWorldbookInjections,
   projectWorldbook,
@@ -619,7 +619,10 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
     const activeGroup = presetSnapshot.value.groups.find((group) => group.enabled)?.id ?? 'default'
     const activeEntries = presetSnapshot.value.entries.filter(
       (entry) => entry.enabled && entry.content.trim() && entry.group === activeGroup,
-    )
+      // M4-f: the managed COT entry assembles only while the CoT layer is
+      // active — plugin-off means the request goes out WITHOUT the thinking
+      // protocol even though the entry survives in the store.
+    ).filter((entry) => cotActive.value || entry.name !== COT_PRESET_NAME)
     const systemEntries = activeEntries.filter((entry) => entry.role === 'system')
     if (systemEntries.length > 0) {
       presetSystemArea = systemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
@@ -1134,10 +1137,17 @@ const streamAssistantInto = async (
 /** M4-f: COT preset content sync before the request assembles — the managed
  *  'COT' entry and the 破限预注入 · AI prefill rewrites track live state
  *  (model / memory / variable analysis). Idempotent; a failed sync must never
- *  block the send (assembly proceeds with whatever the store holds). */
+ *  block the send (assembly proceeds with whatever the store holds). When the
+ *  layer is dormant, the surviving prefill rewrites revert to seed content
+ *  (assembly filters the managed COT entry itself). */
 const syncCotPresetsIfActive = async (): Promise<void> => {
-  if (!cotActive.value || !presetStore || !settingsState) return
+  if (!presetStore || !settingsState) return
   try {
+    if (!cotActive.value) {
+      await revertCotPrefillEntries(presetStore)
+      presetSnapshot.value = await presetStore.get()
+      return
+    }
     await syncCotPresetEntries(presetStore, {
       model: resolveApiConfig(settingsState.snapshot()).model,
       memoryEnabled: isCardDomain.value && memoryActive.value,
