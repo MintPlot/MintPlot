@@ -86,7 +86,8 @@ const inspectArchive = async (active: ImportService): Promise<void> => {
       if (!found.databaseEntryName) throw new Error('备份缺少数据库文件')
       statusText.value = `RP-Hub 备份 · ${new Date(found.rpInfo?.createdAt ?? 0).toLocaleString()}`
       phase.value = 'rp-pick'
-      await loadRpPlan(active, found.sessionId, found.databaseEntryName, [])
+      await loadRpPlan(active, found.sessionId, found.databaseEntryName, [], true)
+      selectedUuids.value = rpPlan.value?.cards.map((card) => card.rpUuid) ?? []
     } else {
       statusText.value = '酒馆备份'
       const plan = await active.inspectStArchive(found.sessionId, found.entries)
@@ -103,10 +104,9 @@ const inspectArchive = async (active: ImportService): Promise<void> => {
   }
 }
 
-const loadRpPlan = async (active: ImportService, sessionId: string, databaseEntryName: string, uuids: string[]): Promise<void> => {
-  const { plan } = await active.buildRpPlan(sessionId, databaseEntryName, uuids, { includeGlobals: includeGlobals.value, includePresets: includePresets.value })
+const loadRpPlan = async (active: ImportService, sessionId: string, databaseEntryName: string, uuids: string[], listAll = false): Promise<void> => {
+  const { plan } = await active.buildRpPlan(sessionId, databaseEntryName, uuids, { includeGlobals: includeGlobals.value, includePresets: includePresets.value, listAll })
   rpPlan.value = plan
-  selectedUuids.value = plan.cards.map((card) => card.rpUuid)
 }
 
 const loadTargetCards = async (): Promise<void> => {

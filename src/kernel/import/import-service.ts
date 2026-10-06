@@ -62,7 +62,7 @@ export interface ImportService {
   inspectArchive(): Promise<ArchiveInspection>
   inspectStArchive(sessionId: string, entries: Array<{ name: string; size: number }>): Promise<StImportPlan>
   inspectLooseFiles(files: Array<{ name: string; bytes: Uint8Array }>): Promise<StImportPlan>
-  buildRpPlan(sessionId: string, databaseEntryName: string, selectedUuids: string[], options: { includeGlobals: boolean; includePresets: boolean }): Promise<{ plan: RpImportPlan; avatarBytes: Map<string, Uint8Array> }>
+  buildRpPlan(sessionId: string, databaseEntryName: string, selectedUuids: string[], options: { includeGlobals: boolean; includePresets: boolean; listAll?: boolean }): Promise<{ plan: RpImportPlan; avatarBytes: Map<string, Uint8Array> }>
   landRp(plan: RpImportPlan, avatarBytes: Map<string, Uint8Array>): Promise<LandResult>
   landSt(plan: StImportPlan, targetCardId: string | null): Promise<LandResult>
   closeArchive(sessionId: string): Promise<void>

@@ -264,14 +264,15 @@ export const mapRpFloors = (rows: RpChatRow[], characterId: string): ChatboxMess
   return floors
 }
 
-/** Full RP kv mirror → import plan. `selectedUuids` filters the cards; the
- *  globals mount into the selected cards only (nothing selected → globals
- *  drop with a warning, since MP has nowhere global to put them yet). */
+/** Full RP kv mirror → import plan. `selectedUuids` filters the cards;
+ *  `options.listAll` lists EVERY card instead (the picker's initial browse
+ *  mode — the UI checks them all by default and rebuilds filtered plans on
+ *  toggle). Globals mount into the selected cards only. */
 export const buildRpImportPlan = (
   kvRows: RpKvRow[],
   chatRows: RpChatRow[],
   selectedUuids: string[],
-  options: { includeGlobals: boolean; includePresets: boolean } = { includeGlobals: true, includePresets: true },
+  options: { includeGlobals: boolean; includePresets: boolean; listAll?: boolean } = { includeGlobals: true, includePresets: true },
 ): RpImportPlan => {
   const kv = new Map<string, unknown>()
   for (const row of kvRows) {
@@ -286,12 +287,16 @@ export const buildRpImportPlan = (
   const characters = asArray(kv.get('characters')) as RpCharacterRecord[]
   const warnings: string[] = []
   const selected = new Set(selectedUuids)
-  const chosen = characters.filter((record) => {
-    const uuid = typeof record.uuid === 'string' ? record.uuid : ''
-    return uuid && selected.has(uuid)
-  })
-  for (const uuid of selectedUuids) {
-    if (!characters.some((record) => record.uuid === uuid)) warnings.push(`卡 ${uuid} 在备份中不存在，已跳过`)
+  const chosen = options.listAll
+    ? characters.filter((record) => typeof record.uuid === 'string' && record.uuid)
+    : characters.filter((record) => {
+        const uuid = typeof record.uuid === 'string' ? record.uuid : ''
+        return uuid && selected.has(uuid)
+      })
+  if (!options.listAll) {
+    for (const uuid of selectedUuids) {
+      if (!characters.some((record) => record.uuid === uuid)) warnings.push(`卡 ${uuid} 在备份中不存在，已跳过`)
+    }
   }
 
   const globalWorldInfo = options.includeGlobals ? asArray(kv.get('global_worldinfo')).map(worldInfoExportEntry) : []
