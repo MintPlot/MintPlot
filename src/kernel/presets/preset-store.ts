@@ -48,7 +48,7 @@ export interface PresetStore {
   setActiveGroup(groupId: string): Promise<PresetSnapshot>
   setEntryEnabled(entryId: string, enabled: boolean): Promise<PresetSnapshot>
   updateEntry(entryId: string, patch: { name: string; content: string; role: PresetRole }): Promise<PresetSnapshot>
-  addEntry(entry: { name: string; content: string; role: PresetRole }): Promise<PresetSnapshot>
+  addEntry(entry: { name: string; content: string; role: PresetRole; /** Importers land entries disabled (M4-g2) — user opts in via the panel. */ enabled?: boolean }): Promise<PresetSnapshot>
   removeEntry(entryId: string): Promise<PresetSnapshot>
   moveEntry(entryId: string, direction: -1 | 1): Promise<PresetSnapshot>
   /** Managed-entry sync (M4-f CoT): upsert by NAME in the default group —
@@ -192,7 +192,7 @@ export function createPresetStore(repository: {
       const activeGroup = snapshot.groups.find((group) => group.enabled)?.id ?? DEFAULT_GROUP
       const next = [
         ...snapshot.entries,
-        { id: newId(), name: entry.name, content: entry.content, enabled: true, role: normalizeRole(entry.role), group: activeGroup },
+        { id: newId(), name: entry.name, content: entry.content, enabled: entry.enabled !== false, role: normalizeRole(entry.role), group: activeGroup },
       ]
       await write({ ...snapshot, entries: next })
       return { ...snapshot, entries: next }

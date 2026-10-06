@@ -269,7 +269,7 @@ export function createImportService(deps: {
       if (presets && plan.presets.length > 0) {
         for (const preset of plan.presets) {
           try {
-            await presets.addEntry({ name: preset.name, content: preset.content, role: preset.role })
+            await presets.addEntry({ name: preset.name, content: preset.content, role: preset.role, enabled: false })
             presetCount += 1
           } catch (error) {
             warnings.push(`预设「${preset.name}」导入失败:${(error as Error)?.message || '未知错误'}`)
@@ -296,7 +296,7 @@ export function createImportService(deps: {
             const entries = Array.isArray(asset.payload) ? asset.payload : []
             for (const entry of entries as Array<{ name: string; content: string; role: 'system' | 'user' | 'assistant'; enabled: boolean }>) {
               if (!entry.content?.trim()) continue
-              await presets.addEntry({ name: entry.name, content: entry.content, role: entry.role })
+              await presets.addEntry({ name: entry.name, content: entry.content, role: entry.role, enabled: entry.enabled !== false })
               presetCount += 1
             }
             continue

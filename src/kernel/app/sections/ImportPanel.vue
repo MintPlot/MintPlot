@@ -52,16 +52,23 @@ const reset = (): void => {
   selectedAssets.value = []
 }
 
+const picking = ref(false)
+
 const beginImport = (): void => {
   resultText.value = ''
+  // Double-fire guard: a second click while the SAF picker is up would open
+  // another picker session and orphan the first call's promise forever.
+  if (picking.value || isBusy.value) return
   if (!ensureService()) {
     uiService.toast('shell', '当前环境不支持备份导入(需要应用内运行)', { tone: 'error' })
     return
   }
+  picking.value = true
   fileInput.value?.click()
 }
 
 const onFilesChosen = async (event: Event): Promise<void> => {
+  picking.value = false
   const input = event.target as HTMLInputElement
   const files = [...(input.files ?? [])]
   input.value = ''
