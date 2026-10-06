@@ -1,14 +1,16 @@
 package com.mintplot.app;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Base64;
+
+import androidx.activity.result.ActivityResult;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
-import com.getcapacitor.ActivityResult;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
@@ -72,7 +74,7 @@ public class MpFilesPlugin extends Plugin {
     private void exportStartResult(PluginCall call, ActivityResult activityResult) {
         if (call == null) return;
         JSObject result = new JSObject();
-        if (activityResult.getResultCode() != android.app.Activity.RESULT_OK
+        if (activityResult.getResultCode() != Activity.RESULT_OK
                 || activityResult.getData() == null
                 || activityResult.getData().getData() == null) {
             result.put("ready", false);
@@ -158,7 +160,7 @@ public class MpFilesPlugin extends Plugin {
     private void importOpenResult(PluginCall call, ActivityResult activityResult) {
         if (call == null) return;
         JSObject result = new JSObject();
-        if (activityResult.getResultCode() != android.app.Activity.RESULT_OK
+        if (activityResult.getResultCode() != Activity.RESULT_OK
                 || activityResult.getData() == null
                 || activityResult.getData().getData() == null) {
             result.put("ready", false);
