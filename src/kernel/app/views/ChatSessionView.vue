@@ -46,6 +46,13 @@ import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
 import { createExecutableHtmlIframe, setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
 import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/template-interp'
+import {
+  buildStoryPromptBlock,
+  parseStoryStages,
+  DEFAULT_STORY_PRINCIPLES,
+  DEFAULT_STORY_STAGES,
+  STORY_STAGE_VARIABLE,
+} from '@/kernel/app/story-prompt'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
@@ -147,6 +154,11 @@ const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 const regexActive = ref(true)
 const showRegex = ref(false)
 const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
+// Story engine (M4-e): app-level like presets — dormant = no principles, no
+// stage table, no bookkeeping block. The stage value itself rides the
+// variables ledger (`stage`), so the stage system additionally needs the
+// card domain with variables active.
+const storyActive = ref(true)
 // Preset layer (M3-w): app-level; dormant = request assembles exactly as
 // before this slice. The snapshot is replaced wholesale on changes.
 const presetsActive = ref(true)
@@ -411,6 +423,9 @@ onMounted(async () => {
   setExecutableFrameSlashHandler((command) => {
     if (!streaming.value) void send(command)
   })
+  // M4-e 故事引擎:门控与变量层同形(停用 = 整块跳过,设置键不动)。
+  const storyPluginState = runtime === null ? 'active' : runtime.stateOf('story')
+  storyActive.value = storyPluginState === 'active' || storyPluginState === 'degraded'
   if (isCardDomain.value) {
     if (!cardSessions || !characterStore) {
       loadError.value = '会话存储未接入'
@@ -640,6 +655,33 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
       )
       if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
     }
+  }
+  // M4-e 故事引擎:叙事原则 + 关系阶段表注入(系统提示尾部,变量区之后)。
+  // 阶段系统仅卡域(需要变量账本解析 setvars);叙事原则两域通用。当前阶段
+  // 读账本里的 stage 变量——AI 的阶段记账经既有解析落账,下一轮自动生效。
+  if (storyActive.value && settingsState) {
+    const scope = settingsState.scope(['storyPrinciples', 'storyStages', 'storyBookkeeping'])
+    // 阶段系统仅卡域(需要变量账本解析 setvars);模板 id 与阶段变量同名时
+    // 两者会在账本里互相覆写——让位给模板,阶段系统休眠。
+    const stageSystemOn = isCardDomain.value
+      && variablesActive.value
+      && !activeTemplates.value.some((entry) => entry.id === STORY_STAGE_VARIABLE)
+    // 默认表只在「键从未设置」时生效——用户清空阶段表(面板持久化为 '[]')
+    // 必须解读为有意关闭阶段系统,而不是回落默认。
+    let stages = stageSystemOn ? parseStoryStages(scope.storyStages) : []
+    if (stageSystemOn && scope.storyStages === undefined) stages = [...DEFAULT_STORY_STAGES]
+    const stageRaw = stageSystemOn ? variableState.value[STORY_STAGE_VARIABLE]?.value : undefined
+    // AI 写入的值不做 trim(账本纪律),这里读取侧补 trim 对齐表名。
+    const currentStage = typeof stageRaw === 'string' ? stageRaw.trim() : ''
+    const block = buildStoryPromptBlock(
+      {
+        principles: scope.storyPrinciples === undefined ? DEFAULT_STORY_PRINCIPLES : String(scope.storyPrinciples),
+        stages,
+        bookkeeping: stageSystemOn && scope.storyBookkeeping !== false,
+      },
+      currentStage,
+    )
+    if (block) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${block}` : block
   }
   if (systemPrompt.trim()) {
     result.push({ role: 'system', content: expandRequestText(systemPrompt) })
