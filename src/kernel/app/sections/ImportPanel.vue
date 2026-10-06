@@ -59,6 +59,20 @@ const beginImport = (): void => {
   // Double-fire guard: a second click while the SAF picker is up would open
   // another picker session and orphan the first call's promise forever.
   if (picking.value || isBusy.value) return
+  const active = ensureService()
+  if (!active) {
+    uiService.toast('shell', '当前环境不支持备份导入(需要应用内运行)', { tone: 'error' })
+    return
+  }
+  // Zip backups (a real RP backup is ~100 MB) ride the bridge's own streaming
+  // SAF picker — the renderer never holds the bytes (the first real-backup
+  // test crashed the renderer on a JS-side base64 round-trip).
+  void inspectArchive(active)
+}
+
+const beginLooseImport = (): void => {
+  resultText.value = ''
+  if (picking.value || isBusy.value) return
   if (!ensureService()) {
     uiService.toast('shell', '当前环境不支持备份导入(需要应用内运行)', { tone: 'error' })
     return
@@ -74,20 +88,14 @@ const onFilesChosen = async (event: Event): Promise<void> => {
   input.value = ''
   const active = service.value
   if (!active || files.length === 0) return
-
-  const single = files[0]!
-  if (files.length === 1 && /\.(zip|backup)$/i.test(single.name)) {
-    await inspectArchive(active, new Uint8Array(await single.arrayBuffer()))
-    return
-  }
   await inspectLoose(active, files)
 }
 
-const inspectArchive = async (active: ImportService, bytes: Uint8Array): Promise<void> => {
+const inspectArchive = async (active: ImportService): Promise<void> => {
   phase.value = 'inspecting'
   statusText.value = '正在识别备份文件…'
   try {
-    const found = await active.inspectArchive(bytes)
+    const found = await active.inspectArchive()
     inspection.value = found
     if (found.source === 'rp') {
       if (!found.databaseEntryName) throw new Error('备份缺少数据库文件')
@@ -105,7 +113,9 @@ const inspectArchive = async (active: ImportService, bytes: Uint8Array): Promise
     }
   } catch (error) {
     reset()
-    if (!(error instanceof ImportBridgeUnavailableError) && (error as Error)?.message !== 'cancelled') {
+    picking.value = false
+    if ((error as { cancelled?: boolean })?.cancelled) return
+    if (!(error instanceof ImportBridgeUnavailableError)) {
       uiService.toast('shell', (error as Error)?.message || '识别失败', { tone: 'error', durationMs: 5000 })
     }
   }
@@ -226,8 +236,17 @@ const isBusy = computed(() => phase.value === 'inspecting' || phase.value === 'l
       :disabled="isBusy"
       @click="beginImport"
     >
-      <span>导入备份 / 资产</span>
-      <span class="text-xs text-ink-3">{{ isBusy ? '处理中…' : 'RP-Hub · 酒馆 · 散装文件' }}</span>
+      <span>导入备份文件</span>
+      <span class="text-xs text-ink-3">{{ isBusy ? '处理中…' : 'RP-Hub / 酒馆 zip' }}</span>
+    </button>
+    <button
+      type="button"
+      class="flex w-full items-center justify-between rounded-input border border-line bg-card px-3 py-2.5 text-left text-sm text-ink transition-colors hover:bg-bg active:bg-bg"
+      :disabled="isBusy"
+      @click="beginLooseImport"
+    >
+      <span>导入散装文件</span>
+      <span class="text-xs text-ink-3">世界书 / 正则 / 预设 / 角色卡</span>
     </button>
 
     <div

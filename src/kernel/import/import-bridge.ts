@@ -11,9 +11,12 @@ export interface ArchiveEntryInfo {
 }
 
 export interface ImportBridge {
-  /** Opens an archive the WEBVIEW already holds as bytes (the file input's
-   *  result) — no SAF round-trip, so no double-picker hazard. */
-  zipOpen(bytes: Uint8Array): Promise<{ sessionId: string; entries: ArchiveEntryInfo[] }>
+  /** Streaming SAF open for LARGE archives (real backups are ~100 MB; the
+   *  Java side copies through a 64 KB buffer — the renderer never holds the
+   *  bytes). Loose small files ride zipFromBytes instead. */
+  zipOpen(): Promise<{ sessionId: string; entries: ArchiveEntryInfo[] }>
+  /** Small archives from the file input's bytes. */
+  zipOpenBytes(bytes: Uint8Array): Promise<{ sessionId: string; entries: ArchiveEntryInfo[] }>
   zipRead(sessionId: string, entryName: string): Promise<Uint8Array>
   sqliteOpen(sessionId: string, entryName: string): Promise<string>
   kvAll(sqliteSessionId: string): Promise<Array<{ key: string; json: string | null }>>
@@ -29,6 +32,7 @@ export class ImportBridgeUnavailableError extends Error {
 }
 
 interface MpBackupBridge {
+  zipOpen(): Promise<{ sessionId?: string; entries?: ArchiveEntryInfo[] }>
   zipFromBytes(call: { base64: string }): Promise<{ sessionId?: string; entries?: ArchiveEntryInfo[] }>
   zipRead(call: { sessionId: string; entryName: string }): Promise<{ base64?: string }>
   sqliteOpen(call: { sessionId: string; entryName: string }): Promise<{ sqliteSessionId?: string }>
@@ -60,7 +64,12 @@ export const resolveImportBridge = (): ImportBridge | null => {
   if (!bridge || typeof bridge !== 'object') return null
   const native = bridge as MpBackupBridge
   return {
-    async zipOpen(bytes) {
+    async zipOpen() {
+      const opened = await native.zipOpen()
+      if (!opened.sessionId) throw Object.assign(new Error('cancelled'), { cancelled: true })
+      return { sessionId: opened.sessionId, entries: opened.entries ?? [] }
+    },
+    async zipOpenBytes(bytes) {
       const opened = await native.zipFromBytes({ base64: bytesToBase64(bytes) })
       if (!opened.sessionId) throw new ImportBridgeUnavailableError()
       return { sessionId: opened.sessionId, entries: opened.entries ?? [] }

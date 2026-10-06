@@ -59,7 +59,7 @@ export interface LandResult {
 }
 
 export interface ImportService {
-  inspectArchive(bytes: Uint8Array): Promise<ArchiveInspection>
+  inspectArchive(): Promise<ArchiveInspection>
   inspectStArchive(sessionId: string, entries: Array<{ name: string; size: number }>): Promise<StImportPlan>
   inspectLooseFiles(files: Array<{ name: string; bytes: Uint8Array }>): Promise<StImportPlan>
   buildRpPlan(sessionId: string, databaseEntryName: string, selectedUuids: string[], options: { includeGlobals: boolean; includePresets: boolean; listAll?: boolean }): Promise<{ plan: RpImportPlan; avatarBytes: Map<string, Uint8Array> }>
@@ -101,8 +101,8 @@ export function createImportService(deps: {
   }
 
   return {
-    async inspectArchive(bytes) {
-      const { sessionId, entries } = await bridge.zipOpen(bytes)
+    async inspectArchive() {
+      const { sessionId, entries } = await bridge.zipOpen()
       let manifestFormat: string | null = null
       let rpInfo: ArchiveInspection['rpInfo'] = null
       let databaseEntryName: string | null = null

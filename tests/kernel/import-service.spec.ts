@@ -32,6 +32,9 @@ const makeFakeBridge = (): ImportBridge => ({
       ],
     }
   },
+  async zipOpenBytes() {
+    return { sessionId: 'sess-bytes', entries: [] }
+  },
   async zipRead(_sessionId, entryName) {
     if (entryName === 'media/star.jpg') return new TextEncoder().encode('FAKE-JPEG-BYTES')
     return new Uint8Array()
