@@ -1,8 +1,13 @@
 <script setup lang="ts">
-// 导入面板(M4-g2):统一入口吃三类来源 —— RP 备份 zip(SQLite 库)、酒馆备份
-// zip(资产目录树)、散装 JSON/PNG(社区单文件)。流程 = 选文件 → 识别来源 →
-// 清单勾选(RP: 卡多选+全局物/预设开关;ST: 资产清单+世界书/正则的目标卡)
-// → 落库 → 结果 toast。桥不可用(纯 Web)给出说明而非报错。
+// Import panel (M4-g2): the unified entry eats three source kinds — RP
+// backup zip (SQLite store), ST backup zip (asset directory tree), loose
+// JSON/PNG files (community single files). Flow = pick → detect source →
+// checklist (RP: card multi-select + globals/presets switches; ST: asset
+// list + worldbook/regex target card) → land → result toast. Worldbook and
+// regex are card-bound assets in MP (no global library at 1.0.0), so
+// standalone ST-community files must mount onto a chosen card — the panel
+// says so in place. Without the bridge (plain web) it explains instead of
+// erroring.
 import { computed, ref } from 'vue'
 import { ImportBridgeUnavailableError, resolveImportBridge } from '@/kernel/import/import-bridge'
 import { createImportService, stAssetKindLabel, type ArchiveInspection, type ImportService, type LandResult, type StImportPlan } from '@/kernel/import/import-service'
@@ -346,6 +351,9 @@ const isBusy = computed(() => phase.value === 'inspecting' || phase.value === 'l
               {{ card.name }}
             </option>
           </select>
+          <div class="mt-1 text-[10px] leading-relaxed text-ink-3">
+            MP 的世界书/正则绑卡生效；酒馆生态常单独分享这类文件，选一张卡挂载后即可在该卡的世界书/正则面板里管理。
+          </div>
         </div>
       </template>
 
