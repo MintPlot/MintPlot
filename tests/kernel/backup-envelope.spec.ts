@@ -7,8 +7,10 @@ import {
   isExcludedFromBackup,
   parseBackupEnvelope,
   serializeBackupEnvelope,
+  type BackupEnvelope,
 } from '@/kernel/dataio/backup-envelope'
-import { createBackupService } from '@/kernel/dataio/backup-service'
+import { BACKUP_CONTAINER_ENTRY_NAME, createBackupService } from '@/kernel/dataio/backup-service'
+import { readZipArchiveEntry, writeZipArchive } from '@/kernel/dataio/zip-archive'
 import type { KvEngine } from '@/kernel/store/kv-store'
 
 const makeEngine = (initial: Record<string, string> = {}): KvEngine & { dump: () => Record<string, string> } => {
@@ -78,7 +80,10 @@ describe('kernel/dataio · backup service (M4-g1)', () => {
     },
   })
 
-  it('export enumerates storage, drops the journal, names the file with a timestamp', async () => {
+  const readEnvelopeFromArchive = async (bytes: Uint8Array): Promise<BackupEnvelope> =>
+    parseBackupEnvelope(new TextDecoder().decode(await readZipArchiveEntry(bytes, BACKUP_CONTAINER_ENTRY_NAME)))
+
+  it('export enumerates storage, drops the journal, packs the envelope into a .zip container', async () => {
     const engine = makeEngine({
       'chat:card:x': '{"floors":[]}',
       'character:index': '["x"]',
@@ -87,8 +92,8 @@ describe('kernel/dataio · backup service (M4-g1)', () => {
     const service = createBackupService({ engine, fileBridge: makeFileBridge })
     await service.exportBackup()
     expect(fileRef).not.toBeNull()
-    expect(fileRef!.name).toMatch(/^mintplot-\d+\.mintplot-backup\.json$/)
-    const envelope = JSON.parse(new TextDecoder().decode(fileRef!.bytes))
+    expect(fileRef!.name).toMatch(/^mintplot-\d+\.zip$/)
+    const envelope = await readEnvelopeFromArchive(fileRef!.bytes)
     expect(envelope.kv['chat:card:x']).toBe('{"floors":[]}')
     expect(envelope.kv['error-journal']).toBeUndefined()
   })
@@ -102,7 +107,7 @@ describe('kernel/dataio · backup service (M4-g1)', () => {
     const service = createBackupService({ engine, fileBridge: makeFileBridge })
     await service.exportBackup()
     engine.set('stray:key', '[]') // appears after the export — must not survive restore
-    const envelope = parseBackupEnvelope(new TextDecoder().decode(fileRef!.bytes))
+    const envelope = await readEnvelopeFromArchive(fileRef!.bytes)
     engine.set('chat:card:x', '{"changed":true}')
     await service.restoreBackup(envelope)
     const dump = engine.dump()
@@ -110,6 +115,27 @@ describe('kernel/dataio · backup service (M4-g1)', () => {
     expect(dump['character:index']).toBe('["x"]')
     expect(dump['stray:key']).toBeUndefined()
     expect(dump['error-journal']).toBe('[1]')
+  })
+
+  it('readBackupFile accepts the zip container and the legacy bare-JSON envelope', async () => {
+    const engine = makeEngine({ 'chat:card:x': '{"a":1}' })
+    const service = createBackupService({ engine, fileBridge: makeFileBridge })
+    await service.exportBackup()
+    const fromZip = await service.readBackupFile()
+    expect(fromZip.format).toBe(BACKUP_FORMAT)
+    expect(fromZip.kv['chat:card:x']).toBe('{"a":1}')
+    // Pre-M4-g4 exports were the envelope JSON itself — still restorable.
+    fileRef = { bytes: new TextEncoder().encode(serializeBackupEnvelope(createBackupEnvelope({}, {}, '1.0.0'))), name: 'legacy.json' }
+    const legacy = await service.readBackupFile()
+    expect(legacy.format).toBe(BACKUP_FORMAT)
+    fileRef = null
+    await expect(service.readBackupFile()).rejects.toMatchObject({ cancelled: true })
+  })
+
+  it('readBackupFile rejects a zip container without the envelope entry', async () => {
+    const service = createBackupService({ engine: makeEngine(), fileBridge: makeFileBridge })
+    fileRef = { bytes: writeZipArchive([{ name: 'unrelated.txt', data: new TextEncoder().encode('hello') }]), name: 'x.zip' }
+    await expect(service.readBackupFile()).rejects.toThrow(BackupEnvelopeError)
   })
 
   it('describe summarizes the envelope for the confirm modal', async () => {

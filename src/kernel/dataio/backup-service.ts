@@ -1,9 +1,10 @@
 /**
- * Backup service (M4-g1, native) — the orchestration face the settings
- * section drives: enumerate storage, build the envelope, write it through
- * the file bridge; on restore, parse + full-replace + reload (RP semantics:
- * the confirm modal and the failure wording live in the section, the
- * replace discipline lives here).
+ * Backup service (M4-g1, native; M4-g4 container) — the orchestration face
+ * the settings section drives: enumerate storage, build the envelope, write
+ * it through the file bridge as a .zip container (single mintplot-backup.json
+ * entry, store-only — see zip-archive); on restore, parse + full-replace +
+ * reload (RP semantics: the confirm modal and the failure wording live in the
+ * section, the replace discipline lives here).
  *
  * Wired through a module singleton (usage-stats service-instance pattern):
  * the composition root binds the raw KvEngine + platform info at boot; the
@@ -16,18 +17,24 @@ import type { KvEngine } from '@/kernel/store/kv-store'
 import { MP_VERSION_NAME } from '@/kernel/app/app-identity'
 import {
   BACKUP_LOCAL_STORAGE_KEYS,
+  BackupEnvelopeError,
   createBackupEnvelope,
   isExcludedFromBackup,
   parseBackupEnvelope,
   serializeBackupEnvelope,
   type BackupEnvelope,
 } from './backup-envelope'
+import { looksLikeZipArchive, readZipArchiveEntry, writeZipArchive, ZipArchiveError } from './zip-archive'
+
+/** The envelope rides inside the .zip container under this fixed entry name. */
+export const BACKUP_CONTAINER_ENTRY_NAME = 'mintplot-backup.json'
 
 export interface BackupService {
   /** Builds + persists the backup file; false = user cancelled the picker. */
   exportBackup(): Promise<boolean>
-  /** Reads a backup file; null = user cancelled the picker. Throws on a
-   *  malformed envelope (BackupEnvelopeError). */
+  /** Reads a backup file (the M4-g4 .zip container, or the legacy bare-JSON
+   *  envelope); null = user cancelled the picker. Throws on a malformed
+   *  container or envelope (BackupEnvelopeError). */
   readBackupFile(): Promise<BackupEnvelope>
   /** Full replace: writes every envelope key, removes current keys the
    *  envelope does not carry, mirrors localStorage, then RELOADS the app
@@ -68,18 +75,29 @@ export function createBackupService(deps: {
   return {
     async exportBackup() {
       const envelope = createBackupEnvelope(await collectKv(), collectLocalStorage(), MP_VERSION_NAME)
-      const bytes = new TextEncoder().encode(serializeBackupEnvelope(envelope))
+      const json = serializeBackupEnvelope(envelope)
+      const bytes = writeZipArchive([{ name: BACKUP_CONTAINER_ENTRY_NAME, data: new TextEncoder().encode(json) }])
       // Digits only — the bracketed char class this replaces used to leak
       // into Tailwind's candidate scanner and break the CSS build.
       const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
-      return fileBridge().exportFile(`mintplot-${stamp}.mintplot-backup.json`, 'application/json', bytes)
+      return fileBridge().exportFile(`mintplot-${stamp}.zip`, 'application/zip', bytes)
     },
 
     async readBackupFile() {
-      const bytes = await fileBridge().importFile('application/json')
+      // No mime filter: the picker must offer both the .zip container and the
+      // legacy .json envelope.
+      const bytes = await fileBridge().importFile()
       if (!bytes) throw Object.assign(new Error('cancelled'), { cancelled: true })
-      const text = new TextDecoder().decode(bytes)
-      return parseBackupEnvelope(text)
+      try {
+        const text = looksLikeZipArchive(bytes)
+          ? new TextDecoder().decode(await readZipArchiveEntry(bytes, BACKUP_CONTAINER_ENTRY_NAME))
+          : new TextDecoder().decode(bytes)
+        return parseBackupEnvelope(text)
+      } catch (error) {
+        if (error instanceof BackupEnvelopeError) throw error
+        const reason = error instanceof ZipArchiveError ? error.message : '未知错误'
+        throw new BackupEnvelopeError(`备份压缩包读取失败:${reason}`)
+      }
     },
 
     async restoreBackup(envelope) {
