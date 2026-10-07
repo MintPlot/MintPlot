@@ -9,7 +9,7 @@ import { createMemoryEngine } from '@/kernel/store/kv-store'
 const RP_KV = [
   { key: 'characters', json: JSON.stringify([{ uuid: 'rp-1', name: '星澜卡', description: 'd', personality: 'p', first_mes: '你好。', avatar: 'file:///data/0/files/media/star.jpg' }]) },
   { key: 'global_regex', json: JSON.stringify([{ scriptName: '全局', findRegex: '/a/g', replaceString: 'b' }]) },
-  { key: 'presets', json: JSON.stringify([{ name: '时间戳', content: '【第1日】', enabled: true, role: 'system', group: 'default' }]) },
+  { key: 'presets', json: JSON.stringify([{ name: 'RP导入·时间戳', content: '【第1日】', enabled: true, role: 'system', group: 'default' }]) },
   { key: 'memory_summaries_rp-1', json: JSON.stringify({ long: '长摘要', short: '短摘要', updatedAt: 5 }) },
   { key: 'memory_profile_rp-1', json: JSON.stringify({ characters: [{ name: '星澜' }], relations: [], openPlots: [] }) },
 ]
@@ -74,7 +74,7 @@ describe('kernel/import · import service (M4-g2)', () => {
     expect(plan.cards).toHaveLength(1)
     expect(plan.cards[0]!.card.name).toBe('星澜卡')
     expect(avatarBytes.get('rp-1')!.length).toBeGreaterThan(0)
-    expect(plan.presets.map((preset) => preset.name)).toEqual(['时间戳'])
+    expect(plan.presets.map((preset) => preset.name)).toEqual(['RP导入·时间戳'])
   })
 
   it('landRp persists cards, covers, floors, envelopes, memory, and presets', async () => {
@@ -102,7 +102,7 @@ describe('kernel/import · import service (M4-g2)', () => {
     expect(memory).toMatchObject({ long: '长摘要', short: '短摘要', anchor: 2 })
     // Preset merged into the store (as a disabled entry).
     const snapshot = await presets.get()
-    expect(snapshot.entries.some((entry) => entry.name === '时间戳')).toBe(true)
+    expect(snapshot.entries.some((entry) => entry.name === 'RP导入·时间戳')).toBe(true)
   })
 
   it('landSt imports loose assets: presets to the store, worldbook/regex onto the target card', async () => {

@@ -223,6 +223,7 @@ public class MpBackupPlugin extends Plugin {
             call.reject("No active archive session or database entry missing");
             return;
         }
+        runWorker(call, () -> {
         File cacheCopy = null;
         try {
             ZipEntry entry = open.zipFile.getEntry(entryName);
@@ -256,6 +257,7 @@ public class MpBackupPlugin extends Plugin {
             if (cacheCopy != null) deleteRecursively(cacheCopy.getParentFile());
             call.reject("Unable to open backup database", error);
         }
+        });
     }
 
     /** kv_store as [{key, json}] — the RP key-value mirror. Values can exceed
@@ -267,6 +269,7 @@ public class MpBackupPlugin extends Plugin {
     public void kvAll(PluginCall call) {
         OpenDatabase open = requireDatabase(call);
         if (open == null) return;
+        runWorker(call, () -> {
         try {
             java.util.List<String> keys = new java.util.ArrayList<>();
             try (Cursor cursor = open.database.query("kv_store", new String[]{"key"}, null, null, null, null, "key")) {
@@ -289,6 +292,7 @@ public class MpBackupPlugin extends Plugin {
         } catch (Exception error) {
             call.reject("Unable to read kv_store", error);
         }
+        });
     }
 
     /** chat_messages as [{characterId, messageId, position, status, messageJson}]. */
@@ -296,6 +300,7 @@ public class MpBackupPlugin extends Plugin {
     public void chatMessages(PluginCall call) {
         OpenDatabase open = requireDatabase(call);
         if (open == null) return;
+        runWorker(call, () -> {
         try {
             JSArray rows = new JSArray();
             try (Cursor cursor = open.database.query("chat_messages",
@@ -317,6 +322,7 @@ public class MpBackupPlugin extends Plugin {
         } catch (Exception error) {
             call.reject("Unable to read chat_messages", error);
         }
+        });
     }
 
     /** memory_fragments as [{characterId, kind, fragmentId, fragmentJson}]. */
@@ -324,6 +330,7 @@ public class MpBackupPlugin extends Plugin {
     public void memoryFragments(PluginCall call) {
         OpenDatabase open = requireDatabase(call);
         if (open == null) return;
+        runWorker(call, () -> {
         try {
             JSArray rows = new JSArray();
             try (Cursor cursor = open.database.query("memory_fragments",
@@ -344,6 +351,7 @@ public class MpBackupPlugin extends Plugin {
         } catch (Exception error) {
             call.reject("Unable to read memory_fragments", error);
         }
+        });
     }
 
     @PluginMethod
@@ -368,6 +376,19 @@ public class MpBackupPlugin extends Plugin {
             }
         }
         call.resolve();
+    }
+
+    /** Database/archive work runs off the UI thread — a real backup's kv
+     *  values and chat rows serialize through the bridge in seconds, and on
+     *  the UI thread those seconds freeze the WebView (CDP included). */
+    private void runWorker(PluginCall call, Runnable work) {
+        new Thread(() -> {
+            try {
+                work.run();
+            } catch (Exception error) {
+                call.reject("Import worker failed", error);
+            }
+        }, "mp-backup-db").start();
     }
 
     private OpenDatabase requireDatabase(PluginCall call) {

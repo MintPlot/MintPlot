@@ -267,7 +267,17 @@ export function createImportService(deps: {
       }
       let presetCount = 0
       if (presets && plan.presets.length > 0) {
+        // MP's default presets ARE RP's presets (M3-w ported them) — a real
+        // backup's presets largely collide by name. Skip duplicates instead
+        // of stacking identically-named entries into the panel.
+        const snapshot = await presets.get()
+        const existingNames = new Set(snapshot.entries.map((entry) => entry.name))
+        const skipped: string[] = []
         for (const preset of plan.presets) {
+          if (existingNames.has(preset.name)) {
+            skipped.push(preset.name)
+            continue
+          }
           try {
             await presets.addEntry({ name: preset.name, content: preset.content, role: preset.role, enabled: false })
             presetCount += 1
@@ -275,6 +285,7 @@ export function createImportService(deps: {
             warnings.push(`预设「${preset.name}」导入失败:${(error as Error)?.message || '未知错误'}`)
           }
         }
+        if (skipped.length > 0) warnings.push(`${skipped.length} 条预设与现有预设同名，已跳过`)
       }
       return { importedCardIds, presetCount, warnings: [...warnings, ...plan.warnings] }
     },
