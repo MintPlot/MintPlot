@@ -32,6 +32,9 @@ export interface CardSession {
   updatedAt: number
   /** Same floor shape as the chatbox domain (role/content/ts/id). */
   messages: ChatboxMessage[]
+  /** Session-level model override (M4-g3 parity): empty = the active
+   *  profile's model. Endpoint/key still come from the active profile. */
+  model?: string
 }
 
 interface CardSessionMeta {
@@ -40,6 +43,7 @@ interface CardSessionMeta {
   createdAt: number
   updatedAt: number
   preview: string
+  model?: string
 }
 
 export interface CardSessionStore {
@@ -83,6 +87,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
         messages,
+        ...(meta.model ? { model: meta.model } : {}),
       }
     },
 
@@ -114,6 +119,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         preview: previewOf(session.messages),
+        ...(session.model ? { model: session.model } : {}),
       }
       await repository.set(metaKeyOf(session.cardId), meta)
     },

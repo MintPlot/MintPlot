@@ -103,6 +103,7 @@ import type { MemoryState } from '@/kernel/memory/memory-engine'
 import { readMemorySummarySettings, runRollingSummary } from '@/kernel/memory/summary-pipeline'
 import type { SummaryFloor } from '@/kernel/memory/summary-pipeline'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
+import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -167,6 +168,9 @@ const showMemory = ref(false)
 // preset sync, no request-side strip (raw tag passthrough). Native reasoning
 // still rides the kernel stream capture; it just stays unshown.
 const cotActive = ref(true)
+// Session settings (M4-g3 parity): session-level system prompt (chatbox) and
+// model override (both domains).
+const showSessionSettings = ref(false)
 const showVariables = ref(false)
 const capsuleOpenId = ref<string | null>(null)
 // Secondary-model analysis status (M3-t): surfaced in the variables sheet.
@@ -1023,6 +1027,8 @@ const streamAssistantInto = async (
   try {
     const result = await provider.stream(requestMessages, {
       signal: controller.signal,
+      // M4-g3 session-level model override (both domains; empty = global).
+      model: (isCardDomain.value ? cardSession.value?.model : conversation.value?.model) || undefined,
       onDelta: (delta) => {
         floor.content += delta
         void scrollToBottom()
@@ -1458,6 +1464,20 @@ const toggleSpeakFloor = (floor: ChatboxMessage): void => {
   })
 }
 
+// M4-g3: the sheet hands over drafts; this side owns the store objects and
+// persists through the domain's own store.
+const onSessionSettingsSaved = async (draft: { systemPrompt: string; model: string }): Promise<void> => {
+  if (isCardDomain.value && cardSession.value) {
+    if (draft.model) cardSession.value.model = draft.model
+    else delete cardSession.value.model
+    await cardSessions?.save(cardSession.value)
+  } else if (conversation.value) {
+    conversation.value.systemPrompt = draft.systemPrompt
+    conversation.value.model = draft.model
+    await store?.save(conversation.value)
+  }
+}
+
 const restartSession = async (): Promise<void> => {
   if (!isCardDomain.value || !card.value || !cardSessions) return
   const confirmed = await uiService.confirm('shell', {
@@ -1555,6 +1575,13 @@ const restartSession = async (): Promise<void> => {
         @click="showMemory = true"
       >
         记忆
+      </button>
+      <button
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showSessionSettings = true"
+      >
+        会话
       </button>
       <button
         v-if="isCardDomain"
@@ -2015,6 +2042,15 @@ const restartSession = async (): Promise<void> => {
       @close="showRegex = false"
     />
 
+        <SessionSettingsSheet
+      v-if="showSessionSettings"
+      :domain="props.domain"
+      :conversation="conversation"
+      :card-session="cardSession"
+      :settings-state="settingsState"
+      @close="showSessionSettings = false"
+      @saved="onSessionSettingsSaved"
+    />
     <MemorySheet
       v-if="isCardDomain && showMemory && card"
       :state="memoryState"

@@ -25,6 +25,9 @@ export interface LlmProvider {
       onDelta?: (delta: string) => void
       /** Native reasoning deltas (M4-f) — optional, older providers omit. */
       onReasoningDelta?: (delta: string) => void
+      /** Session-level model override (M4-g3 parity): replaces the active
+       *  profile's model name; endpoint/key still come from the profile. */
+      model?: string
     },
   ): Promise<{
     content: string
@@ -55,7 +58,11 @@ export function createOpenAiCompatibleProvider(settings: SettingsState): LlmProv
       return !!baseUrl && !!model
     },
     async stream(messages, options) {
-      return streamChatCompletion(config(), messages, options)
+      const resolved = config()
+      const override = options.model?.trim()
+      // Session-level override (M4-g3): the model name swaps, the active
+      // profile keeps supplying the endpoint and key.
+      return streamChatCompletion(override ? { ...resolved, model: override } : resolved, messages, options)
     },
   }
 }
