@@ -5,7 +5,7 @@
 // import-analysis time ("Cannot bundle Node.js built-in"), which fails the
 // whole suite on machines where this file would merely be skipped. Pure
 // data mapping — no DOM needed.
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { buildRpImportPlan, type RpChatRow, type RpKvRow } from '@/kernel/import/rp-import'
@@ -29,15 +29,23 @@ const DB_PATH = 'build/rp-real.db'
 const hasRealBackup = existsSync(DB_PATH)
 
 describe.skipIf(!hasRealBackup)('kernel/import · REAL RP backup regression (local file)', () => {
-  const db = new DatabaseSync(DB_PATH)
-  const kvRows: RpKvRow[] = db.prepare('SELECT key, json FROM kv_store ORDER BY key').all().map((row) => ({ key: row.key as string, json: row.json as string | null }))
-  const chatRows: RpChatRow[] = db.prepare('SELECT character_id, message_id, position, status, message_json FROM chat_messages ORDER BY character_id, position').all().map((row) => ({
-    characterId: row.character_id as string,
-    messageId: row.message_id as string,
-    position: row.position as number,
-    status: row.status as string | null,
-    messageJson: row.message_json as string | null,
-  }))
+  // Suite bodies run at collection even when skipped (Jest/vitest semantics),
+  // so the database may only be opened inside beforeAll — otherwise every
+  // machine without the archive fails the suite here.
+  let kvRows!: RpKvRow[]
+  let chatRows!: RpChatRow[]
+
+  beforeAll(() => {
+    const db = new DatabaseSync(DB_PATH)
+    kvRows = db.prepare('SELECT key, json FROM kv_store ORDER BY key').all().map((row) => ({ key: row.key as string, json: row.json as string | null }))
+    chatRows = db.prepare('SELECT character_id, message_id, position, status, message_json FROM chat_messages ORDER BY character_id, position').all().map((row) => ({
+      characterId: row.character_id as string,
+      messageId: row.message_id as string,
+      position: row.position as number,
+      status: row.status as string | null,
+      messageJson: row.message_json as string | null,
+    }))
+  })
 
   it('kv carries the prefixed key family and giant card values', () => {
     // The prefix itself is red-lined from source; assert the family by suffix.
