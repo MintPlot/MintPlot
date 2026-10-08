@@ -1,3 +1,10 @@
+// @vitest-environment node
+//
+// The node environment is required regardless of the skip below: the jsdom
+// (client) environment makes vite-resolve refuse the node:sqlite builtin at
+// import-analysis time ("Cannot bundle Node.js built-in"), which fails the
+// whole suite on machines where this file would merely be skipped. Pure
+// data mapping — no DOM needed.
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
