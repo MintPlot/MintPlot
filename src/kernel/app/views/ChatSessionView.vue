@@ -25,6 +25,7 @@ import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
 import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
 import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
 import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
+import { pluginActive, useFloorActions } from '@/kernel/app/chat/use-floor-actions'
 import { closeConversation } from '@/kernel/app/chat-router'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
@@ -41,7 +42,6 @@ import { setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kern
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
-import { copyText } from '@/kernel/app/ui/clipboard'
 // M3-q variables: tag-block parsing/ledger on the card domain only — the
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
@@ -51,8 +51,6 @@ import {
   parseVariableUpdates,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
-import { filterCandidateEvents, eventsBeforeFloor } from '@/kernel/variables/variable-store'
-import { replayVariableState } from '@/kernel/variables/variable-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
@@ -85,6 +83,10 @@ const memoryStore = inject(MEMORY_STORE_KEY, null)
 // No runtime injected (pure kernel tests) keeps variables active.
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
 
+// C7: one provider-resolution shape for the view's turn sites (the floor
+// actions composable receives it as a dep).
+const resolveProvider = (): LlmProvider | undefined => seams?.resolve<LlmProvider>('llm.provider')?.implementation
+
 const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
 const card = ref<CharacterCard | null>(null)
@@ -115,9 +117,6 @@ const cotActive = ref(true)
 // model override (both domains).
 const showSessionSettings = ref(false)
 const showVariables = ref(false)
-// M4-c floor actions: in-place editor state for one floor at a time.
-const editingFloorId = ref('')
-const editDraft = ref('')
 // M4-d single-shot system instruction: rides one request, then clears.
 const oneShotInstruction = ref('')
 const showOneShotPanel = ref(false)
@@ -198,35 +197,29 @@ onMounted(async () => {
     projection?.setActiveCardSession({ cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages })
     // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)——插件停用时
     // 整体休眠:不播种、不解析、不展开、不注入、面板入口隐藏;账本数据不动。
-    const pluginState = runtime === null ? 'active' : runtime.stateOf('variables')
-    variablesActive.value = pluginState === 'active' || pluginState === 'degraded'
+    variablesActive.value = pluginActive(runtime, 'variables')
     // M3-u: the worldbook layer gates on its own plugin the same way.
-    const worldinfoState = runtime === null ? 'active' : runtime.stateOf('worldinfo')
-    worldbookActive.value = worldinfoState === 'active' || worldinfoState === 'degraded'
+    worldbookActive.value = pluginActive(runtime, 'worldinfo')
     if (worldbookActive.value) {
       worldbookDisabledUids.value = (await worldbookStore?.getDisabled(card.value.id)) ?? new Set()
     }
     // M3-v: regex layer gates on its own plugin the same way.
-    const regexState = runtime === null ? 'active' : runtime.stateOf('regex')
-    regexActive.value = regexState === 'active' || regexState === 'degraded'
+    regexActive.value = pluginActive(runtime, 'regex')
     if (regexActive.value) {
       regexDisabledUids.value = (await regexStore?.getDisabled(card.value.id)) ?? new Set()
     }
     // M4-e: the memory layer gates on its own plugin the same way.
-    const memoryPluginState = runtime === null ? 'active' : runtime.stateOf('memory')
-    memoryActive.value = memoryPluginState === 'active' || memoryPluginState === 'degraded'
+    memoryActive.value = pluginActive(runtime, 'memory')
     if (memoryActive.value) {
       memoryState.value = (await memoryStore?.ensure({ kind: 'card', id: card.value.id })) ?? null
     }
     // M3-w: presets are app-level — gate + load once per view mount.
-    const presetState = runtime === null ? 'active' : runtime.stateOf('presets')
-    presetsActive.value = presetState === 'active' || presetState === 'degraded'
+    presetsActive.value = pluginActive(runtime, 'presets')
     if (presetsActive.value) {
       presetSnapshot.value = (await presetStore?.ensure()) ?? null
     }
     // M4-f: the CoT layer gates on its own plugin the same way.
-    const cotPluginState = runtime === null ? 'active' : runtime.stateOf('cot')
-    cotActive.value = cotPluginState === 'active' || cotPluginState === 'degraded'
+    cotActive.value = pluginActive(runtime, 'cot')
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -362,7 +355,6 @@ const buildUserInfoLine = (): string => {
 // writes the plugin gates; request assembly and the sheets consume the state.
 const {
   variableState,
-  variableEvents,
   variablesActive,
   worldbookActive,
   worldbookReport,
@@ -371,7 +363,6 @@ const {
   regexDisabledUids,
   capsuleOpenId,
   analysisStatus,
-  candidateIndexOf,
   absorbVariableSnapshot,
   activeTemplates,
   worldbookEntries,
@@ -450,7 +441,7 @@ const streamAssistantInto = async (
   requestMessages: LlmChatMessage[],
   options: { candidateIndex?: number; isNewFloor?: boolean } = {},
 ): Promise<boolean> => {
-  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  const provider = resolveProvider()
   if (!provider) return false
   const candidateIndex = options.candidateIndex
   streaming.value = true
@@ -576,7 +567,7 @@ const streamAssistantInto = async (
 }
 
 const runAssistantTurn = async (): Promise<void> => {
-  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  const provider = resolveProvider()
   if (!provider) return
   await syncCotPresetsIfActive()
   const assistantFloor: ChatboxMessage = {
@@ -592,7 +583,7 @@ const runAssistantTurn = async (): Promise<void> => {
 }
 
 const send = async (overrideText?: string): Promise<void> => {
-  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
+  const provider = resolveProvider()
   if (!sessionLoaded.value || !provider) return
   // Panel-button triggers (M3-t bridge) pass the command directly; the normal
   // path sends the draft. Both share the streaming guard + the M4-d image
@@ -633,182 +624,42 @@ const retryLastSend = async (): Promise<void> => {
   await runAssistantTurn()
 }
 
-// ── M4-c floor actions ──────────────────────────────────────────────────────
-// Every floor carries a persistent action row (RP-Hub shape, plan D1/D2);
-// the LAST assistant floor adds the swipe group and regenerate (D3).
-
-const isLastAssistantFloor = (message: ChatboxMessage): boolean =>
-  message.role === 'assistant' && messages.value[messages.value.length - 1]?.id === message.id
-
-/** Regenerate (D3): re-rolls the last assistant floor as an ADDITIONAL
- *  candidate. The ledger's pre-floor state drives the request; the previous
- *  candidate stays switchable, and its untagged events are retagged first so
- *  per-candidate replay stays disjoint. Abort/failure restores the previous
- *  candidate untouched. */
-const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
-  if (streaming.value || !isLastAssistantFloor(floor)) return
-  const provider = seams?.resolve<LlmProvider>('llm.provider')?.implementation
-  if (!provider || !sessionLoaded.value) return
-  await syncCotPresetsIfActive()
-  if (isCardDomain.value && card.value && variablesActive.value) {
-    await variableStore?.retagUntaggedEvents(card.value.id, floor.id, floor.activeIndex ?? 0)
-  }
-  if (!floor.candidates) {
-    floor.candidates = [floor.content]
-    floor.activeIndex = 0
-  }
-  // M4-f: per-candidate reasoning alignment — backfill the previous
-  // candidate's slot (first regen on a legacy floor) so switching candidates
-  // never shows one candidate's thinking under another's prose.
-  if (!floor.candidateReasoning || floor.candidateReasoning.length !== floor.candidates.length) {
-    const prev = floor.activeIndex ?? 0
-    floor.candidateReasoning = floor.candidates.map((_, index) => (index === prev ? floor.reasoning ?? '' : ''))
-  }
-  const prevIndex = floor.activeIndex ?? 0
-  const prevContent = floor.candidates[prevIndex] ?? floor.content
-  const prevReasoning = floor.reasoning ?? ''
-  const newIndex = floor.candidates.length
-  // The request sees the ledger AS OF before this floor (variables partition,
-  // worldbook scan, macros) — the floor itself is being rewritten.
-  const snapshot = isCardDomain.value && card.value ? await variableStore?.get(card.value.id) : null
-  if (snapshot) {
-    const preFloorEvents = eventsBeforeFloor(snapshot.events, floor.id)
-    variableEvents.value = preFloorEvents
-    variableState.value = replayVariableState(snapshot.seed, filterCandidateEvents(preFloorEvents, candidateIndexOf))
-  }
-  floor.activeIndex = newIndex
-  floor.candidates.push('')
-  floor.candidateReasoning!.push('')
-  floor.reasoning = ''
-  const ok = await streamAssistantInto(
-    floor,
-    buildRequestMessages(messages.value.slice(0, -1)),
-    { candidateIndex: newIndex },
-  )
-  if (ok) {
-    floor.candidates[newIndex] = floor.content
-    floor.candidateReasoning![newIndex] = floor.reasoning ?? ''
-    floor.activeIndex = newIndex
-  } else {
-    // Aborted or failed: drop the placeholder candidate, restore the previous.
-    floor.candidates.pop()
-    floor.candidateReasoning!.pop()
-    floor.activeIndex = prevIndex
-    floor.content = prevContent
-    floor.reasoning = prevReasoning
-    const restored = isCardDomain.value && card.value ? await variableStore?.get(card.value.id) : null
-    if (restored) absorbVariableSnapshot(restored)
-  }
-  await persistSession()
-}
-
-/** Swipe (D3): switch the displayed candidate; the ledger projection follows
- *  the active candidate (candidate-aware replay). */
-const switchCandidate = async (floor: ChatboxMessage, direction: -1 | 1): Promise<void> => {
-  if (streaming.value || !floor.candidates?.length) return
-  const next = (floor.activeIndex ?? 0) + direction
-  if (next < 0 || next >= floor.candidates.length) return
-  floor.activeIndex = next
-  floor.content = floor.candidates[next] ?? ''
-  // M4-f: the thinking card follows the candidate (parallel reasoning slots).
-  floor.reasoning = floor.candidateReasoning?.[next] ?? ''
-  await persistSession()
-  if (isCardDomain.value && card.value && variablesActive.value) {
-    const snapshot = await variableStore?.get(card.value.id)
-    if (snapshot) absorbVariableSnapshot(snapshot)
-  }
-}
-
-/** Delete (D4): a floor and EVERYTHING after it leaves the conversation;
- *  their ledger events roll back with them (confirm modal states the count). */
-const deleteFloorFrom = async (floor: ChatboxMessage): Promise<void> => {
-  if (streaming.value) return
-  const index = messages.value.findIndex((message) => message.id === floor.id)
-  if (index < 0) return
-  const count = messages.value.length - index
-  const confirmed = await uiService.confirm('shell', {
-    title: '删除楼层',
-    message: count > 1 ? `将删除此楼及其后 ${count} 楼,不可恢复。` : '将删除此楼,不可恢复。',
-    confirmLabel: '删除',
-  })
-  if (!confirmed) return
-  if (isCardDomain.value && card.value && variablesActive.value) {
-    await variableStore?.rollbackFloors(card.value.id, messages.value.slice(index).map((message) => message.id))
-  }
-  messages.value.splice(index)
-  await persistSession()
-  if (isCardDomain.value && card.value && variablesActive.value) {
-    const snapshot = await variableStore?.get(card.value.id)
-    if (snapshot) absorbVariableSnapshot(snapshot)
-  }
-}
-
-// In-place editor (plan §2): the bubble becomes a textarea; saving rewrites
-// the stored floor (and the active candidate's slot).
-const startEditFloor = (floor: ChatboxMessage): void => {
-  editingFloorId.value = floor.id
-  editDraft.value = floor.content
-}
-const cancelEditFloor = (): void => {
-  editingFloorId.value = ''
-  editDraft.value = ''
-}
-const saveEditFloor = async (): Promise<void> => {
-  const floor = messages.value.find((message) => message.id === editingFloorId.value)
-  if (!floor) {
-    cancelEditFloor()
-    return
-  }
-  floor.content = editDraft.value
-  if (floor.candidates && floor.activeIndex !== undefined) {
-    floor.candidates[floor.activeIndex] = floor.content
-  }
-  cancelEditFloor()
-  await persistSession()
-}
-
-const copyFloor = async (floor: ChatboxMessage): Promise<void> => {
-  const succeeded = await copyText(floor.content)
-  uiService.toast('shell', succeeded ? '已复制楼层原文' : '复制失败:剪贴板不可用', {
-    tone: succeeded ? 'success' : 'error',
-  })
-}
-
-/** Speak (D5): the kernel emits an intent; the tts plugin toggles reading.
- *  Red line — the view never imports the plugin, the bus carries the request
- *  with the floor text (projection-index free). */
-const ttsActive = computed(() => {
-  if (!runtime) return true
-  const state = runtime.stateOf('tts')
-  return state === 'active' || state === 'degraded'
+// Floor actions (composable, 2026-10 cleanup extraction): the swipe/regen
+// candidates, edit/copy/delete row, speak intent and session-settings handoff.
+const {
+  editingFloorId,
+  editDraft,
+  ttsActive,
+  isLastAssistantFloor,
+  regenerateLast,
+  switchCandidate,
+  deleteFloorFrom,
+  startEditFloor,
+  cancelEditFloor,
+  saveEditFloor,
+  copyFloor,
+  toggleSpeakFloor,
+  onSessionSettingsSaved,
+} = useFloorActions({
+  resolveProvider,
+  runtime,
+  variableStore,
+  isStreaming: () => streaming.value,
+  sessionLoaded: () => sessionLoaded.value,
+  isCardDomain: () => isCardDomain.value,
+  card: () => card.value,
+  cardSession: () => cardSession.value,
+  conversation: () => conversation.value,
+  messages: () => messages.value,
+  variablesActive: () => variablesActive.value,
+  absorbVariableSnapshot,
+  buildRequestMessages,
+  streamAssistantInto,
+  syncCotPresetsIfActive,
+  persistSession,
+  stripCotText,
+  domain: () => props.domain,
 })
-const toggleSpeakFloor = (floor: ChatboxMessage): void => {
-  if (streaming.value) return
-  const floorIndex = messages.value.findIndex((message) => message.id === floor.id)
-  runtime?.emit('tts.speak.requested', {
-    sessionId: isCardDomain.value ? card.value?.id ?? '' : conversation.value?.id ?? '',
-    kind: props.domain,
-    messageId: floor.id,
-    floorIndex,
-    // M4-f (plan D4): read the prose, not the thinking — tag-based CoT strips
-    // from the spoken text (native reasoning never lives in content).
-    text: stripCotText(floor.content),
-  })
-}
-
-// M4-g3: the sheet hands over drafts; this side owns the store objects and
-// persists through the domain's own store.
-const onSessionSettingsSaved = async (draft: { systemPrompt: string; model: string }): Promise<void> => {
-  if (isCardDomain.value && cardSession.value) {
-    if (draft.model) cardSession.value.model = draft.model
-    else delete cardSession.value.model
-    await cardSessions?.save(cardSession.value)
-  } else if (conversation.value) {
-    conversation.value.systemPrompt = draft.systemPrompt
-    conversation.value.model = draft.model
-    await store?.save(conversation.value)
-  }
-}
 
 const restartSession = async (): Promise<void> => {
   if (!isCardDomain.value || !card.value || !cardSessions) return
