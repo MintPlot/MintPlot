@@ -8,11 +8,14 @@ import type { SettingsState } from '@/kernel/settings/settings-state'
 import {
   DEFAULT_STORY_PRINCIPLES,
   DEFAULT_STORY_STAGES,
+  STORY_STAGE_VARIABLE,
   parseStoryStages,
 } from '@/kernel/app/story-prompt'
 import type { StoryStage } from '@/kernel/app/story-prompt'
 
 const settingsState = inject<SettingsState | null>(SETTINGS_STATE_KEY, null)
+
+const stageVariableName = STORY_STAGE_VARIABLE
 
 const principles = ref(DEFAULT_STORY_PRINCIPLES)
 const stages = ref<StoryStage[]>([...DEFAULT_STORY_STAGES])
@@ -35,7 +38,9 @@ const persist = (): void => {
   if (!settingsState) return
   const scope = settingsState.scope([...STORY_KEYS])
   scope.storyPrinciples = principles.value
-  scope.storyStages = JSON.stringify(stages.value.filter((stage) => stage.name.trim()))
+  // Persist rows verbatim (unnamed included) — filtering here silently ate
+  // half-typed rows on remount; the request-side parser skips nameless ones.
+  scope.storyStages = JSON.stringify(stages.value)
   scope.storyBookkeeping = bookkeeping.value
 }
 
@@ -79,7 +84,7 @@ const updateStageGuide = (index: number, guide: string): void => {
 
     <div>
       <div class="mb-1 text-xs font-medium text-ink-3">
-        关系阶段表（按顺序执行；当前阶段由变量 <code>{{ 'stage' }}</code> 决定，仅卡域生效）
+        关系阶段表（按顺序执行；当前阶段由变量 <code>{{ stageVariableName }}</code> 决定，仅卡域生效）
       </div>
       <div class="flex flex-col gap-2">
         <div

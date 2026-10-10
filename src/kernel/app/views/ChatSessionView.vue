@@ -156,8 +156,8 @@ const showRegex = ref(false)
 const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 // Story engine (M4-e): app-level like presets — dormant = no principles, no
 // stage table, no bookkeeping block. The stage value itself rides the
-// variables ledger (`stage`), so the stage system additionally needs the
-// card domain with variables active.
+// variables ledger (`story.stage`), so the stage system additionally needs
+// the card domain with variables active.
 const storyActive = ref(true)
 // Preset layer (M3-w): app-level; dormant = request assembles exactly as
 // before this slice. The snapshot is replaced wholesale on changes.

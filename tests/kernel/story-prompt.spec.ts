@@ -43,14 +43,25 @@ describe('故事引擎提示块(M4-e)', () => {
     expect(block).toContain('初识 → 熟悉')
   })
 
-  it('当前阶段不在表内时回落首个阶段', () => {
+  it('当前阶段不在表内时如实标注并禁止改写,不回落首阶段', () => {
     const block = buildStoryPromptBlock(
       { principles: '', stages: DEFAULT_STORY_STAGES, bookkeeping: false },
       '不存在',
     )
-    expect(block).toContain('当前阶段：初识')
+    expect(block).toContain('当前阶段：不存在（暂不在阶段表内')
+    expect(block).not.toContain('- 初识（当前）')
     expect(block).not.toContain('【叙事原则】')
     expect(block).not.toContain('【阶段记账】')
+  })
+
+  it('空 currentStage(新会话)回落首个阶段并标注(当前);同名阶段解析去重', () => {
+    const block = buildStoryPromptBlock(
+      { principles: '', stages: [{ name: '初识', guide: 'a' }, { name: '熟悉', guide: 'b' }], bookkeeping: false },
+      '',
+    )
+    expect(block).toContain('当前阶段：初识')
+    expect(block).toContain('- 初识（当前）')
+    expect(parseStoryStages([{ name: '熟悉', guide: 'a' }, { name: '熟悉', guide: 'b' }])).toHaveLength(1)
   })
 
   it('全空配置返回空串(调用方跳过注入)', () => {

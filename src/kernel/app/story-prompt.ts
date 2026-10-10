@@ -44,7 +44,8 @@ export const DEFAULT_STORY_STAGES: StoryStage[] = [
   { name: '交付', guide: '袒露脆弱面、愿意为对方破例' },
 ]
 
-/** 容错解析持久化的阶段表(字符串 JSON 或已解析数组;脏数据静默降级为空)。 */
+/** 容错解析持久化的阶段表(字符串 JSON 或已解析数组;脏数据静默降级为空)。
+ *  同名阶段去重(保留首个)——重复名会让「当前」标注与记账顺序线歧义。 */
 export function parseStoryStages(raw: unknown): StoryStage[] {
   let list: unknown = raw
   if (typeof raw === 'string') {
@@ -56,32 +57,43 @@ export function parseStoryStages(raw: unknown): StoryStage[] {
   }
   if (!Array.isArray(list)) return []
   const stages: StoryStage[] = []
+  const seen = new Set<string>()
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue
     const name = String((entry as { name?: unknown }).name ?? '').trim()
     const guide = String((entry as { guide?: unknown }).guide ?? '').trim()
-    if (name) stages.push({ name, guide })
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    stages.push({ name, guide })
   }
   return stages
 }
 
 /**
  * 组装提示块;三部分全空(或阶段表为空)时返回 ''(调用方跳过注入)。
- * currentStage 为空串时阶段表标注首个阶段为当前。
+ * currentStage 为空串 → 标注首个阶段(新会话起步);有值但不匹配任何表项
+ * (改名/重排后的常见残留)→ 如实标注「不在阶段表内」并禁止模型改写该变量,
+ * 绝不静默回落首阶段——回落会让提示词自相矛盾,且可能诱导模型覆写真实进度。
  */
 export function buildStoryPromptBlock(config: StoryPromptConfig, currentStage: string): string {
   const parts: string[] = []
   const principles = config.principles.trim()
   if (principles) parts.push(`【叙事原则】\n${principles}`)
   if (config.stages.length > 0) {
-    const active = config.stages.some((stage) => stage.name === currentStage)
-      ? currentStage
-      : config.stages[0]!.name
+    const matched = config.stages.some((stage) => stage.name === currentStage)
+    // matched → 标注该行;空值(新会话起步)→ 标注首阶段;有值但不匹配 →
+    // 不标任何行,如实标注「不在表内」并禁止改写(避免自相矛盾与覆写进度)。
+    const active = matched ? currentStage : currentStage === '' ? config.stages[0]!.name : null
+    const header = active !== null
+      ? `【关系阶段】当前阶段：${active}`
+      : `【关系阶段】当前阶段：${currentStage}（暂不在阶段表内，请以此为当前关系状态，不要改写该变量）`
+    let markerUsed = false
     const lines = config.stages.map((stage) => {
-      const marker = stage.name === active ? '（当前）' : ''
-      return `- ${stage.name}${marker}：${stage.guide}`
+      const isMarker = active !== null && stage.name === active && !markerUsed
+      if (isMarker) markerUsed = true
+      return `- ${stage.name}${isMarker ? '（当前）' : ''}：${stage.guide}`
     })
-    parts.push(`【关系阶段】当前阶段：${active}\n${lines.join('\n')}`)
+    parts.push(`${header}\n${lines.join('\n')}`)
   }
   if (config.bookkeeping && config.stages.length > 0) {
     const order = config.stages.map((stage) => stage.name).join(' → ')
