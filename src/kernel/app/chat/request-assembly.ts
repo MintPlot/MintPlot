@@ -38,6 +38,13 @@ import {
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
 import { renderTemplateStateContext, readTemplateAnalysisSettings } from '@/kernel/variables/analysis'
+import {
+  buildStoryPromptBlock,
+  parseStoryStages,
+  DEFAULT_STORY_PRINCIPLES,
+  DEFAULT_STORY_STAGES,
+  STORY_STAGE_VARIABLE,
+} from '@/kernel/app/story-prompt'
 import { buildMemoryContext, createEmptyMemoryState, pruneFloorsForMemory, type MemoryState } from '@/kernel/memory/memory-engine'
 import { readMemorySummarySettings } from '@/kernel/memory/summary-pipeline'
 import type { LlmChatMessage, LlmContentPart } from '@/kernel/llm/chat-completions'
@@ -58,6 +65,8 @@ export interface RequestAssemblerDeps {
   /** syncCotPresetEntries rewrites the store; the view's snapshot ref follows. */
   setPresetSnapshot: (snapshot: PresetSnapshot) => void
   cotActive: () => boolean
+  /** 故事引擎(M4-e):叙事原则两域通用;阶段系统仅在卡域 + 变量层激活时注入。 */
+  storyActive: () => boolean
   variablesActive: () => boolean
   variableState: () => Record<string, VariableState>
   activeTemplates: () => CardUiTemplate[]
@@ -214,6 +223,29 @@ export function createRequestAssembler(deps: RequestAssemblerDeps) {
         )
         if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
       }
+    }
+    // M4-e 故事引擎:叙事原则 + 关系阶段表注入(系统提示尾部,变量区之后)。
+    // 阶段系统仅卡域 + 变量层激活(需要 setvars 解析落账);当前阶段读账本
+    // 的 story.stage 变量,记账指令引用同一名字,下一轮自动生效。与模板 id
+    // 同名时阶段系统让位;清空的阶段表('[]')= 有意关闭。
+    if (deps.storyActive()) {
+      const storyScope = deps.settingsState?.scope(['storyPrinciples', 'storyStages', 'storyBookkeeping'])
+      const stageSystemOn = deps.isCardDomain()
+        && deps.variablesActive()
+        && !deps.activeTemplates().some((entry) => entry.id === STORY_STAGE_VARIABLE)
+      let stages = stageSystemOn ? parseStoryStages(storyScope?.storyStages) : []
+      if (stageSystemOn && storyScope?.storyStages === undefined) stages = [...DEFAULT_STORY_STAGES]
+      const stageRaw = stageSystemOn ? deps.variableState()[STORY_STAGE_VARIABLE]?.value : undefined
+      const currentStage = typeof stageRaw === 'string' ? stageRaw.trim() : ''
+      const block = buildStoryPromptBlock(
+        {
+          principles: storyScope?.storyPrinciples === undefined ? DEFAULT_STORY_PRINCIPLES : String(storyScope.storyPrinciples),
+          stages,
+          bookkeeping: stageSystemOn && storyScope?.storyBookkeeping !== false,
+        },
+        currentStage,
+      )
+      if (block) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${block}` : block
     }
     if (systemPrompt.trim()) {
       result.push({ role: 'system', content: expandRequestText(systemPrompt) })
