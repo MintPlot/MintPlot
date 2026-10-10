@@ -1,21 +1,13 @@
+<script setup lang="ts">
+// 角色标签图标 — 故事风传送门（用户提供的裁切图，圆形徽章位图）
+import charIcon from './story-char.png'
+</script>
+
 <template>
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    aria-hidden="true"
+  <img
+    :src="charIcon"
+    alt=""
+    class="rounded-full select-none"
+    draggable="false"
   >
-    <g
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    >
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle
-        cx="12"
-        cy="7"
-        r="4"
-      />
-    </g>
-  </svg>
 </template>
