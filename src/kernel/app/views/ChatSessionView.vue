@@ -23,6 +23,7 @@ import {
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
+import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -92,10 +93,8 @@ import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 // M4-e memory layer: rolling-summary engine/ledger/pipeline stay kernel-
 // side (red line: kernel never imports plugins); the plugin is the toggle.
-import { buildMemoryContext, computePendingBatch, createEmptyMemoryState, pruneFloorsForMemory } from '@/kernel/memory/memory-engine'
-import type { MemoryState } from '@/kernel/memory/memory-engine'
-import { readMemorySummarySettings, runRollingSummary } from '@/kernel/memory/summary-pipeline'
-import type { SummaryFloor } from '@/kernel/memory/summary-pipeline'
+import { buildMemoryContext, createEmptyMemoryState, pruneFloorsForMemory } from '@/kernel/memory/memory-engine'
+import { readMemorySummarySettings } from '@/kernel/memory/summary-pipeline'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
 import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
 
@@ -150,14 +149,6 @@ const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 // before this slice. The snapshot is replaced wholesale on changes.
 const presetsActive = ref(true)
 const presetSnapshot = shallowRef<PresetSnapshot | null>(null)
-// Memory layer (M4-e): rolling-summary state rides its reserved key; the
-// plugin toggle (sessions:['card']) flips the runtime state - dormant =
-// no injection, no pruning, no background summary, ledger data untouched.
-const memoryActive = ref(true)
-const memoryState = shallowRef<MemoryState | null>(null)
-const memoryStatus = ref('')
-const memoryBusy = ref(false)
-const showMemory = ref(false)
 // CoT layer (M4-f): same gating shape — dormant = no thinking card, no COT
 // preset sync, no request-side strip (raw tag passthrough). Native reasoning
 // still rides the kernel stream capture; it just stays unshown.
@@ -336,6 +327,27 @@ const messages = computed<ChatboxMessage[]>(() =>
 const title = computed(() =>
   (isCardDomain.value ? card.value?.name : conversation.value?.title) ?? (isCardDomain.value ? '角色' : '对话'))
 const sessionLoaded = computed(() => (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
+
+// M4-e memory pipeline (composable, 2026-10 cleanup extraction): onMounted
+// writes the plugin-toggle gate; the patrol and manual rebuild live there.
+const {
+  memoryActive,
+  memoryState,
+  memoryStatus,
+  memoryBusy,
+  showMemory,
+  maybeRunMemoryPipeline,
+  rebuildMemory,
+} = useChatMemory({
+  settingsState,
+  memoryStore,
+  recordUsage,
+  isCardDomain: () => isCardDomain.value,
+  card: () => card.value,
+  messages: () => messages.value,
+  toProse: (text) => stripVariableBlocks(stripCotText(text)),
+  userName: () => readUserInfo().name,
+})
 
 const scrollToBottom = async (): Promise<void> => {
   await nextTick()
@@ -1265,79 +1277,6 @@ const deleteFloorFrom = async (floor: ChatboxMessage): Promise<void> => {
   }
 }
 
-// ── M4-e memory pipeline ───────────────────────────────────────────────────────────
-// Fire-and-forget patrol: after a turn fully lands, cover the backlog
-// (window = total − keepFloors) in rewrite batches. Busy-gated; failures
-// park the anchor and surface in the sheet + diagnostics journal. Deleting
-// floors needs no rollback here (D7): the anchor is a COUNT, the window
-// recomputes over the remaining floors, done batches never re-run.
-
-const maybeRunMemoryPipeline = async (force = false): Promise<void> => {
-  if (!memoryActive.value || !isCardDomain.value || !card.value || !memoryStore || memoryBusy.value) return
-  const settings = readMemorySummarySettings(settingsState)
-  const state = memoryState.value ?? createEmptyMemoryState()
-  if (!force) {
-    const pending = computePendingBatch(messages.value.length, settings.keepFloors, settings.batchSize, state)
-    if (!pending) return
-  }
-  const apiConfig = resolveApiConfig(settingsState?.snapshot() ?? {})
-  const model = settings.model || apiConfig.model
-  if (!apiConfig.baseUrl || !model) {
-    memoryStatus.value = '未配置模型,无法整理记忆'
-    return
-  }
-  memoryBusy.value = true
-  memoryStatus.value = '整理中…'
-  try {
-    const floors: SummaryFloor[] = messages.value.map((message) => ({
-      role: message.role === 'user' ? 'user' : 'assistant',
-      name: message.role === 'user' ? readUserInfo().name : card.value!.name,
-      // M4-f: the summary consumes prose — thinking blocks never enter the
-      // memory pipeline (RP feeds parseCot().main the same way).
-      content: stripVariableBlocks(stripCotText(message.content)),
-    }))
-    const result = await runRollingSummary({
-      config: { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model },
-      floors,
-      state,
-      settings: { keepFloors: settings.keepFloors, batchSize: settings.batchSize, maxOutputTokens: settings.maxOutputTokens },
-      onUsage: (usage, meta) => {
-        if (usage) recordUsage?.(usage, meta)
-      },
-    })
-    memoryState.value = result.state
-    await memoryStore.save({ kind: 'card', id: card.value.id }, result.state)
-    if (result.error) {
-      memoryStatus.value = `整理失败:${result.error.slice(0, 80)}`
-      errorHub.record({
-        severity: 'warn',
-        category: 'chat',
-        action: 'memory_summary_failed',
-        message: result.error,
-        context: { cardId: card.value.id },
-      })
-    } else {
-      memoryStatus.value = result.batches > 0 ? `已整理 ${result.batches} 批` : '记忆已是最新'
-    }
-  } catch (error) {
-    memoryStatus.value = `整理失败:${(error as Error)?.message || '未知错误'}`
-  } finally {
-    memoryBusy.value = false
-  }
-}
-
-const rebuildMemory = async (): Promise<void> => {
-  if (!isCardDomain.value || !card.value || !memoryStore) return
-  const confirmed = await uiService.confirm('shell', {
-    title: '清空重建记忆',
-    message: `将删除与「${card.value.name}」的摘要与档案,之后从原文重新整理。楼层本身不受影响。`,
-    confirmLabel: '清空重建',
-  })
-  if (!confirmed) return
-  await memoryStore.reset({ kind: 'card', id: card.value.id })
-  memoryState.value = createEmptyMemoryState()
-  memoryStatus.value = '已清空,整理后重新积累'
-}
 
 // In-place editor (plan §2): the bubble becomes a textarea; saving rewrites
 // the stored floor (and the active candidate's slot).
