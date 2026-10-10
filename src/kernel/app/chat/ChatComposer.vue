@@ -24,6 +24,16 @@ const emit = defineEmits<{
 // Composer-local UI state (the panel is only reachable from this dock).
 const showOneShotPanel = ref(false)
 const imageInputEl = ref<HTMLInputElement | null>(null)
+
+/** IME 组词守卫（重构回归修复）：组词期间的回车是「确认候选词」，不是发送。
+ *  Chromium 对组词回车同样上报 key: 'Enter'（isComposing: true / keyCode 229），
+ *  旧 v-model 时代由指令内部的 composing 守卫挡住；拆成裸 @input 后必须显式
+ *  恢复，否则中文输入法用户按回车会把未转换的拼音直接发出去。 */
+const onDraftKeydown = (event: KeyboardEvent): void => {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  emit('send')
+}
 </script>
 
 <template>
@@ -144,7 +154,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
         placeholder="输入…"
         class="max-h-32 min-h-[44px] flex-1 resize-none rounded-input border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-primary"
         @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-        @keydown.enter.exact.prevent="emit('send')"
+        @keydown.enter.exact="onDraftKeydown"
       />
       <button
         v-if="streaming"
