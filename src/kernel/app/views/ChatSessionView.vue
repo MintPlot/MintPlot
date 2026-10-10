@@ -24,21 +24,19 @@ import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
 import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
 import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
+import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
 import { closeConversation } from '@/kernel/app/chat-router'
-import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
-import type { LlmChatMessage, LlmContentPart } from '@/kernel/llm/chat-completions'
+import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import { LlmRequestError } from '@/kernel/llm/chat-completions'
-import { resolveApiConfig } from '@/kernel/llm/api-profiles'
-import { userImageContextText } from '@/kernel/llm/vision'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
 // module is a side-effect import (≤3 active frames red line).
 import '@/kernel/render/html-frame-lifecycle'
-import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
+import { applyRegexPipeline } from '@/kernel/regex/regex-engine'
 import { setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
@@ -48,41 +46,24 @@ import { copyText } from '@/kernel/app/ui/clipboard'
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
 import {
-  expandGetvarMacros,
   parseTemplateUpdateBlocks,
   parseTemplateUpdatePayload,
   parseVariableUpdates,
-  renderTemplateUpdateSection,
-  renderVariablesSection,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
 import { filterCandidateEvents, eventsBeforeFloor } from '@/kernel/variables/variable-store'
 import { replayVariableState } from '@/kernel/variables/variable-engine'
-import {
-  applyRegexPipeline,
-  isFullHtmlDocument,
-  HTML_FLOOR_OMISSION_MARKER,
-} from '@/kernel/regex/regex-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
 import { parseCot } from '@/kernel/cot/cot-parser'
-import { COT_PRESET_NAME, revertCotPrefillEntries, syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
-import {
-  buildWorldbookInjections,
-  DEFAULT_SCAN_SETTINGS,
-} from '@/kernel/worldinfo/worldbook-engine'
-import {
-  readTemplateAnalysisSettings,
-  renderTemplateStateContext,
-} from '@/kernel/variables/analysis'
+import { readTemplateAnalysisSettings } from '@/kernel/variables/analysis'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 // M4-e memory layer: rolling-summary engine/ledger/pipeline stay kernel-
 // side (red line: kernel never imports plugins); the plugin is the toggle.
-import { buildMemoryContext, createEmptyMemoryState, pruneFloorsForMemory } from '@/kernel/memory/memory-engine'
-import { readMemorySummarySettings } from '@/kernel/memory/summary-pipeline'
+import { createEmptyMemoryState } from '@/kernel/memory/memory-engine'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
 import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
 
@@ -162,9 +143,9 @@ const title = computed(() =>
   (isCardDomain.value ? card.value?.name : conversation.value?.title) ?? (isCardDomain.value ? '角色' : '对话'))
 const sessionLoaded = computed(() => (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
 
-// Prose projection shared by the memory/ledger pipelines (thinking +
-// variable blocks out); request-assembly will name this chain later (C9).
-const toProse = (text: string): string => stripVariableBlocks(stripCotText(text))
+// Prose projection shared by the memory/ledger pipelines — delegates to the
+// assembler's proseOf (C9: the strip chain is defined once, in one place).
+const toProse = (text: string): string => proseOf(text)
 // M4-e memory pipeline (composable, 2026-10 cleanup extraction): onMounted
 // writes the plugin-toggle gate; the patrol and manual rebuild live there.
 const {
@@ -360,269 +341,7 @@ const toggleCotCard = (message: ChatboxMessage): void => {
 
 const renderThinkingText = (text: string): string => renderMessageHtml(text, macroContext.value, true)
 
-/** Request/consumer projection: the reply without its thinking blocks (RP
- *  strips CoT from history before sending). Plugin-off keeps raw passthrough;
- *  the stored floor is never rewritten. */
-const stripCotText = (text: string): string => (cotActive.value ? parseCot(text).main : text)
-
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
-
-// M3-q request-side expansion chain (card domain): {{getvar}} → char/user
-// macros. The chatbox domain keeps the M3-n macro pass only — variables
-// never enter it (review Q4), so {{getvar}} stays literal there. The plugin
-// toggle (M3-q2) puts the whole variable layer to sleep.
-const expandRequestText = (text: string): string => {
-  const withVariables = isCardDomain.value && variablesActive.value
-    ? expandGetvarMacros(text, (name) => variableState.value[name]?.value)
-    : text
-  return replaceCardMacros(withVariables, macroContext.value)
-}
-
-const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): LlmChatMessage[] => {
-  // M4-e memory layer: with a live summary the request prunes to the last
-  // keepFloors floors (request projection only - storage is never touched)
-  // and a fixed <role_memory> prefix joins below. The greeting-insurance
-  // check keeps reading the UNPRUNED source: it decides on the session's
-  // real first floor, pruning must not fake a reseed.
-  const memoryBlock = memoryActive.value && isCardDomain.value
-    ? buildMemoryContext(memoryState.value ?? createEmptyMemoryState())
-    : ''
-  const memoryKeep = memoryBlock ? readMemorySummarySettings(settingsState).keepFloors : 0
-  const floors = memoryKeep > 0 ? pruneFloorsForMemory(floorsSource, memoryKeep) : floorsSource
-  const result: LlmChatMessage[] = []
-  // M3-w presets: the active group's entries, split by role. system entries
-  // ride the very front of the system prompt; user/assistant entries become
-  // standalone prefill messages right after the system block (RP semantics:
-  // at-depth injections clamp to never land before them).
-  let presetSystemArea = ''
-  const presetPrefills: Array<{ role: 'user' | 'assistant'; content: string }> = []
-  if (presetsActive.value && presetSnapshot.value) {
-    const activeGroup = presetSnapshot.value.groups.find((group) => group.enabled)?.id ?? 'default'
-    const activeEntries = presetSnapshot.value.entries.filter(
-      (entry) => entry.enabled && entry.content.trim() && entry.group === activeGroup,
-      // M4-f: the managed COT entry assembles only while the CoT layer is
-      // active — plugin-off means the request goes out WITHOUT the thinking
-      // protocol even though the entry survives in the store.
-    ).filter((entry) => cotActive.value || entry.name !== COT_PRESET_NAME)
-    const systemEntries = activeEntries.filter((entry) => entry.role === 'system')
-    if (systemEntries.length > 0) {
-      presetSystemArea = systemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
-    }
-    for (const entry of activeEntries) {
-      if (entry.role === 'user' || entry.role === 'assistant') {
-        presetPrefills.push({ role: entry.role, content: entry.content })
-      }
-    }
-  }
-  let systemPrompt = isCardDomain.value && card.value
-    ? buildCardSystemPrompt(card.value, readUserInfo())
-    : conversation.value?.systemPrompt.trim() ?? ''
-  if (presetSystemArea) {
-    systemPrompt = `${presetSystemArea}\n\n${systemPrompt}`
-  }
-  // M3-u worldbook: one artifact per request — activation over the last
-  // scanDepth floors, whole-entry budget, seven-position injections. The
-  // report feeds the sheet's visibility panel (预算丢弃必须可见).
-  let worldbookSystemArea = ''
-  const worldbookBeforeChar: string[] = []
-  const worldbookAtDepth: Array<{ depth: number; content: string }> = []
-  if (isCardDomain.value && worldbookActive.value && card.value?.book) {
-    // Settings live in mp_settings (sheet exposes 预算/扫描深度); clamp here.
-    const scope = settingsState?.scope(['worldInfoTokenBudget', 'worldInfoScanDepth'])
-    const settings = {
-      ...DEFAULT_SCAN_SETTINGS,
-      tokenBudget: Math.max(0, Math.round(Number(scope?.worldInfoTokenBudget ?? 4000)) || 0),
-      scanDepth: Math.min(20, Math.max(1, Math.round(Number(scope?.worldInfoScanDepth ?? 2)) || 2)),
-    }
-    const scanText = floors
-      .filter((message) => message.role !== 'system')
-      .slice(-Math.max(1, settings.scanDepth))
-      // M4-f: the scan mirrors what the model sees in history — thinking is
-      // stripped from the request projection, so it must not trigger entries.
-      .map((message) => stripVariableBlocks(stripCotText(message.content)))
-      .join('\n')
-    const artifact = buildWorldbookInjections({
-      book: card.value.book,
-      scanText,
-      turnSeed: floors.length,
-      settings,
-      disabledUids: worldbookDisabledUids.value,
-    })
-    worldbookReport.value = artifact
-    const systemArea = artifact.injections.filter(
-      (injection) => injection.position === 'system_top' || injection.position === 'global_note',
-    )
-    // system_top rides the very top; global_note after it, still ahead of the
-    // character block (RP prompt order). `global_note` ignores depth (D5).
-    if (systemArea.length > 0) {
-      worldbookSystemArea = systemArea.map((injection) => injection.content).join('\n\n')
-    }
-    for (const injection of artifact.injections) {
-      if (injection.position === 'before_char') worldbookBeforeChar.push(injection.content)
-      else if (injection.position === 'at_depth') worldbookAtDepth.push({ depth: injection.depth, content: injection.content })
-    }
-  }
-  if (worldbookBeforeChar.length > 0) {
-    systemPrompt = `${worldbookBeforeChar.join('\n\n')}\n\n${systemPrompt}`
-  }
-  if (worldbookSystemArea) {
-    systemPrompt = `${worldbookSystemArea}\n\n${systemPrompt}`
-  }
-  // M3-q: the flat variables artifact section rides the system-prompt tail
-  // (review Q5 compact line form). The M3-r template update section does NOT
-  // ride here anymore — M3-s moves it to the very last message (RP's
-  // "[Instructions for next message]" placement: the final instruction wins,
-  // a system-prompt tail drowns in long prompts).
-  if (isCardDomain.value && variablesActive.value) {
-    const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
-    const flatState = Object.fromEntries(
-      Object.entries(variableState.value).filter(([name]) => !templateIds.has(name)),
-    )
-    const variablesSection = renderVariablesSection(flatState)
-    if (variablesSection) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${variablesSection}` : variablesSection
-    // M3-t sub-model mode: the state snapshot rides the system prompt (read
-    // only — the model never writes variables in this mode); the main-model
-    // update instruction is NOT appended in this mode.
-    const analysisSettings = readTemplateAnalysisSettings(settingsState)
-    if (activeTemplates.value.length > 0 && !analysisSettings.mainModelAnalysis && analysisSettings.injectContext) {
-      const context = renderTemplateStateContext(
-        activeTemplates.value.map((entry) => ({ name: entry.name, state: templateStateOf(entry) })),
-      )
-      if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
-    }
-  }
-  if (systemPrompt.trim()) {
-    result.push({ role: 'system', content: expandRequestText(systemPrompt) })
-  }
-  // M3-w: message-role presets ride as standalone prefill messages right
-  // after the system block, in array order (RP prefill slot). Outside the
-  // system-prompt guard — prefills must survive an empty system prompt.
-  for (const prefill of presetPrefills) {
-    result.push({ role: prefill.role, content: expandRequestText(prefill.content) })
-  }
-  // M4-e: the memory block rides as a user-role fixed prefix after the
-  // preset prefills, before the greeting/history (RP position semantics) -
-  // never pruned, never macro-expanded (system-generated content).
-  if (memoryBlock) {
-    result.push({ role: 'user', content: memoryBlock })
-  }
-  // M3-v: prompt-side omission switch (D7) — a floor that IS a frontend
-  // HTML document is replaced by a marker in the request; display keeps the
-  // iframe. Default on (the card's lore lives in the worldbook; the markup
-  // itself is pure request weight). Off = verbatim floors.
-  const promptOmitHtml = isCardDomain.value && regexActive.value
-    ? settingsState?.scope(['promptOmitHtmlFloors']).promptOmitHtmlFloors !== false
-    : false
-  const promptScripts = isCardDomain.value && regexActive.value ? cardRegexScripts.value : []
-  const rewritePromptFloor = (content: string, role: 'user' | 'assistant', depth: number): string => {
-    // M4-f: thinking leaves the request projection first (RP strips CoT from
-    // history before sending — both domains). Full-HTML floors skip tag
-    // surgery; the omission marker below handles them wholesale.
-    let next = cotActive.value && !isFullHtmlDocument(content) ? parseCot(content).main : content
-    if (isCardDomain.value && variablesActive.value) next = stripVariableBlocks(next)
-    if (promptOmitHtml && isFullHtmlDocument(next)) return HTML_FLOOR_OMISSION_MARKER
-    if (promptScripts.length > 0) {
-      next = applyRegexPipeline(next, {
-        scripts: promptScripts,
-        surface: 'prompt',
-        role,
-        depth,
-        disabledUids: regexDisabledUids.value,
-      })
-    }
-    return next
-  }
-  // RP 开场白保险:历史首楼不再是开场白时,请求里补注入(历史本身不改写)。
-  if (isCardDomain.value && card.value && greetingFloorMissing(floorsSource, card.value.firstMes)) {
-    result.push({ role: 'assistant', content: expandRequestText(rewritePromptFloor(card.value.firstMes, 'assistant', floors.length)) })
-  }
-  for (let index = 0; index < floors.length; index += 1) {
-    const message = floors[index]!
-    if (message.role === 'system') continue
-    // M3-s: protocol blocks stay out of the model's context too — RP strips
-    // them from message content at parse time, and the ecosystem regex
-    // convention is display+prompt double-strip. The stored floor keeps them
-    // verbatim; this strips the request projection only.
-    // M3-v: omission marker / card regexes then rewrite the prompt
-    // projection (depth anchored from the end, 0 = last floor).
-    let content = rewritePromptFloor(
-      message.content,
-      message.role === 'user' ? 'user' : 'assistant',
-      floors.length - 1 - index,
-    )
-    // M4-d hybrid vision (D1): the description mode appends the vision-model
-    // text as a <user_image_context> block (RP semantics — descriptions ride
-    // history permanently); direct mode sends the CURRENT turn's user floor
-    // as content parts instead, and older floors degrade to plain text.
-    const attachments = message.imageAttachments
-    if (attachments?.length) {
-      // "Current turn" = the last user floor with no assistant content after
-      // it — the streaming pipeline pushes an EMPTY assistant placeholder
-      // before assembling the request, so index-vs-length never works here.
-      const isCurrentTurn = message.role === 'user'
-        && floors.slice(index + 1).every((floor) => floor.role !== 'assistant' || floor.content === '')
-      if (isCurrentTurn && activeVisionCapable()) {
-        const parts: LlmContentPart[] = [
-          { type: 'text', text: expandRequestText(content) },
-          ...attachments.map((image) => ({ type: 'image_url' as const, image_url: { url: image.dataUrl, detail: 'high' as const } })),
-        ]
-        result.push({ role: message.role, content: parts })
-        continue
-      }
-      content = `${content}\n\n${userImageContextText(attachments)}`
-    }
-    // Macros resolve on the request path too (RP default script runs both
-    // sides); the stored history itself stays untouched.
-    result.push({ role: message.role, content: expandRequestText(content) })
-  }
-  // M3-u: at_depth injections splice into the history (depth counts
-  // individual messages from the end; never ahead of the system block).
-  // M3-w: at-depth injections clamp to never land before the preset prefills
-  // (RP safeTargetLimit semantics — the 破限 multi-turn order stays intact).
-  const prefillCount = presetPrefills.length
-  for (const injection of worldbookAtDepth) {
-    const index = Math.max(1 + prefillCount, result.length - injection.depth)
-    result.splice(index, 0, { role: 'system', content: injection.content })
-  }
-  // M3-u: user_top prepends to the last user floor (RP same); assistant_top
-  // rides the trailing system-note channel — BEFORE the template instruction,
-  // which stays the true last message (final instruction wins).
-  let lastUserIndex = -1
-  for (let index = result.length - 1; index >= 0; index -= 1) {
-    if (result[index]?.role === 'user') {
-      lastUserIndex = index
-      break
-    }
-  }
-  const userTop = worldbookReport.value?.injections.find((injection) => injection.position === 'user_top')
-  if (lastUserIndex >= 0 && userTop) {
-    result[lastUserIndex] = { role: 'user', content: `${userTop.content}\n${result[lastUserIndex]!.content}` }
-  }
-  // M4-d single-shot instruction (D3): rides exactly one request, placed
-  // before the trailing instruction blocks (the last system instruction
-  // wins — RP placement) but after the worldbook at-depth splices.
-  if (oneShotInstruction.value.trim()) {
-    result.push({ role: 'system', content: `[单次指令]\n${expandRequestText(oneShotInstruction.value.trim())}` })
-  }
-  const assistantTop = worldbookReport.value?.injections.find((injection) => injection.position === 'assistant_top')
-  if (assistantTop) {
-    result.push({ role: 'system', content: `[Instructions for next message]\n${assistantTop.content}` })
-  }
-  if (isCardDomain.value && variablesActive.value && readTemplateAnalysisSettings(settingsState).mainModelAnalysis) {
-    const templateSection = renderTemplateUpdateSection(
-      activeTemplates.value.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        currentVariables: templateStateOf(entry),
-        variableSchema: entry.variableSchema,
-      })),
-    )
-    if (templateSection) {
-      result.push({ role: 'system', content: `[Instructions for next message]\n${templateSection}` })
-    }
-  }
-  return result
-}
 
 const persistSession = async (): Promise<void> => {
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
@@ -682,6 +401,44 @@ const {
   toProse,
   userName: () => readUserInfo().name,
   userInfoLine: buildUserInfoLine,
+})
+
+// Request assembly (factory, 2026-10 cleanup extraction): memory prune +
+// presets + card prompt + worldbook + variables + regex/CoT/omission rewriting.
+// The worldbook report rides out through onWorldbookArtifact into the ledger
+// layer's ref; COT preset sync keeps the view's snapshot ref in sync.
+const {
+  stripCotText,
+  proseOf,
+  buildRequestMessages,
+  syncCotPresetsIfActive,
+} = createRequestAssembler({
+  settingsState,
+  presetStore,
+  isCardDomain: () => isCardDomain.value,
+  card: () => card.value,
+  conversation: () => conversation.value,
+  messages: () => messages.value,
+  memoryActive: () => memoryActive.value,
+  memoryState: () => memoryState.value,
+  presetsActive: () => presetsActive.value,
+  presetSnapshot: () => presetSnapshot.value,
+  setPresetSnapshot: (snapshot) => { presetSnapshot.value = snapshot },
+  cotActive: () => cotActive.value,
+  variablesActive: () => variablesActive.value,
+  variableState: () => variableState.value,
+  activeTemplates: () => activeTemplates.value,
+  templateStateOf,
+  worldbookActive: () => worldbookActive.value,
+  worldbookDisabledUids: () => worldbookDisabledUids.value,
+  regexActive: () => regexActive.value,
+  onWorldbookArtifact: (artifact) => { worldbookReport.value = artifact },
+  cardRegexScripts: () => cardRegexScripts.value,
+  regexDisabledUids: () => regexDisabledUids.value,
+  activeVisionCapable,
+  oneShotInstruction: () => oneShotInstruction.value,
+  readUserInfo,
+  macroContext: () => macroContext.value,
 })
 
 /** The streaming half of a turn, shared by fresh sends and M4-c floor
@@ -816,35 +573,6 @@ const streamAssistantInto = async (
     await scrollToBottom()
   }
   return succeeded
-}
-
-/** M4-f: COT preset content sync before the request assembles — the managed
- *  'COT' entry and the 破限预注入 · AI prefill rewrites track live state
- *  (model / memory / variable analysis). Idempotent; a failed sync must never
- *  block the send (assembly proceeds with whatever the store holds). When the
- *  layer is dormant, the surviving prefill rewrites revert to seed content
- *  (assembly filters the managed COT entry itself). */
-const syncCotPresetsIfActive = async (): Promise<void> => {
-  if (!presetStore || !settingsState) return
-  try {
-    if (!cotActive.value) {
-      await revertCotPrefillEntries(presetStore)
-      presetSnapshot.value = await presetStore.get()
-      return
-    }
-    await syncCotPresetEntries(presetStore, {
-      model: resolveApiConfig(settingsState.snapshot()).model,
-      memoryEnabled: isCardDomain.value && memoryActive.value,
-      variablesAnalysisEnabled:
-        isCardDomain.value
-        && variablesActive.value
-        && activeTemplates.value.length > 0
-        && readTemplateAnalysisSettings(settingsState).mainModelAnalysis,
-    })
-    presetSnapshot.value = await presetStore.get()
-  } catch (error) {
-    console.error('[cot] preset sync failed:', error)
-  }
 }
 
 const runAssistantTurn = async (): Promise<void> => {
@@ -1014,7 +742,6 @@ const deleteFloorFrom = async (floor: ChatboxMessage): Promise<void> => {
     if (snapshot) absorbVariableSnapshot(snapshot)
   }
 }
-
 
 // In-place editor (plan §2): the bubble becomes a textarea; saving rewrites
 // the stored floor (and the active candidate's slot).
