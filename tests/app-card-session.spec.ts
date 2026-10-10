@@ -618,6 +618,13 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect(restarted.events).toEqual([])
     expect(restarted.state['tpl-1']).toMatchObject({ value: { hp: 10 }, sourceEventId: 'seed' })
     expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(1)
+    // C3 (2026-10 cleanup): the VIEW-side live projection must reset too — the
+    // old code wrote state only, so the pre-reset event kept showing in the
+    // sheet's 变更记录 after 清空重开.
+    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('0 条记录')
+    expect(wrapper.text()).not.toContain('1 条记录')
     wrapper.unmount()
   })
 

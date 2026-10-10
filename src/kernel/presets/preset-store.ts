@@ -48,9 +48,18 @@ export interface PresetStore {
   setActiveGroup(groupId: string): Promise<PresetSnapshot>
   setEntryEnabled(entryId: string, enabled: boolean): Promise<PresetSnapshot>
   updateEntry(entryId: string, patch: { name: string; content: string; role: PresetRole }): Promise<PresetSnapshot>
-  addEntry(entry: { name: string; content: string; role: PresetRole }): Promise<PresetSnapshot>
+  addEntry(entry: { name: string; content: string; role: PresetRole; /** Importers land entries disabled (M4-g2) — user opts in via the panel. */ enabled?: boolean }): Promise<PresetSnapshot>
   removeEntry(entryId: string): Promise<PresetSnapshot>
   moveEntry(entryId: string, direction: -1 | 1): Promise<PresetSnapshot>
+  /** Managed-entry sync (M4-f CoT): upsert by NAME in the default group —
+   *  create (enabled) when absent, rewrite content/role when they differ,
+   *  no-op otherwise. Content clobbering is intentional: managed entries are
+   *  generated, not user-authored. `createIfMissing: false` respects user
+   *  deletions (sync only refreshes surviving entries). */
+  syncManagedEntry(
+    patch: { name: string; content: string; role: PresetRole },
+    options?: { createIfMissing?: boolean },
+  ): Promise<PresetSnapshot>
   exportGroups(): Promise<string>
   importGroups(json: string): Promise<PresetSnapshot>
 }
@@ -183,7 +192,7 @@ export function createPresetStore(repository: {
       const activeGroup = snapshot.groups.find((group) => group.enabled)?.id ?? DEFAULT_GROUP
       const next = [
         ...snapshot.entries,
-        { id: newId(), name: entry.name, content: entry.content, enabled: true, role: normalizeRole(entry.role), group: activeGroup },
+        { id: newId(), name: entry.name, content: entry.content, enabled: entry.enabled !== false, role: normalizeRole(entry.role), group: activeGroup },
       ]
       await write({ ...snapshot, entries: next })
       return { ...snapshot, entries: next }
@@ -204,6 +213,26 @@ export function createPresetStore(repository: {
       const entries = [...snapshot.entries]
       const [moved] = entries.splice(index, 1)
       entries.splice(target, 0, moved!)
+      await write({ ...snapshot, entries })
+      return { ...snapshot, entries }
+    },
+
+    async syncManagedEntry(patch, options) {
+      const snapshot = await load()
+      const role = normalizeRole(patch.role)
+      const existing = snapshot.entries.find((entry) => entry.group === DEFAULT_GROUP && entry.name === patch.name)
+      if (!existing) {
+        if (options?.createIfMissing === false) return snapshot
+        const next = [
+          ...snapshot.entries,
+          { id: newId(), name: patch.name, content: patch.content, enabled: true, role, group: DEFAULT_GROUP },
+        ]
+        await write({ ...snapshot, entries: next })
+        return { ...snapshot, entries: next }
+      }
+      if (existing.content === patch.content && existing.role === role) return snapshot
+      const entries = snapshot.entries.map((entry) =>
+        entry.id === existing.id ? { ...entry, content: patch.content, role } : entry)
       await write({ ...snapshot, entries })
       return { ...snapshot, entries }
     },

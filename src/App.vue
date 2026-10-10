@@ -16,6 +16,7 @@ import ApiConfigSection from '@/kernel/app/sections/ApiConfigSection.vue'
 import AppearanceSection from '@/kernel/app/sections/AppearanceSection.vue'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
 import DiagnosticsSection from '@/kernel/app/sections/DiagnosticsSection.vue'
+import DataBackupSection from '@/kernel/app/sections/DataBackupSection.vue'
 import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
 import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 import MemorySettingsSection from '@/kernel/app/sections/MemorySettingsSection.vue'
@@ -60,6 +61,8 @@ disposers.push(
   registerSettingsSection('kernel', { id: 'persona', title: '用户设定', component: UserPersonaSection, placement: 'settings' }, 10),
   registerSettingsSection('kernel', { id: 'api', title: 'API 连接与服务', component: ApiConfigSection, placement: 'settings' }, 20),
   registerSettingsSection('kernel', { id: 'appearance', title: '通用设置', component: AppearanceSection, placement: 'settings' }, 30),
+  // M4-g1: data continuity — full export / restore (RP import joins in M4-g2).
+  registerSettingsSection('kernel', { id: 'data-backup', title: '数据与备份', component: DataBackupSection, placement: 'settings' }, 35),
   // M3-err2: the error hub's troubleshooting face — export is manual only.
   registerSettingsSection('kernel', { id: 'diagnostics', title: '诊断', component: DiagnosticsSection, placement: 'settings' }, 40),
   // M3-w followups: 变量分析 / 提示词预设 fold into their plugin's tools-area

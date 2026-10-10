@@ -21,6 +21,11 @@ import { createPlatformSecretChannel } from '@/kernel/secrets/platform-secret-ch
 import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
 import { installGlobalErrorHandlers, replayEarlyErrors } from '@/kernel/diagnostics/global-handlers'
 import { installRequestDiagnostics } from '@/kernel/diagnostics/request-diagnostics'
+// M4-g1 data continuity: the backup service rides its own raw engine (same
+// idb; values move verbatim) and the MpFiles SAF bridge (browser fallback).
+import { createBackupService } from '@/kernel/dataio/backup-service'
+import { setBackupServiceInstance } from '@/kernel/dataio/backup-service-instance'
+import { resolveFileBridge } from '@/kernel/dataio/file-bridge'
 import { closeConversation, useChatRoute } from '@/kernel/app/chat-router'
 import { PLUGIN_BUS_KEY, PLUGIN_RUNTIME_KEY, PLUGIN_SETTINGS_STORE_KEY } from '@/kernel/app/runtime-key'
 import {
@@ -47,6 +52,7 @@ import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
 import MemoryPlugin from '@/plugins/memory'
 import StoryPlugin from '@/plugins/story'
+import CotPlugin from '@/plugins/cot'
 
 initMpTheme()
 initMpColorFamily()
@@ -63,6 +69,13 @@ attachErrorHubPersistence({
 })
 void hydrateErrorHub()
 replayEarlyErrors()
+
+setBackupServiceInstance(
+  createBackupService({
+    engine: createDefaultEngine(),
+    fileBridge: resolveFileBridge,
+  }),
+)
 
 // Composition root — the only module allowed to see both the kernel and the
 // plugins; src/kernel/** stays free of plugin imports (red line).
@@ -128,6 +141,9 @@ kernel.runtime.load(MemoryPlugin)
 // Story engine (M4-e): same serviceless shape — the prompt-block builder and
 // request-side injection stay kernel-side; the plugin is the tools-area toggle.
 kernel.runtime.load(StoryPlugin)
+// Thinking layer (M4-f): same serviceless shape — parser/builder/preset-sync
+// stay kernel-side; the plugin is the tools-area toggle surface.
+kernel.runtime.load(CotPlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').

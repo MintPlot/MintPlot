@@ -1,0 +1,11 @@
+{
+  "id": "cot",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "思维链",
+    "description": "思考标签与原生推理内容折叠显示，COT 预设动态生成引导模型先思考后正文"
+  },
+  "permissions": []
+}
