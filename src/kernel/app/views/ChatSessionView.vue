@@ -26,11 +26,13 @@ import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
 import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
 import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
 import { pluginActive, useFloorActions } from '@/kernel/app/chat/use-floor-actions'
+import { useChatTurn } from '@/kernel/app/chat/use-chat-turn'
+import ChatFloorList from '@/kernel/app/chat/ChatFloorList.vue'
+import type { FloorView } from '@/kernel/app/chat/ChatFloorList.vue'
+import ChatComposer from '@/kernel/app/chat/ChatComposer.vue'
+import ImageViewer from '@/kernel/app/chat/ImageViewer.vue'
 import { closeConversation } from '@/kernel/app/chat-router'
 import type { CharacterCard } from '@/kernel/characters/character-card'
-import { errorHub } from '@/kernel/diagnostics/error-hub'
-import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
-import { LlmRequestError } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
@@ -45,17 +47,11 @@ import { uiService } from '@/kernel/ui/toasts'
 // M3-q variables: tag-block parsing/ledger on the card domain only — the
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
-import {
-  parseTemplateUpdateBlocks,
-  parseTemplateUpdatePayload,
-  parseVariableUpdates,
-  stripVariableBlocks,
-} from '@/kernel/variables/variable-engine'
+import { stripVariableBlocks } from '@/kernel/variables/variable-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
 import { parseCot } from '@/kernel/cot/cot-parser'
-import { readTemplateAnalysisSettings } from '@/kernel/variables/analysis'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 import RegexSheet from '@/kernel/regex/RegexSheet.vue'
@@ -97,7 +93,6 @@ const loadError = ref('')
 // D3: request failures never write a message floor — they surface as a
 // transient error bar above the composer and vanish on remount/retry/success.
 const sendError = ref('')
-const lastUserText = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 // Card artifact layers (variables ledger / worldbook / regex states, the
 // per-floor panel pipeline, floor capsule and template analysis) live in
@@ -119,7 +114,6 @@ const showSessionSettings = ref(false)
 const showVariables = ref(false)
 // M4-d single-shot system instruction: rides one request, then clears.
 const oneShotInstruction = ref('')
-const showOneShotPanel = ref(false)
 
 // M4-d chat image attachments: pending strip + picker handler + vision
 // capability lookups live in the composable (2026-10 cleanup extraction).
@@ -128,12 +122,9 @@ const {
   pendingImagesNotReady,
   removePendingImage,
   onChatImageSelected,
-  imageInputEl,
   viewerImage,
   activeVisionCapable,
 } = useChatAttachments({ settingsState, isStreaming: () => streaming.value })
-
-let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
 const messages = computed<ChatboxMessage[]>(() =>
@@ -320,12 +311,11 @@ const floorThinkingSections = (message: ChatboxMessage): FloorThinkingSection[] 
   return sections
 }
 
-/** Default open while the floor is streaming, collapsed once finished; a
- *  user toggle persists per floor (RP isSummaryOpen semantics). */
-const isCotCardOpen = (message: ChatboxMessage): boolean =>
-  message.cotOpen !== undefined ? message.cotOpen : isStreamingFloor(message) && floorThinkingSections(message).length > 0
-
-const cotCardLive = (message: ChatboxMessage): boolean => floorThinkingSections(message).some((section) => section.live)
+/** Default open while the streaming floor finishes, collapsed once finished; a
+ *  user toggle persists per floor (RP isSummaryOpen semantics). `sections`
+ *  accepts the precomputed list so the view-model pass parses each floor once. */
+const isCotCardOpen = (message: ChatboxMessage, sections: FloorThinkingSection[] = floorThinkingSections(message)): boolean =>
+  message.cotOpen !== undefined ? message.cotOpen : isStreamingFloor(message) && sections.length > 0
 
 const toggleCotCard = (message: ChatboxMessage): void => {
   message.cotOpen = !isCotCardOpen(message)
@@ -339,11 +329,6 @@ const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtml
 const persistSession = async (): Promise<void> => {
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
   else if (conversation.value) await store?.save(conversation.value)
-}
-
-const stopStreaming = (): void => {
-  abortController?.abort()
-  abortController = null
 }
 
 const buildUserInfoLine = (): string => {
@@ -372,7 +357,6 @@ const {
   templateStateOf,
   buildVariableDefaults,
   floorPanels,
-  floorHasPanels,
   floorVariableSummary,
   toggleCapsule,
   onVariablesChanged,
@@ -432,197 +416,42 @@ const {
   macroContext: () => macroContext.value,
 })
 
-/** The streaming half of a turn, shared by fresh sends and M4-c floor
- *  regeneration: streams into an existing floor object, attributes usage and
- *  variable events (candidateIndex tags regen candidates), runs the analysis
- *  pipeline. Returns true when a reply fully landed. */
-const streamAssistantInto = async (
-  floor: ChatboxMessage,
-  requestMessages: LlmChatMessage[],
-  options: { candidateIndex?: number; isNewFloor?: boolean } = {},
-): Promise<boolean> => {
-  const provider = resolveProvider()
-  if (!provider) return false
-  const candidateIndex = options.candidateIndex
-  streaming.value = true
-  // Local alias: stopStreaming() may null the module ref while the stream's
-  // rejection is still in flight — the catch must read the live signal.
-  const controller = new AbortController()
-  abortController = controller
-  let succeeded = false
-  try {
-    const result = await provider.stream(requestMessages, {
-      signal: controller.signal,
-      // M4-g3 session-level model override (both domains; empty = global).
-      model: (isCardDomain.value ? cardSession.value?.model : conversation.value?.model) || undefined,
-      onDelta: (delta) => {
-        floor.content += delta
-        void scrollToBottom()
-      },
-      // M4-f: native reasoning streams into its own floor field — the wire
-      // capture runs regardless of the plugin toggle (data is not recoverable
-      // later); the display card is what the toggle gates.
-      onReasoningDelta: (delta) => {
-        floor.reasoning = (floor.reasoning ?? '') + delta
-      },
-    })
-    // A stream that settles cleanly with zero content (thinking-only local
-    // engines, upstream error frames older builds swallowed) is a failure the
-    // user must see — never a silent no-op turn (D3 would drop the floor).
-    // Reasoning-only replies get their own wording (M4-f): the model spent
-    // its budget thinking and never wrote the prose.
-    if (!result.content.trim()) {
-      throw new LlmRequestError(
-        result.reasoning?.trim() ? '模型只输出了思考内容，没有正文' : '模型返回了空回复',
-        undefined,
-        'MP-CHAT-003',
-      )
-    }
-    floor.content = result.content
-    floor.reasoning = result.reasoning ?? ''
-    succeeded = true
-    if (result.usage) {
-      // Attribution: the record must say which session it came from — the
-      // card domain types itself 'card' (labeled 角色卡 in the ledger) and
-      // names the card; the chatbox domain names the conversation.
-      recordUsage?.(result.usage, {
-        type: isCardDomain.value ? 'card' : 'chat',
-        model: result.model ?? '',
-        ...(isCardDomain.value
-          ? { characterName: card.value?.name ?? '' }
-          : { detail: conversation.value?.title ?? '' }),
-      })
-    }
-    if (isCardDomain.value && card.value && variablesActive.value && floor.content) {
-      // M3-q/M3-r: the reply's variable blocks become ledger events
-      // (source=ai, floor-attributed) — flat setvars/StatData entries and
-      // template-bound ui_template_updates trees alike. Storage failures
-      // must never fail the finished floor; malformed blocks were ignored
-      // by the parsers.
-      let matchedTemplateCount = 0
-      try {
-        const { updates } = parseVariableUpdates(floor.content)
-        if (updates.length > 0) {
-          const snapshot = await variableStore?.apply(card.value.id, updates, {
-            source: 'ai',
-            messageId: floor.id,
-            ...(candidateIndex !== undefined ? { candidateIndex } : {}),
-          })
-          if (snapshot) {
-            absorbVariableSnapshot(snapshot)
-          }
-        }
-        const blocks = parseTemplateUpdateBlocks(floor.content)
-        if (blocks.length > 0 && activeTemplates.value.length > 0) {
-          const parsed = blocks.flatMap((body) => {
-            try {
-              return parseTemplateUpdatePayload(body)
-            } catch {
-              return []
-            }
-          })
-          matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, floor.id, candidateIndex)
-        }
-      } catch (error) {
-        console.error('[variables] failed to record AI-side updates:', error)
-      }
-      // M3-t: sub-model mode analyzes every reply; main-model mode falls
-      // back only when no block was found or none routed to a template.
-      if (activeTemplates.value.length > 0) {
-        const analysisSettings = readTemplateAnalysisSettings(settingsState)
-        if (!analysisSettings.mainModelAnalysis) {
-          await runTemplateAnalysisPipeline(floor)
-        } else if (matchedTemplateCount === 0 && analysisSettings.analysisModel) {
-          await runTemplateAnalysisPipeline(floor)
-        }
-      }
-    }
-  } catch (error) {
-    if (!controller.signal.aborted) {
-      const message = (error as Error)?.message || '未知错误'
-      sendError.value = message
-      // M3-err1: journal the failure with its unified code (throw-site).
-      errorHub.record({
-        severity: 'error',
-        category: 'chat',
-        action: 'request_failed',
-        code: (error as LlmRequestError)?.code,
-        message,
-        context: { domain: props.domain },
-      })
-    }
-  } finally {
-    streaming.value = false
-    if (abortController === controller) abortController = null
-    if (options.isNewFloor && floor.content === '') {
-      // Aborted or failed before any token: drop the empty floor. Failed
-      // turns leave only the user floor — history stays request-clean (D3).
-      const index = messages.value.findIndex((message) => message.id === floor.id)
-      if (index >= 0) messages.value.splice(index, 1)
-    }
-    await persistSession()
-    await scrollToBottom()
-  }
-  return succeeded
-}
-
-const runAssistantTurn = async (): Promise<void> => {
-  const provider = resolveProvider()
-  if (!provider) return
-  await syncCotPresetsIfActive()
-  const assistantFloor: ChatboxMessage = {
-    id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'assistant',
-    content: '',
-    ts: Date.now(),
-  }
-  messages.value.push(assistantFloor)
-  await streamAssistantInto(assistantFloor, buildRequestMessages(), { isNewFloor: true })
-  // M4-e: the patrol never blocks the next send - fire, forget, busy-gated.
-  void maybeRunMemoryPipeline()
-}
-
-const send = async (overrideText?: string): Promise<void> => {
-  const provider = resolveProvider()
-  if (!sessionLoaded.value || !provider) return
-  // Panel-button triggers (M3-t bridge) pass the command directly; the normal
-  // path sends the draft. Both share the streaming guard + the M4-d image
-  // readiness gate (RP same: send waits until every attachment is described).
-  const text = (typeof overrideText === 'string' ? overrideText : draft.value).trim()
-  if (!text || streaming.value || pendingImagesNotReady.value) return
-
-  const now = Date.now()
-  const attachments = pendingImages.value.map(({ dataUrl, description }) => ({ dataUrl, description }))
-  const userFloor: ChatboxMessage = {
-    id: `m-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'user',
-    content: text,
-    ts: now,
-    ...(attachments.length > 0 ? { imageAttachments: attachments } : {}),
-  }
-  messages.value.push(userFloor)
-  pendingImages.value = []
-  // Title defaults to the first utterance (spec §03) — chatbox domain only;
-  // the card domain keeps the card name.
-  if (!isCardDomain.value && conversation.value && conversation.value.title === '新的对话') {
-    conversation.value.title = text.slice(0, 24)
-  }
-  await persistSession()
-  if (typeof overrideText !== 'string') draft.value = ''
-  sendError.value = ''
-  lastUserText.value = text
-  await scrollToBottom()
-  await runAssistantTurn()
-  // D3 single-shot: consumed by exactly one send (regeneration excluded).
-  oneShotInstruction.value = ''
-}
-
-/** Retry re-streams a reply for the persisted user floor (D3 error bar). */
-const retryLastSend = async (): Promise<void> => {
-  if (streaming.value || !lastUserText.value) return
-  sendError.value = ''
-  await runAssistantTurn()
-}
+// Turn engine (composable, 2026-10 cleanup extraction): the streaming half of
+// a turn plus send/retry; abort state and the retry's lastUserText live there.
+const {
+  stopStreaming,
+  streamAssistantInto,
+  retryLastSend,
+  send,
+} = useChatTurn({
+  resolveProvider,
+  streaming,
+  sendError,
+  draft,
+  oneShotInstruction,
+  pendingImages,
+  pendingImagesNotReady,
+  sessionLoaded: () => sessionLoaded.value,
+  isCardDomain: () => isCardDomain.value,
+  cardSession: () => cardSession.value,
+  conversation: () => conversation.value,
+  card: () => card.value,
+  messages: () => messages.value,
+  variablesActive: () => variablesActive.value,
+  settingsState,
+  recordUsage,
+  variableStore,
+  activeTemplates: () => activeTemplates.value,
+  absorbVariableSnapshot,
+  applyMatchedTemplateUpdates,
+  runTemplateAnalysisPipeline,
+  buildRequestMessages,
+  syncCotPresetsIfActive,
+  persistSession,
+  scrollToBottom,
+  maybeRunMemoryPipeline,
+  domain: () => props.domain,
+})
 
 // Floor actions (composable, 2026-10 cleanup extraction): the swipe/regen
 // candidates, edit/copy/delete row, speak intent and session-settings handoff.
@@ -660,6 +489,31 @@ const {
   stripCotText,
   domain: () => props.domain,
 })
+
+// C1: the per-floor view model — every derived value is computed ONCE per
+// render pass (the old template re-invoked these functions 3-6 times per
+// floor; floorVariableSummary alone re-scanned the whole event list ×4).
+const floorViews = computed<FloorView[]>(() =>
+  messages.value.map((message, index) => {
+    const thinking = floorThinkingSections(message).map((section) => ({ ...section, html: renderThinkingText(section.text) }))
+    const panels = floorPanels(message)
+    const isHtmlFrame = floorUsesHtmlFrame(message)
+    return {
+      message,
+      index,
+      html: renderFloor(message),
+      thinking,
+      thinkingOpen: isCotCardOpen(message, thinking),
+      thinkingLive: thinking.some((section) => section.live),
+      panels,
+      capsule: floorVariableSummary(message),
+      capsuleOpen: capsuleOpenId.value === message.id,
+      isHtmlFrame,
+      wide: isHtmlFrame || panels.top.length > 0 || panels.bottom.length > 0,
+      isStreaming: isStreamingFloor(message),
+      isLastAssistant: isLastAssistantFloor(message),
+    }
+  }))
 
 const restartSession = async (): Promise<void> => {
   if (!isCardDomain.value || !card.value || !cardSessions) return
@@ -791,235 +645,25 @@ const restartSession = async (): Promise<void> => {
         class="min-h-0 flex-1 overflow-y-auto px-4 py-4"
       >
         <div class="mx-auto flex max-w-xl flex-col gap-3">
-          <p
-            v-if="messages.length === 0"
-            class="py-12 text-center text-xs text-chat-accent"
-          >
-            发送第一条消息开始对话
-          </p>
-          <div
-            v-for="(message, floorIndex) in messages"
-            :key="message.id"
-            class="flex flex-col"
-            :class="message.role === 'user' ? 'items-end' : 'items-start'"
-          >
-            <!-- M4-c in-place editor (plan §2): saving rewrites the stored floor. -->
-            <div
-              v-if="editingFloorId === message.id"
-              class="w-full max-w-[85%] rounded-bubble-ai border border-primary bg-card p-2"
-            >
-              <textarea
-                v-model="editDraft"
-                rows="3"
-                class="w-full resize-y rounded-input border border-line bg-bg px-2 py-1.5 text-sm leading-relaxed text-ink outline-none focus:border-primary"
-              />
-              <div class="mt-1 flex justify-end gap-2">
-                <button
-                  type="button"
-                  class="rounded-input border border-line px-2 py-1 text-xs text-ink-2"
-                  @click="cancelEditFloor"
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  class="rounded-input bg-primary px-2 py-1 text-xs font-bold text-on-primary"
-                  @click="saveEditFloor"
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-            <div
-              v-else
-              class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
-              :class="[
-                message.role === 'user'
-                  ? 'rounded-bubble-user bg-chat-bubble-user text-chat-on-bubble-user'
-                  : 'border border-line bg-chat-bubble-ai text-chat-on-bubble-ai',
-                floorUsesHtmlFrame(message) || floorHasPanels(message) ? 'w-full max-w-none' : 'max-w-[85%]',
-              ]"
-            >
-              <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline); panels are replay-interpolated card templates in the same sandbox -->
-              <!-- M4-d attached-image thumbnails (user floors): tap to view. -->
-              <div
-                v-if="message.imageAttachments?.length"
-                class="mb-1 grid gap-1"
-                :class="message.imageAttachments.length === 1 ? 'w-40' : 'grid-cols-2'"
-              >
-                <img
-                  v-for="(image, imageIndex) in message.imageAttachments"
-                  :key="imageIndex"
-                  :src="image.dataUrl"
-                  :alt="`附件图片 ${imageIndex + 1}`"
-                  class="w-full cursor-zoom-in rounded-input border border-line object-cover"
-                  @click="viewerImage = image.dataUrl"
-                >
-              </div>
-              <!-- M4-f thinking card: native reasoning + tag-based CoT in one
-                   collapsible card above the prose (RP timeline shape, two
-                   sections max). Open while streaming by default; the toggle
-                   persists per floor. -->
-              <div
-                v-if="floorThinkingSections(message).length > 0"
-                class="mb-1 overflow-hidden rounded-input border border-line bg-bg"
-              >
-                <button
-                  type="button"
-                  class="flex w-full items-center justify-between px-2.5 py-1.5 text-left"
-                  :aria-expanded="isCotCardOpen(message)"
-                  @click="toggleCotCard(message)"
-                >
-                  <span
-                    class="flex items-center gap-1.5 text-xs font-bold"
-                    :class="cotCardLive(message) ? 'text-chat-accent' : 'text-ink-2'"
-                  >
-                    <span v-if="cotCardLive(message)">⏳</span>
-                    <span v-else>💡</span>
-                    <span>{{ cotCardLive(message) ? '思考中…' : '思考' }}</span>
-                  </span>
-                  <span class="text-[10px] text-ink-3">{{ isCotCardOpen(message) ? '收起' : '展开' }}</span>
-                </button>
-                <div
-                  v-if="isCotCardOpen(message)"
-                  class="border-t border-line px-2.5 py-2"
-                >
-                  <div
-                    v-for="section in floorThinkingSections(message)"
-                    :key="section.id"
-                    class="mb-2 last:mb-0"
-                  >
-                    <div class="mb-1 flex items-center justify-between text-[10px] font-bold text-ink-3">
-                      <span>{{ section.title }}</span>
-                      <span>{{ section.chars }} 字</span>
-                    </div>
-                    <div
-                      class="markdown-body text-[13px] leading-relaxed text-ink-2"
-                      v-html="renderThinkingText(section.text)"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div
-                v-for="frame in floorPanels(message).top"
-                :key="`top-${frame.id}`"
-                class="mp-panel-frame"
-                v-html="frame.html"
-              />
-              <div
-                class="markdown-body"
-                v-html="renderFloor(message)"
-              />
-              <button
-                v-if="floorVariableSummary(message).total > 0"
-                type="button"
-                class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg px-2 py-0.5 text-[10px] text-ink-2"
-                @click="toggleCapsule(message.id)"
-              >
-                ⚙ 变量 ×{{ floorVariableSummary(message).total }}
-              </button>
-              <div
-                v-if="capsuleOpenId === message.id"
-                class="mt-1 rounded-input border border-line bg-bg px-2 py-1 text-[10px] text-ink-2"
-              >
-                <div
-                  v-for="update in floorVariableSummary(message).flat"
-                  :key="update.name"
-                >
-                  {{ update.name }} → {{ update.value }}
-                </div>
-                <div
-                  v-for="line in floorVariableSummary(message).templateLines"
-                  :key="line"
-                >
-                  面板·{{ line }}
-                </div>
-              </div>
-              <div
-                v-for="frame in floorPanels(message).bottom"
-                :key="`bottom-${frame.id}`"
-                class="mp-panel-frame"
-                v-html="frame.html"
-              />
-              <!-- eslint-enable vue/no-v-html -->
-              <span
-                v-if="isStreamingFloor(message)"
-                class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
-              />
-            </div>
-            <!-- M4-c floor action row (RP-Hub shape, plan D1/D2): persistent
-                 under every floor; the last assistant floor adds the swipe
-                 group and regenerate. Hidden while streaming. -->
-            <div
-              v-if="!streaming && editingFloorId !== message.id"
-              class="mt-0.5 flex items-center gap-0.5"
-            >
-              <template v-if="isLastAssistantFloor(message)">
-                <template v-if="(message.candidates?.length ?? 0) > 1">
-                  <button
-                    type="button"
-                    class="floor-act"
-                    :class="{ 'opacity-40': (message.activeIndex ?? 0) <= 0 }"
-                    :aria-label="`切换到上一候选(${(message.activeIndex ?? 0) + 1}/${message.candidates?.length})`"
-                    @click="switchCandidate(message, -1)"
-                  >
-                    ‹
-                  </button>
-                  <span class="font-mono text-[10px] text-ink-3">{{ (message.activeIndex ?? 0) + 1 }}/{{ message.candidates?.length }}</span>
-                  <button
-                    type="button"
-                    class="floor-act"
-                    :class="{ 'opacity-40': (message.activeIndex ?? 0) >= (message.candidates?.length ?? 1) - 1 }"
-                    :aria-label="`切换到下一候选(${(message.activeIndex ?? 0) + 1}/${message.candidates?.length})`"
-                    @click="switchCandidate(message, 1)"
-                  >
-                    ›
-                  </button>
-                </template>
-                <button
-                  type="button"
-                  class="floor-act text-primary"
-                  aria-label="重新生成(追加候选)"
-                  @click="regenerateLast(message)"
-                >
-                  ⟳
-                </button>
-              </template>
-              <button
-                type="button"
-                class="floor-act"
-                :aria-label="`编辑第 ${floorIndex + 1} 楼`"
-                @click="startEditFloor(message)"
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                class="floor-act"
-                :aria-label="`复制第 ${floorIndex + 1} 楼`"
-                @click="copyFloor(message)"
-              >
-                ⧉
-              </button>
-              <button
-                v-if="message.role === 'assistant' && ttsActive"
-                type="button"
-                class="floor-act"
-                :aria-label="`朗读第 ${floorIndex + 1} 楼`"
-                @click="toggleSpeakFloor(message)"
-              >
-                🔊
-              </button>
-              <button
-                type="button"
-                class="floor-act text-danger"
-                :aria-label="`删除第 ${floorIndex + 1} 楼及其后`"
-                @click="deleteFloorFrom(message)"
-              >
-                🗑
-              </button>
-            </div>
-          </div>
+          <ChatFloorList
+            :views="floorViews"
+            :editing-floor-id="editingFloorId"
+            :edit-draft="editDraft"
+            :streaming="streaming"
+            :tts-active="ttsActive"
+            @update:edit-draft="editDraft = $event"
+            @cancel-edit="cancelEditFloor"
+            @save-edit="saveEditFloor"
+            @view-image="viewerImage = $event"
+            @toggle-cot="toggleCotCard"
+            @toggle-capsule="toggleCapsule"
+            @switch="(message, direction) => switchCandidate(message, direction)"
+            @regenerate="regenerateLast"
+            @edit="startEditFloor"
+            @copy="copyFloor"
+            @speak="toggleSpeakFloor"
+            @remove="deleteFloorFrom"
+          />
         </div>
       </div>
 
@@ -1048,156 +692,26 @@ const restartSession = async (): Promise<void> => {
         </div>
       </div>
 
-      <footer class="shrink-0 border-t border-line bg-card px-3 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
-        <!-- M4-d pending attachment strip: thumbnails with per-image status. -->
-        <div
-          v-if="pendingImages.length > 0"
-          class="mx-auto mb-2 flex max-w-xl gap-2 overflow-x-auto pb-1"
-        >
-          <div
-            v-for="image in pendingImages"
-            :key="image.id"
-            class="relative flex-shrink-0"
-          >
-            <img
-              v-if="image.dataUrl"
-              :src="image.dataUrl"
-              alt="待发送图片"
-              class="h-16 w-16 rounded-input border border-line object-cover"
-            >
-            <div
-              v-else
-              class="flex h-16 w-16 items-center justify-center rounded-input border border-line bg-bg text-[10px] text-ink-3"
-            >
-              读取中
-            </div>
-            <span
-              v-if="image.status === 'analyzing'"
-              class="absolute inset-x-0 bottom-0 rounded-b-input bg-black/50 px-1 text-center text-[9px] text-white"
-            >
-              识别中…
-            </span>
-            <span
-              v-else-if="image.status === 'error'"
-              class="absolute inset-x-0 bottom-0 rounded-b-input bg-danger px-1 text-center text-[9px] text-on-primary"
-              :title="image.error"
-            >
-              识别失败
-            </span>
-            <button
-              type="button"
-              class="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-bg text-[10px] text-ink-2 shadow"
-              :aria-label="`移除待发送图片(${image.status === 'ready' ? image.description.slice(0, 12) : '未就绪'})`"
-              @click="removePendingImage(image.id)"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-        <div class="mx-auto flex max-w-xl items-end gap-2">
-          <!-- M4-d attach + single-shot instruction (D2/D3, RP composer left
-               controls): direct buttons; the inputActions panel stays reserved. -->
-          <div class="relative flex flex-col items-center gap-1">
-            <button
-              type="button"
-              class="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-bg text-base text-ink-2 active:text-primary disabled:opacity-40"
-              aria-label="添加图片"
-              :disabled="streaming"
-              @click="imageInputEl?.click()"
-            >
-              📎
-            </button>
-            <input
-              ref="imageInputEl"
-              type="file"
-              accept="image/*"
-              multiple
-              class="hidden"
-              @change="onChatImageSelected"
-            >
-          </div>
-          <div class="relative flex flex-col items-center gap-1">
-            <button
-              type="button"
-              class="flex h-9 w-9 items-center justify-center rounded-full border text-base"
-              :class="oneShotInstruction.trim() ? 'border-primary bg-primary-wash text-primary' : 'border-line bg-bg text-ink-2'"
-              aria-label="单次指令"
-              @click="showOneShotPanel = !showOneShotPanel"
-            >
-              ⌘
-            </button>
-            <div
-              v-if="showOneShotPanel"
-              class="absolute bottom-11 left-0 z-40 w-64 rounded-bubble-ai border border-line bg-card p-2 shadow-lg"
-            >
-              <p class="mb-1 text-xs font-bold text-ink">
-                单次指令
-                <span class="ml-1 font-normal text-ink-3">只影响下一次发送</span>
-              </p>
-              <textarea
-                v-model="oneShotInstruction"
-                rows="3"
-                placeholder="例:这段用更轻快的语气写…"
-                class="w-full resize-none rounded-input border border-line bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-primary"
-              />
-              <div class="mt-1 flex justify-end gap-2">
-                <button
-                  type="button"
-                  class="rounded-input border border-line px-2 py-1 text-xs text-ink-2"
-                  @click="oneShotInstruction = ''; showOneShotPanel = false"
-                >
-                  清空
-                </button>
-                <button
-                  type="button"
-                  class="rounded-input bg-primary px-2 py-1 text-xs font-bold text-on-primary"
-                  @click="showOneShotPanel = false"
-                >
-                  完成
-                </button>
-              </div>
-            </div>
-          </div>
-          <textarea
-            v-model="draft"
-            rows="1"
-            placeholder="输入…"
-            class="max-h-32 min-h-[44px] flex-1 resize-none rounded-input border border-line bg-bg px-3 py-2.5 text-sm text-ink outline-none focus:border-primary"
-            @keydown.enter.exact.prevent="send()"
-          />
-          <button
-            v-if="streaming"
-            type="button"
-            class="min-h-[44px] rounded-input bg-danger px-4 text-sm font-bold text-on-primary"
-            @click="stopStreaming"
-          >
-            中止
-          </button>
-          <button
-            v-else
-            type="button"
-            class="min-h-[44px] rounded-input bg-primary px-4 text-sm font-bold text-on-primary disabled:opacity-40"
-            :disabled="!draft.trim() || pendingImagesNotReady"
-            @click="send()"
-          >
-            发送
-          </button>
-        </div>
-      </footer>
+      <ChatComposer
+        :pending-images="pendingImages"
+        :draft="draft"
+        :streaming="streaming"
+        :one-shot-instruction="oneShotInstruction"
+        :send-disabled="!draft.trim() || pendingImagesNotReady"
+        @update:draft="draft = $event"
+        @update:one-shot-instruction="oneShotInstruction = $event"
+        @send="send()"
+        @stop="stopStreaming"
+        @files="onChatImageSelected"
+        @remove-image="removePendingImage"
+      />
     </template>
 
-    <!-- M4-d image viewer: tap a floor thumbnail to inspect the attachment. -->
-    <div
+    <ImageViewer
       v-if="viewerImage"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-      @click="viewerImage = ''"
-    >
-      <img
-        :src="viewerImage"
-        alt="图片查看"
-        class="max-h-full max-w-full object-contain"
-      >
-    </div>
+      :src="viewerImage"
+      @close="viewerImage = ''"
+    />
 
     <VariablesSheet
       v-if="isCardDomain && showVariables && card"
@@ -1227,7 +741,7 @@ const restartSession = async (): Promise<void> => {
       @close="showRegex = false"
     />
 
-        <SessionSettingsSheet
+    <SessionSettingsSheet
       v-if="showSessionSettings"
       :domain="props.domain"
       :conversation="conversation"
@@ -1249,101 +763,4 @@ const restartSession = async (): Promise<void> => {
   </div>
 </template>
 
-<style scoped>
-/* M4-c floor action row: 24px+ hit targets, quiet until touched. */
-.floor-act {
-  min-width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--color-ink-3, #93a69d);
-}
-.floor-act:active {
-  background: rgba(23, 168, 139, 0.12);
-  color: var(--color-primary, #17a88b);
-}
 
-/* M3-s panel frames: full-width slots above/below the floor text; the inner
- * iframe is created via v-html so it needs a deep rule (v-html content is
- * outside scoped-data attributes). */
-.mp-panel-frame {
-  width: 100%;
-  margin-top: 0.5rem;
-}
-.mp-panel-frame:first-child {
-  margin-top: 0;
-}
-.mp-panel-frame :deep(iframe.executable-html-frame) {
-  width: 100%;
-  display: block;
-  border: 0;
-}
-/* Minimal markdown presentation inside bubbles — Tailwind preflight strips
- * the browser defaults marked output relies on (RP ships a markdown-body
- * theme; this is the MP minimal equivalent). */
-.markdown-body :where(p) {
-  margin: 0.35em 0;
-}
-.markdown-body :where(> :first-child) {
-  margin-top: 0;
-}
-.markdown-body :where(> :last-child) {
-  margin-bottom: 0;
-}
-.markdown-body :where(h1, h2, h3, h4, h5, h6) {
-  font-weight: 700;
-  margin: 0.6em 0 0.25em;
-}
-.markdown-body :where(ul, ol) {
-  margin: 0.35em 0;
-  padding-left: 1.3em;
-  list-style: revert;
-}
-.markdown-body :where(code) {
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: rgba(127, 127, 127, 0.14);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 0.85em;
-}
-.markdown-body :where(pre) {
-  margin: 0.4em 0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(127, 127, 127, 0.14);
-  overflow-x: auto;
-}
-.markdown-body :where(pre code) {
-  padding: 0;
-  background: transparent;
-}
-.markdown-body :where(blockquote) {
-  margin: 0.4em 0;
-  padding-left: 8px;
-  border-left: 3px solid rgba(127, 127, 127, 0.4);
-  opacity: 0.85;
-}
-.markdown-body :where(a) {
-  text-decoration: underline;
-}
-.markdown-body :where(img, video) {
-  max-width: 100%;
-  height: auto;
-}
-.markdown-body :where(table) {
-  border-collapse: collapse;
-  margin: 0.4em 0;
-}
-.markdown-body :where(th, td) {
-  border: 1px solid rgba(127, 127, 127, 0.4);
-  padding: 3px 8px;
-}
-.markdown-body :where(hr) {
-  border: none;
-  border-top: 1px solid rgba(127, 127, 127, 0.4);
-}
-</style>
