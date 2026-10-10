@@ -6,7 +6,6 @@
 // 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
 // (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import type { VariableState } from '@contracts'
 import {
   CARD_SESSION_STORE_KEY,
   CHATBOX_STORE_KEY,
@@ -24,6 +23,7 @@ import {
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
 import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
+import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -39,8 +39,7 @@ import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import '@/kernel/render/html-frame-lifecycle'
 import { replaceCardMacros } from '@/kernel/render/macros'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
-import { createExecutableHtmlIframe, setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
-import { renderTemplateString, stripTemplateCodeFence } from '@/kernel/render/template-interp'
+import { setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
 import type { CardSession } from '@/kernel/sessions/card-session-store'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
@@ -49,25 +48,20 @@ import { copyText } from '@/kernel/app/ui/clipboard'
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
 import {
-  applyTemplateUpdates,
   expandGetvarMacros,
-  matchTemplateUpdates,
   parseTemplateUpdateBlocks,
   parseTemplateUpdatePayload,
   parseVariableUpdates,
-  readCardVariableDefaults,
   renderTemplateUpdateSection,
   renderVariablesSection,
   stripVariableBlocks,
 } from '@/kernel/variables/variable-engine'
-import type { ParsedTemplateUpdate } from '@/kernel/variables/variable-engine'
-import { replayTemplateStateAtFloor, filterCandidateEvents, eventsBeforeFloor, type VariableSnapshot } from '@/kernel/variables/variable-store'
+import { filterCandidateEvents, eventsBeforeFloor } from '@/kernel/variables/variable-store'
 import { replayVariableState } from '@/kernel/variables/variable-engine'
 import {
   applyRegexPipeline,
   isFullHtmlDocument,
   HTML_FLOOR_OMISSION_MARKER,
-  projectRegexScripts,
 } from '@/kernel/regex/regex-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
@@ -76,18 +70,12 @@ import { parseCot } from '@/kernel/cot/cot-parser'
 import { COT_PRESET_NAME, revertCotPrefillEntries, syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
 import {
   buildWorldbookInjections,
-  projectWorldbook,
   DEFAULT_SCAN_SETTINGS,
 } from '@/kernel/worldinfo/worldbook-engine'
-import type { WorldbookActivationReport } from '@/kernel/worldinfo/worldbook-engine'
 import {
   readTemplateAnalysisSettings,
   renderTemplateStateContext,
-  runTemplateAnalysis,
-  useBatchAnalysis,
 } from '@/kernel/variables/analysis'
-import type { AnalysisFloor } from '@/kernel/variables/analysis'
-import type { CardUiTemplate } from '@/kernel/characters/character-card'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 import RegexSheet from '@/kernel/regex/RegexSheet.vue'
@@ -128,23 +116,12 @@ const loadError = ref('')
 const sendError = ref('')
 const lastUserText = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
-// shallowRef — both are replaced wholesale from snapshots (never mutated in
-// place), and Vue's deep UnwrapRef explodes on the recursive VariableValue
-// union (TS2589).
-const variableState = shallowRef<Record<string, VariableState>>({})
-const variableEvents = shallowRef<VariableSnapshot['events']>([])
-const variablesActive = ref(true)
-// Worldbook layer (M3-u): same gating shape as variables — the plugin toggle
-// flips the runtime state; dormant = no scan, no injection, no panel entry.
-const worldbookActive = ref(true)
+// Card artifact layers (variables ledger / worldbook / regex states, the
+// per-floor panel pipeline, floor capsule and template analysis) live in
+// use-card-ledger (2026-10 cleanup); onMounted writes the plugin gates onto
+// the returned refs. Only the sheet-visibility flags stay here.
 const showWorldbook = ref(false)
-const worldbookReport = shallowRef<WorldbookActivationReport | null>(null)
-const worldbookDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
-// Regex layer (M3-v): same gating shape — dormant = no display rewrite, no
-// prompt rewrite, no panel entry. Card scripts ride extensions verbatim.
-const regexActive = ref(true)
 const showRegex = ref(false)
-const regexDisabledUids = shallowRef<ReadonlySet<number>>(new Set())
 // Preset layer (M3-w): app-level; dormant = request assembles exactly as
 // before this slice. The snapshot is replaced wholesale on changes.
 const presetsActive = ref(true)
@@ -157,9 +134,6 @@ const cotActive = ref(true)
 // model override (both domains).
 const showSessionSettings = ref(false)
 const showVariables = ref(false)
-const capsuleOpenId = ref<string | null>(null)
-// Secondary-model analysis status (M3-t): surfaced in the variables sheet.
-const analysisStatus = ref('')
 // M4-c floor actions: in-place editor state for one floor at a time.
 const editingFloorId = ref('')
 const editDraft = ref('')
@@ -179,146 +153,6 @@ const {
   activeVisionCapable,
 } = useChatAttachments({ settingsState, isStreaming: () => streaming.value })
 
-// Candidate-aware ledger projection (M4-c): events tagged with a
-// candidateIndex only count toward the floor's ACTIVE candidate — switching
-// swipes must not mix sibling candidates' variables. Untagged events
-// (legacy, manual, plain floors) always count.
-const candidateIndexOf = (messageId: string): number | undefined => {
-  const floor = messages.value.find((message) => message.id === messageId)
-  return floor?.candidates ? floor.activeIndex ?? 0 : undefined
-}
-const activeCandidateEvents = computed(() => filterCandidateEvents(variableEvents.value, candidateIndexOf))
-const absorbVariableSnapshot = (snapshot: VariableSnapshot): void => {
-  variableEvents.value = snapshot.events
-  variableState.value = replayVariableState(snapshot.seed, activeCandidateEvents.value)
-}
-
-/** Enabled card-embedded templates, highest order first (M3-r). Their state
- *  trees live in the ledger under the template id. */
-const activeTemplates = computed<CardUiTemplate[]>(() =>
-  variablesActive.value && isCardDomain.value
-    ? [...(card.value?.uiTemplates ?? [])].filter((entry) => entry.enabled).sort((a, b) => b.order - a.order)
-    : [])
-
-// M3-u worldbook: the projected entry view (verbatim card data → runtime
-// list); toggles ride worldbookDisabledUids, never the card record.
-const worldbookEntries = computed(() =>
-  isCardDomain.value ? projectWorldbook(card.value?.book) : [])
-
-const toggleWorldbookEntry = async (uid: number): Promise<void> => {
-  const next = new Set(worldbookDisabledUids.value)
-  if (next.has(uid)) next.delete(uid)
-  else next.add(uid)
-  worldbookDisabledUids.value = next
-  if (card.value) await worldbookStore?.setDisabled(card.value.id, next)
-}
-
-// M3-v regex: projected card scripts (verbatim extensions data → runtime
-// list); toggles ride regexDisabledUids, never the card record.
-const cardRegexScripts = computed(() =>
-  isCardDomain.value ? projectRegexScripts(card.value?.extensions?.regex_scripts) : [])
-
-const toggleRegexScript = async (uid: number): Promise<void> => {
-  const next = new Set(regexDisabledUids.value)
-  if (next.has(uid)) next.delete(uid)
-  else next.add(uid)
-  regexDisabledUids.value = next
-  if (card.value) await regexStore?.setDisabled(card.value.id, next)
-}
-
-const templateStateOf = (entry: CardUiTemplate): Record<string, unknown> => {
-  const value = variableState.value[entry.id]?.value
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : entry.initialVariableState
-}
-
-/** Seed rows for a fresh ledger: flat card defaults + each template's initial
- *  tree under its id (M3-r) — shared by mount-time ensure and 清空重开 reset
- *  (M3-s fix: reset previously dropped the template trees). */
-const buildVariableDefaults = (): Array<{ name: string; value: VariableState['value'] }> => {
-  if (!card.value) return []
-  return [
-    ...readCardVariableDefaults(card.value.extensions),
-    ...activeTemplates.value.map((entry) => ({
-      name: entry.id,
-      value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
-    })),
-  ]
-}
-
-// M3-s 逐楼快照: panel frames render per floor from the ledger — RP stores an
-// interpolated snapshot on each message, MP re-derives the state at render
-// time (replayTemplateStateAtFloor) so storage stays duplicate-free. Frames
-// ride the same sandboxed-iframe pipeline and ≤3-active-frame budget as M3-n
-// card documents; the gu-class templates are ~78KB, so interpolation results
-// cache by (template, state) and per-floor frames by a ledger/template stamp.
-interface PanelFrame {
-  id: string
-  html: string
-}
-interface FloorPanels {
-  top: PanelFrame[]
-  bottom: PanelFrame[]
-}
-const EMPTY_PANELS: FloorPanels = { top: [], bottom: [] }
-const panelFramesCache = new Map<string, { stamp: string; panels: FloorPanels }>()
-const panelHtmlCache = new Map<string, string>()
-
-const floorIndexOfMessage = (messageId: string): number =>
-  messages.value.findIndex((message) => message.id === messageId)
-
-const renderPanelHtml = (entry: CardUiTemplate, state: Record<string, unknown>): string => {
-  const raw = stripTemplateCodeFence(entry.htmlTemplate)
-  if (!raw || typeof document === 'undefined') return ''
-  const cacheKey = `${entry.id}|${JSON.stringify(state)}`
-  const cached = panelHtmlCache.get(cacheKey)
-  if (cached !== undefined) return cached
-  const container = document.createElement('div')
-  container.appendChild(createExecutableHtmlIframe(renderTemplateString(raw, state)))
-  const html = container.innerHTML
-  if (panelHtmlCache.size >= 32) panelHtmlCache.clear()
-  panelHtmlCache.set(cacheKey, html)
-  return html
-}
-
-const floorPanels = (message: ChatboxMessage): FloorPanels => {
-  if (!isCardDomain.value || !variablesActive.value) return EMPTY_PANELS
-  if (message.role !== 'assistant' || isStreamingFloor(message)) return EMPTY_PANELS
-  if (activeTemplates.value.length === 0) return EMPTY_PANELS
-  const targetFloor = messages.value.indexOf(message)
-  if (targetFloor < 0) return EMPTY_PANELS
-  // The reads below feed Vue's reactivity: ledger/template changes re-render.
-  const stamp = `${variableEvents.value.length}|${messages.value.length}|${activeTemplates.value.length}`
-  const cached = panelFramesCache.get(message.id)
-  if (cached && cached.stamp === stamp) return cached.panels
-  const panels: FloorPanels = { top: [], bottom: [] }
-  for (const entry of activeTemplates.value) {
-    const tree = replayTemplateStateAtFloor(
-      activeCandidateEvents.value,
-      entry.id,
-      entry.initialVariableState as VariableState['value'],
-      floorIndexOfMessage,
-      targetFloor,
-    )
-    const state = typeof tree === 'object' && tree !== null && !Array.isArray(tree)
-      ? (tree as Record<string, unknown>)
-      : entry.initialVariableState
-    const html = renderPanelHtml(entry, state)
-    if (!html) continue
-    const frame: PanelFrame = { id: entry.id, html }
-    if (entry.placement === 'top') panels.top.push(frame)
-    else panels.bottom.push(frame)
-  }
-  panelFramesCache.set(message.id, { stamp, panels })
-  return panels
-}
-
-const floorHasPanels = (message: ChatboxMessage): boolean => {
-  const panels = floorPanels(message)
-  return panels.top.length > 0 || panels.bottom.length > 0
-}
-
 let abortController: AbortController | null = null
 
 const isCardDomain = computed(() => props.domain === 'card')
@@ -328,6 +162,9 @@ const title = computed(() =>
   (isCardDomain.value ? card.value?.name : conversation.value?.title) ?? (isCardDomain.value ? '角色' : '对话'))
 const sessionLoaded = computed(() => (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
 
+// Prose projection shared by the memory/ledger pipelines (thinking +
+// variable blocks out); request-assembly will name this chain later (C9).
+const toProse = (text: string): string => stripVariableBlocks(stripCotText(text))
 // M4-e memory pipeline (composable, 2026-10 cleanup extraction): onMounted
 // writes the plugin-toggle gate; the patrol and manual rebuild live there.
 const {
@@ -345,7 +182,7 @@ const {
   isCardDomain: () => isCardDomain.value,
   card: () => card.value,
   messages: () => messages.value,
-  toProse: (text) => stripVariableBlocks(stripCotText(text)),
+  toProse,
   userName: () => readUserInfo().name,
 })
 
@@ -787,50 +624,6 @@ const buildRequestMessages = (floorsSource: ChatboxMessage[] = messages.value): 
   return result
 }
 
-// Floor capsule (review Q6) — LEDGER-DRIVEN (M3-r lesson: counting parsed
-// fields lies when the allow-list rejects them). A floor shows what the
-// ledger actually recorded for it: flat events as 「名 → 值」, template
-// events as one 「面板·名 → 已更新」 line each.
-const floorVariableSummary = (message: ChatboxMessage): { flat: Array<{ name: string; value: string }>; templateLines: string[]; total: number } => {
-  if (!isCardDomain.value || !variablesActive.value || message.role !== 'assistant') {
-    return { flat: [], templateLines: [], total: 0 }
-  }
-  const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
-  const templateNames = new Map(activeTemplates.value.map((entry) => [entry.id, entry.name] as const))
-  const flat: Array<{ name: string; value: string }> = []
-  const templateLines: string[] = []
-  for (const event of activeCandidateEvents.value) {
-    if (event.messageId !== message.id) continue
-    if (templateIds.has(event.name)) {
-      templateLines.push(`${templateNames.get(event.name) ?? event.name} → 已更新`)
-    } else {
-      // Not String() — its overload resolution explodes on the recursive
-      // VariableValue union (TS2589, same as Array.find).
-      const after = event.after
-      flat.push({
-        name: event.name,
-        value: after === null ? '已删除' : typeof after === 'object' ? JSON.stringify(after) : String(after),
-      })
-    }
-  }
-  return { flat, templateLines, total: flat.length + templateLines.length }
-}
-
-const toggleCapsule = (messageId: string): void => {
-  capsuleOpenId.value = capsuleOpenId.value === messageId ? null : messageId
-}
-
-const onVariablesChanged = (snapshot: VariableSnapshot): void => {
-  absorbVariableSnapshot(snapshot)
-}
-
-// Live ledger projection pushed down to VariablesSheet (M4-a): AI-side applies
-// land here on every turn, so the open sheet re-renders without close/reopen.
-const liveVariableSnapshot = computed<Pick<VariableSnapshot, 'state' | 'events'>>(() => ({
-  state: variableState.value,
-  events: variableEvents.value,
-}))
-
 const persistSession = async (): Promise<void> => {
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
   else if (conversation.value) await store?.save(conversation.value)
@@ -841,110 +634,55 @@ const stopStreaming = (): void => {
   abortController = null
 }
 
-// Shared ledger chain for parsed template-update entries (main-model blocks
-// and analysis replies both land here): route → deep-merge → whitelist →
-// floor-attributed event. Returns how many templates were matched.
-const applyMatchedTemplateUpdates = async (
-  parsed: ParsedTemplateUpdate[],
-  messageId: string,
-  candidateIndex?: number,
-): Promise<number> => {
-  let matched = 0
-  for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
-    matched += 1
-    const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
-      initial: template.initialVariableState,
-      schema: template.variableSchema,
-    })
-    if (result.rejectedKeys.length > 0) {
-      console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
-    }
-    if (result.changedKeys.length === 0) continue
-    const snapshot = await variableStore?.apply(card.value!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
-      source: 'ai',
-      messageId,
-      ...(candidateIndex !== undefined ? { candidateIndex } : {}),
-    })
-    if (snapshot) {
-      absorbVariableSnapshot(snapshot)
-    }
-  }
-  return matched
-}
-
-// M3-t secondary-model analysis: fallback when the main-model mode produced
-// no routable block, mandatory in sub-model mode. Recent floors, the card's
-// own schema and a decoupled token budget ride the same OpenAI-compatible
-// endpoint; parsing/routing/application reuse the block path above.
-const runTemplateAnalysisPipeline = async (targetFloor: ChatboxMessage, force = false): Promise<void> => {
-  if (!card.value || !settingsState) return
-  const settings = readTemplateAnalysisSettings(settingsState)
-  if (!settings.analysisModel) {
-    analysisStatus.value = '未配置分析模型'
-    return
-  }
-  // M4-b profiles: resolve the ACTIVE profile - the legacy flat keys read
-  // empty in profile mode (latent bug surfaced while wiring M4-e).
-  const apiConfig = resolveApiConfig(settingsState.snapshot())
-  const analysisTemplates = activeTemplates.value.map((entry) => ({
-    id: entry.id,
-    name: entry.name,
-    currentVariables: templateStateOf(entry),
-    variableSchema: entry.variableSchema,
-  }))
-  const depth = settings.analysisDepth
-  const recentFloors: AnalysisFloor[] = messages.value
-    .filter((message) => message.role !== 'system' && message.id !== targetFloor.id)
-    .slice(-depth)
-    .map((message) => ({
-      role: message.role as 'user' | 'assistant',
-      name: message.role === 'user' ? readUserInfo().name : card.value!.name,
-      // M4-f: the analysis reads prose — thinking blocks stay out.
-      content: stripVariableBlocks(stripCotText(message.content)),
-    }))
-  const config = {
-    baseUrl: apiConfig.baseUrl,
-    apiKey: apiConfig.apiKey,
-    model: settings.analysisModel,
-    temperature: 0.2,
-    maxTokens: settings.maxOutputTokens,
-    jsonMode: settings.jsonMode,
-  }
-  analysisStatus.value = '分析中…'
-  try {
-    const outcome = await runTemplateAnalysis({
-      config,
-      templates: analysisTemplates,
-      recentFloors,
-      userInfo: buildUserInfoLine(),
-      batch: useBatchAnalysis(settings, analysisTemplates.length),
-      force,
-      onUsage: (usage, meta) => {
-        if (usage) recordUsage?.(usage, meta)
-      },
-    })
-    let changed = 0
-    for (const reply of outcome.replies) {
-      try {
-        changed += await applyMatchedTemplateUpdates(parseTemplateUpdatePayload(reply.content), targetFloor.id)
-      } catch {
-        // Malformed analysis JSON is skipped — same tolerance as block path.
-      }
-    }
-    analysisStatus.value = outcome.failedTemplates > 0
-      ? `${outcome.failedTemplates} 个失败${outcome.firstError ? `：${outcome.firstError.slice(0, 80)}` : ''}`
-      : changed > 0
-        ? `更新 ${changed} 项`
-        : '无变化'
-  } catch (error) {
-    analysisStatus.value = `分析失败：${(error as Error)?.message || '未知错误'}`
-  }
-}
-
 const buildUserInfoLine = (): string => {
   const { name, persona } = readUserInfo()
   return [name ? `用户名字：${name}` : '', persona ? `用户人设：${persona}` : ''].filter(Boolean).join('\n')
 }
+
+// Card artifact layers (composable, 2026-10 cleanup extraction): onMounted
+// writes the plugin gates; request assembly and the sheets consume the state.
+const {
+  variableState,
+  variableEvents,
+  variablesActive,
+  worldbookActive,
+  worldbookReport,
+  worldbookDisabledUids,
+  regexActive,
+  regexDisabledUids,
+  capsuleOpenId,
+  analysisStatus,
+  candidateIndexOf,
+  absorbVariableSnapshot,
+  activeTemplates,
+  worldbookEntries,
+  toggleWorldbookEntry,
+  cardRegexScripts,
+  toggleRegexScript,
+  templateStateOf,
+  buildVariableDefaults,
+  floorPanels,
+  floorHasPanels,
+  floorVariableSummary,
+  toggleCapsule,
+  onVariablesChanged,
+  liveVariableSnapshot,
+  applyMatchedTemplateUpdates,
+  runTemplateAnalysisPipeline,
+} = useCardLedger({
+  settingsState,
+  variableStore,
+  worldbookStore,
+  regexStore,
+  recordUsage,
+  isCardDomain: () => isCardDomain.value,
+  card: () => card.value,
+  messages: () => messages.value,
+  isStreamingFloor,
+  toProse,
+  userName: () => readUserInfo().name,
+  userInfoLine: buildUserInfoLine,
+})
 
 /** The streaming half of a turn, shared by fresh sends and M4-c floor
  *  regeneration: streams into an existing floor object, attributes usage and
