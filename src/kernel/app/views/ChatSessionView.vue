@@ -22,6 +22,7 @@ import {
   MEMORY_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
+import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
 import { closeConversation } from '@/kernel/app/chat-router'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -29,14 +30,7 @@ import { errorHub } from '@/kernel/diagnostics/error-hub'
 import type { LlmChatMessage, LlmContentPart } from '@/kernel/llm/chat-completions'
 import { LlmRequestError } from '@/kernel/llm/chat-completions'
 import { resolveApiConfig } from '@/kernel/llm/api-profiles'
-import {
-  CHAT_IMAGE_MAX_BYTES,
-  MAX_CHAT_IMAGES,
-  compressImageFile,
-  describeImage,
-  userImageContextText,
-  type PendingChatImage,
-} from '@/kernel/llm/vision'
+import { userImageContextText } from '@/kernel/llm/vision'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
@@ -178,87 +172,21 @@ const analysisStatus = ref('')
 // M4-c floor actions: in-place editor state for one floor at a time.
 const editingFloorId = ref('')
 const editDraft = ref('')
-// M4-d chat image attachments: pending images ride the NEXT user floor.
-const pendingImages = ref<PendingChatImage[]>([])
-const imageInputEl = ref<HTMLInputElement | null>(null)
 // M4-d single-shot system instruction: rides one request, then clears.
 const oneShotInstruction = ref('')
 const showOneShotPanel = ref(false)
-const viewerImage = ref('')
 
-// D1 hybrid vision: the ACTIVE profile's capability declaration decides
-// direct parts vs the vision-model description fallback.
-const activeVisionCapable = (): boolean =>
-  resolveApiConfig(settingsState?.snapshot() ?? {}).visionCapable === true
-const readVisionModel = (): string => {
-  const scope = settingsState?.scope(['visionModel'])
-  return String(scope?.visionModel ?? '')
-}
-const pendingImagesNotReady = computed(() => pendingImages.value.some((image) => image.status !== 'ready'))
-
-const removePendingImage = (id: string): void => {
-  pendingImages.value = pendingImages.value.filter((image) => image.id !== id)
-}
-
-const onChatImageSelected = async (event: Event): Promise<void> => {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
-  // NOTE: input.value stays until every file is READ — Android WebView
-  // invalidates photo-picker File handles the moment the input resets
-  // ("图片读取失败" on-device). Cleared at the end of the read loop.
-  if (files.length === 0 || streaming.value) { input.value = ''; return }
-  if (!activeVisionCapable() && !readVisionModel()) {
-    uiService.toast('shell', '请先配置识图模型,或在 API 档案声明「支持看图」', { tone: 'error' })
-    return
-  }
-  const room = MAX_CHAT_IMAGES - pendingImages.value.length
-  const accepted = files.slice(0, Math.max(0, room))
-  if (accepted.length === 0) {
-    uiService.toast('shell', `每条消息最多 ${MAX_CHAT_IMAGES} 张图片`, { tone: 'error' })
-    return
-  }
-  for (const file of accepted) {
-    if (file.size > CHAT_IMAGE_MAX_BYTES) {
-      uiService.toast('shell', '单张图片不能超过 20MB', { tone: 'error' })
-      continue
-    }
-    const id = `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    const pending: PendingChatImage = { id, dataUrl: '', description: '', status: 'analyzing' }
-    pendingImages.value = [...pendingImages.value, pending]
-    // Compress + (description mode) recognize in the background; failures are
-    // per-image and never block the others.
-    void (async () => {
-      // patchInto = write through a fresh array — the pending object itself is
-      // captured UNREACTIVE in this closure (plain object inside the ref), so
-      // in-place mutation would never re-render the strip.
-      const patchInto = (patch: Partial<PendingChatImage>): void => {
-        pendingImages.value = pendingImages.value.map((image) => image.id === id ? { ...image, ...patch } : image)
-      }
-      try {
-        // Capture the compressed dataUrl locally — `pending` is the ORIGINAL
-        // object (patchInto replaces array slots with copies), so reading
-        // pending.dataUrl here would always send an empty image to the
-        // vision model (description mode never worked).
-        const dataUrl = await compressImageFile(file)
-        patchInto({ dataUrl })
-        if (activeVisionCapable()) {
-          patchInto({ status: 'ready' })
-          return
-        }
-        const config = resolveApiConfig(settingsState?.snapshot() ?? {})
-        const description = await describeImage(
-          { baseUrl: config.baseUrl, apiKey: config.apiKey, visionModel: readVisionModel() },
-          dataUrl,
-        )
-        patchInto({ description, status: 'ready' })
-      } catch (error) {
-        patchInto({ status: 'error', error: error instanceof Error ? error.message : String(error) })
-      }
-    })()
-  }
-  // All reads dispatched — now safe to reset the input for the next pick.
-  input.value = ''
-}
+// M4-d chat image attachments: pending strip + picker handler + vision
+// capability lookups live in the composable (2026-10 cleanup extraction).
+const {
+  pendingImages,
+  pendingImagesNotReady,
+  removePendingImage,
+  onChatImageSelected,
+  imageInputEl,
+  viewerImage,
+  activeVisionCapable,
+} = useChatAttachments({ settingsState, isStreaming: () => streaming.value })
 
 // Candidate-aware ledger projection (M4-c): events tagged with a
 // candidateIndex only count toward the floor's ACTIVE candidate — switching
