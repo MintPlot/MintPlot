@@ -1096,9 +1096,11 @@ const restartSession = async (): Promise<void> => {
   // M3-q/M3-s: 清空重开 resets the ledger to a fresh full seed — flat card
   // defaults AND the template trees (previously only the flat rows were
   // re-seeded and template panels fell back to card initial state).
+  // C3: absorb the WHOLE snapshot (events included) — writing state only left
+  // the pre-reset events visible in the sheet and feeding panel replay.
   if (variablesActive.value) {
     const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
-    if (variableSnapshot) variableState.value = variableSnapshot.state
+    if (variableSnapshot) absorbVariableSnapshot(variableSnapshot)
   }
   // M4-e: clear-and-restart clears the memory ledger with everything else
   // - the summary describes the CLEARED story, keeping it would be wrong.
