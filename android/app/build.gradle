@@ -15,9 +15,10 @@ android {
         applicationId "com.mintplot.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // M0-b 拍板:versionCode 1 起新数轴,versionName 1.0.0-alpha;单调递增不回退,dev 构建也占号
-        versionCode 1
-        versionName "1.0.0-alpha"
+        // Identity (M0-b): versionCode derives from versionName as
+        // major*1000000 + minor*1000 + patch (1.0.0 -> 1000000); monotonic, never regress.
+        versionCode 1000000
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

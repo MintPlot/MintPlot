@@ -14,6 +14,7 @@ import { createKvStore, createMemoryEngine, createPrefixedEngine, MP_STORAGE_PRE
 import { createSessionLedger } from '@/kernel/sessions/session-ledger'
 import { createSecretsVault } from '@/kernel/secrets/vault'
 import { createPlatformCapability } from '@/kernel/app/platform'
+import { MP_VERSION_NAME } from '@/kernel/app/app-identity'
 import { uiService } from '@/kernel/ui/toasts'
 import { getRegisteredSettingsSections, settingsSink } from '@/kernel/app/settings-registry'
 import { createMemorySettingsState } from '../helpers/memory-settings'
@@ -244,7 +245,7 @@ describe('update-checker · full lifecycle through the runtime (walking skeleton
 
     const wrapper = mount(UpdateCheckerSection)
     expect(wrapper.text()).toContain('MintPlot')
-    expect(wrapper.text()).toContain(`v1.0.0-alpha`)
+    expect(wrapper.text()).toContain(`v${MP_VERSION_NAME}`)
     expect(wrapper.text()).toContain('dev')
 
     await runtime.deactivate('update-checker')
