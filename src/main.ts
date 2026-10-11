@@ -51,6 +51,7 @@ import WorldinfoPlugin from '@/plugins/worldinfo'
 import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
 import MemoryPlugin from '@/plugins/memory'
+import StoryPlugin from '@/plugins/story'
 import CotPlugin from '@/plugins/cot'
 
 initMpTheme()
@@ -137,6 +138,9 @@ kernel.runtime.load(PresetsPlugin)
 // Memory system (M4-e): same serviceless shape — the summary pipeline,
 // ledger and injection engine stay kernel-side; the plugin is the toggle.
 kernel.runtime.load(MemoryPlugin)
+// Story engine (M4-e): same serviceless shape — the prompt-block builder and
+// request-side injection stay kernel-side; the plugin is the tools-area toggle.
+kernel.runtime.load(StoryPlugin)
 // Thinking layer (M4-f): same serviceless shape — parser/builder/preset-sync
 // stay kernel-side; the plugin is the tools-area toggle surface.
 kernel.runtime.load(CotPlugin)

@@ -1,0 +1,11 @@
+{
+  "id": "story",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "故事引擎",
+    "description": "叙事原则注入 + 关系阶段系统：角色有自主权会拒绝，随剧情分时期改变态度与语气"
+  },
+  "permissions": []
+}

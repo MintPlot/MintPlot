@@ -108,6 +108,11 @@ const presetSnapshot = shallowRef<PresetSnapshot | null>(null)
 // preset sync, no request-side strip (raw tag passthrough). Native reasoning
 // still rides the kernel stream capture; it just stays unshown.
 const cotActive = ref(true)
+// Story engine (M4-e): app-level — dormant = no principles, no stage table,
+// no bookkeeping block. The stage value rides the variables ledger
+// (`story.stage`), so the stage system additionally needs the card domain
+// with variables active (request-assembly gates that itself).
+const storyActive = ref(true)
 // Session settings (M4-g3 parity): session-level system prompt (chatbox) and
 // model override (both domains).
 const showSessionSettings = ref(false)
@@ -211,6 +216,9 @@ onMounted(async () => {
     }
     // M4-f: the CoT layer gates on its own plugin the same way.
     cotActive.value = pluginActive(runtime, 'cot')
+    // M4-e 故事引擎:门控与预设层同形(app-level,两域通用;阶段系统在
+    // request-assembly 内再按卡域 + 变量层二次门控)。
+    storyActive.value = pluginActive(runtime, 'story')
     if (variablesActive.value) {
       // Seed = flat card defaults (mp_variables) + each template's initial
       // tree under its id (M3-r). First touch only; later ensures keep the
@@ -401,6 +409,7 @@ const {
   presetSnapshot: () => presetSnapshot.value,
   setPresetSnapshot: (snapshot) => { presetSnapshot.value = snapshot },
   cotActive: () => cotActive.value,
+  storyActive: () => storyActive.value,
   variablesActive: () => variablesActive.value,
   variableState: () => variableState.value,
   activeTemplates: () => activeTemplates.value,
