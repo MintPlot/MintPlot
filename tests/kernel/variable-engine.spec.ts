@@ -87,6 +87,17 @@ describe('kernel/variables · display projection & delta semantics', () => {
     expect(stripVariableBlocks('<setvars>{"a":1}</setvars>\n中段\n<StatData>{"b":2}</StatData>')).toBe('中段')
   })
 
+  it('cuts a trailing unclosed protocol block (F4: output-limit truncation residue)', () => {
+    // 设备实测存量形态:64-token 输出上限截断的未闭合块。
+    expect(stripVariableBlocks('我们启程了。<ui_template_updates>{"updates":[')).toBe('我们启程了。')
+    // 完整块在前、截断块在后:完整块照常剥离,截断块切除。
+    expect(stripVariableBlocks('<setvars>{"a":1}</setvars>正文<ui_template_updates>{"hp"')).toBe('正文')
+    // 未闭合的扁平标签同样容忍。
+    expect(stripVariableBlocks('正文<setvars>{"a":')).toBe('正文')
+    // 完整块之后的正常正文不受影响。
+    expect(stripVariableBlocks('<setvars>{"a":1}</setvars>正文完好')).toBe('正文完好')
+  })
+
   it('resolves ±deltas against the current value, absolute otherwise', () => {
     expect(resolveUpdateValue(45, 10)).toBe(45)
     expect(resolveUpdateValue('黄昏', null)).toBe('黄昏')

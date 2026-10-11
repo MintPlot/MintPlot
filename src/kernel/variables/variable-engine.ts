@@ -41,6 +41,19 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 const blockPattern = (tag: string): RegExp =>
   new RegExp(`<${escapeRegExp(tag)}(?:\\s[^>]*)?>([\\s\\S]*?)</${escapeRegExp(tag)}>`, 'gi')
 
+/** F4 (2026-10-10 device test): a reply cut off mid-protocol-block by an
+ *  output limit leaves an unclosed opening tag in the stored floor — the
+ *  balanced-block patterns above can't match it, so the raw JSON rode into
+ *  the display. After complete blocks are stripped, a trailing opener with
+ *  no closer after it is truncation residue: cut from the tag to the end.
+ *  Tempered token (no nested quantifiers) — linear over the floor text. */
+const TRAILING_UNCLOSED_PATTERN = new RegExp(
+  [...VARIABLE_TAG_NAMES, 'ui_template_updates']
+    .map((tag) => `<${escapeRegExp(tag)}(?:\\s[^>]*)?>(?:(?!${escapeRegExp(`</${tag}>`)})[\\s\\S])*$`)
+    .join('|'),
+  'i',
+)
+
 /** The ui-template update protocol (M3-r): `<ui_template_updates …>…</…>`,
  *  case-insensitive, attribute-tolerant. */
 const TEMPLATE_UPDATE_BLOCK_PATTERN = /<ui_template_updates(?:\s[^>]*)?>([\s\S]*?)<\/ui_template_updates>/gi
@@ -105,7 +118,8 @@ export function parseVariableUpdates(text: string): { updates: ParsedVariableUpd
 /**
  * Display projection: the stored floor keeps its tag blocks verbatim; only
  * the render path strips them (review Q1 落库纪律). M3-r: the ui-template
- * protocol block strips alongside the flat tags.
+ * protocol block strips alongside the flat tags. F4: a trailing unclosed
+ * block (output-limit truncation residue) is cut too.
  */
 export function stripVariableBlocks(text: string): string {
   if (!text) return text
@@ -113,7 +127,7 @@ export function stripVariableBlocks(text: string): string {
   for (const tag of VARIABLE_TAG_NAMES) {
     result = result.replace(blockPattern(tag), '')
   }
-  return result.replace(TEMPLATE_UPDATE_BLOCK_PATTERN, '').trim()
+  return result.replace(TEMPLATE_UPDATE_BLOCK_PATTERN, '').replace(TRAILING_UNCLOSED_PATTERN, '').trim()
 }
 
 /**
