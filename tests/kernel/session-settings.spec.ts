@@ -53,6 +53,51 @@ describe('M4-g3 · 会话设置面板', () => {
     expect(wrapper.emitted('saved')![0]![0]).toEqual({ title: '', systemPrompt: '', model: 'deepseek-r1' })
   })
 
+  it('卡域有封面:背景调节区上屏,保存交回 bg 参数草稿', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    // Envelope carries no bg yet → the sheet pre-fills the shipped defaults.
+    const cardSession = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [] } as never
+    const wrapper = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    expect(wrapper.text()).toContain('卡图背景')
+    const ranges = wrapper.findAll('input[type="range"]')
+    expect(ranges).toHaveLength(2)
+    await ranges[0]!.setValue('12')
+    await ranges[1]!.setValue('60')
+    await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
+    const saved = wrapper.emitted('saved')![0]![0] as { bg?: { enabled: boolean; blur: number; dim: number } }
+    expect(saved.bg).toEqual({ enabled: true, blur: 12, dim: 60 })
+  })
+
+  it('卡域有封面且信封带 bg:草稿吃信封值,关开关后 bg.enabled=false 交回', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const cardSession = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [], bg: { enabled: true, blur: 8, dim: 30 } } as never
+    const wrapper = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    const ranges = wrapper.findAll('input[type="range"]')
+    expect((ranges[0]!.element as HTMLInputElement).value).toBe('8')
+    expect((ranges[1]!.element as HTMLInputElement).value).toBe('30')
+    await wrapper.find('input[type="checkbox"]').setValue(false)
+    await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
+    const saved = wrapper.emitted('saved')![0]![0] as { bg?: { enabled: boolean } }
+    expect(saved.bg!.enabled).toBe(false)
+  })
+
+  it('卡域无封面或 chatbox 域:不出背景调节区', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const cardSession = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [] } as never
+    const noCover = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession, settingsState: settings },
+    })
+    expect(noCover.text()).not.toContain('卡图背景')
+    const chatbox = mount(SessionSettingsSheet, {
+      props: { domain: 'chatbox', conversation: null, cardSession: null, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    expect(chatbox.text()).not.toContain('卡图背景')
+  })
+
   it('拉取模型填充 datalist 选项', async () => {
     const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
     // scope() projections carry setters into the reactive store (same write

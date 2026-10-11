@@ -1,32 +1,40 @@
 <script setup lang="ts">
-// 会话设置面板(M4-g3 parity):chatbox 域 = 会话级 system prompt 编辑 + 模型
-// 覆盖;卡域 = 模型覆盖(卡定义/世界书/预设组装本就是卡域的 system 面)。模型
-// 覆盖只换模型名,端点与密钥仍走激活档案;空 = 跟随全局。模型列表经「拉取」
-// 按钮从激活档案端点实时获取(M4-b fetchModelList)。
+// 会话设置面板(M4-g3 parity):chatbox 域 = 会话名称 + 会话级 system prompt
+// 编辑 + 模型覆盖;卡域 = 模型覆盖 + 卡图背景调节(1.0.x:开关/模糊/压暗,
+// 随卡信封持久)。模型覆盖只换模型名,端点与密钥仍走激活档案;空 = 跟随全局。
+// 模型列表经「拉取」按钮从激活档案端点实时获取(M4-b fetchModelList)。
 import { computed, ref, watch } from 'vue'
 import { fetchModelList } from '@/kernel/llm/api-profiles'
 import { resolveApiConfig } from '@/kernel/llm/api-profiles'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { ChatboxConversation } from '@/kernel/sessions/chatbox-store'
-import type { CardSession } from '@/kernel/sessions/card-session-store'
+import type { CardBackdrop, CardSession } from '@/kernel/sessions/card-session-store'
+import ToggleSwitch from '@/kernel/app/ui/ToggleSwitch.vue'
 
 const props = defineProps<{
   domain: 'chatbox' | 'card'
   conversation: ChatboxConversation | null
   cardSession: CardSession | null
   settingsState: SettingsState | null
+  cardCover?: string
 }>()
 
-const emit = defineEmits<{ close: []; saved: [{ title: string; systemPrompt: string; model: string }] }>()
+const emit = defineEmits<{ close: []; saved: [{ title: string; systemPrompt: string; model: string; bg?: CardBackdrop }] }>()
+
+/** Defaults mirror the view's fallback so an untouched card (no bg in the
+ *  envelope) shows the same numbers the page is already rendering. */
+const BG_DEFAULTS: CardBackdrop = { enabled: true, blur: 40, dim: 45 }
 
 const draftTitle = ref('')
 const draftPrompt = ref('')
 const draftModel = ref('')
+const draftBg = ref<CardBackdrop>({ ...BG_DEFAULTS })
 const modelOptions = ref<string[]>([])
 const fetching = ref(false)
 const fetchNote = ref('')
 
 const isChatbox = computed(() => props.domain === 'chatbox')
+const hasBackdrop = computed(() => !isChatbox.value && !!props.cardCover)
 
 watch(
   () => [props.conversation, props.cardSession] as const,
@@ -34,6 +42,7 @@ watch(
     draftTitle.value = props.conversation?.title ?? ''
     draftPrompt.value = props.conversation?.systemPrompt ?? ''
     draftModel.value = props.conversation?.model || props.cardSession?.model || ''
+    draftBg.value = { ...BG_DEFAULTS, ...(props.cardSession?.bg ?? {}) }
     modelOptions.value = []
     fetchNote.value = ''
   },
@@ -59,8 +68,14 @@ const pullModels = async (): Promise<void> => {
 const save = (): void => {
   // The parent owns the store objects (vue/no-mutating-props) — hand over
   // the drafts; '' = follow the global profile (the seam treats empty as
-  // no override) and keep the current title (rename is opt-in).
-  emit('saved', { title: draftTitle.value.trim(), systemPrompt: draftPrompt.value, model: draftModel.value.trim() })
+  // no override) and keep the current title (rename is opt-in). The bg
+  // draft only carries in the card domain (chatbox has no backdrop).
+  emit('saved', {
+    title: draftTitle.value.trim(),
+    systemPrompt: draftPrompt.value,
+    model: draftModel.value.trim(),
+    ...(hasBackdrop.value ? { bg: { ...draftBg.value } } : {}),
+  })
   emit('close')
 }
 </script>
@@ -108,6 +123,47 @@ const save = (): void => {
         />
         <div class="mb-3 mt-1 text-[10px] text-ink-3">
           与预设/角色定义组装为系统提示词,留空即无。
+        </div>
+      </template>
+
+      <template v-if="hasBackdrop">
+        <div class="flex items-center justify-between">
+          <div class="text-xs font-bold text-ink-2">
+            卡图背景
+          </div>
+          <ToggleSwitch v-model="draftBg.enabled" />
+        </div>
+        <div
+          class="mt-2 space-y-2"
+          :class="draftBg.enabled ? '' : 'pointer-events-none opacity-40'"
+        >
+          <label class="flex items-center gap-2">
+            <span class="w-8 flex-shrink-0 text-xs text-ink-2">模糊</span>
+            <input
+              v-model.number="draftBg.blur"
+              type="range"
+              min="0"
+              max="40"
+              step="2"
+              class="min-w-0 flex-1 accent-primary"
+            >
+            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ draftBg.blur }}px</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <span class="w-8 flex-shrink-0 text-xs text-ink-2">压暗</span>
+            <input
+              v-model.number="draftBg.dim"
+              type="range"
+              min="0"
+              max="80"
+              step="5"
+              class="min-w-0 flex-1 accent-primary"
+            >
+            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ draftBg.dim }}%</span>
+          </label>
+        </div>
+        <div class="mb-3 mt-1 text-[10px] text-ink-3">
+          只影响本卡的对话背景,随卡保存。
         </div>
       </template>
 

@@ -12,6 +12,7 @@ import type { VariableStore, VariableSnapshot } from '@/kernel/variables/variabl
 import { eventsBeforeFloor } from '@/kernel/variables/variable-store'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
+import type { CardBackdrop } from '@/kernel/sessions/card-session-store'
 import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import { uiService } from '@/kernel/ui/toasts'
@@ -36,7 +37,7 @@ export interface FloorActionsOptions {
   sessionLoaded: () => boolean
   isCardDomain: () => boolean
   card: () => CharacterCard | null
-  cardSession: () => { model?: string } | null
+  cardSession: () => ({ model?: string; bg?: CardBackdrop }) | null
   conversation: () => ChatboxConversation | null
   messages: () => ChatboxMessage[]
   variablesActive: () => boolean
@@ -222,11 +223,13 @@ export function useFloorActions(options: FloorActionsOptions) {
   // M4-g3: the sheet hands over drafts; this side owns the store objects and
   // persists through the domain's own store (C5: the save dispatch reuses
   // persistSession instead of restating it). 1.0.x: title rides the same
-  // payload for the chatbox domain — empty = keep the current title.
-  const onSessionSettingsSaved = async (draft: { title: string; systemPrompt: string; model: string }): Promise<void> => {
+  // payload for the chatbox domain — empty = keep the current title; bg
+  // rides for the card domain (backdrop tuning, per-card envelope).
+  const onSessionSettingsSaved = async (draft: { title: string; systemPrompt: string; model: string; bg?: CardBackdrop }): Promise<void> => {
     if (isCardDomain() && cardSession()) {
       if (draft.model) cardSession()!.model = draft.model
       else delete cardSession()!.model
+      if (draft.bg) cardSession()!.bg = draft.bg
     } else if (conversation()) {
       if (draft.title) conversation()!.title = draft.title
       conversation()!.systemPrompt = draft.systemPrompt

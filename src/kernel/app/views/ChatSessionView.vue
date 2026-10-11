@@ -87,6 +87,18 @@ const conversation = ref<ChatboxConversation | null>(null)
 const cardSession = ref<CardSession | null>(null)
 const card = ref<CharacterCard | null>(null)
 const cardCover = ref('')
+
+// Backdrop tuning (1.0.x): the card session envelope carries {enabled,blur,
+// dim}; absent = the shipped defaults. Scale stays fixed at 110% — it hides
+// the blur edge bleed, not a taste parameter.
+const backdropDisabled = computed(() => cardSession.value?.bg?.enabled === false)
+const backdropImgStyle = computed(() => ({
+  filter: `blur(${cardSession.value?.bg?.blur ?? 40}px)`,
+  transform: 'scale(1.1)',
+}))
+const backdropDimStyle = computed(() => ({
+  backgroundColor: `rgba(0, 0, 0, ${(cardSession.value?.bg?.dim ?? 45) / 100})`,
+}))
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
@@ -548,6 +560,26 @@ const restartSession = async (): Promise<void> => {
 
 <template>
   <div class="fixed inset-0 z-40 flex flex-col bg-bg">
+    <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
+         and dimmed behind the whole page. Tuning rides the card session
+         envelope (SessionSettingsSheet); absent = enabled/40px/45%.
+         Negative z keeps every in-flow sibling above it. -->
+    <div
+      v-if="isCardDomain && cardCover && !backdropDisabled"
+      class="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      aria-hidden="true"
+    >
+      <img
+        :src="cardCover"
+        alt=""
+        class="h-full w-full object-cover"
+        :style="backdropImgStyle"
+      >
+      <div
+        class="absolute inset-0"
+        :style="backdropDimStyle"
+      />
+    </div>
     <header class="flex shrink-0 items-center gap-2 border-b border-line bg-card px-2">
       <button
         type="button"
@@ -770,6 +802,7 @@ const restartSession = async (): Promise<void> => {
       :conversation="conversation"
       :card-session="cardSession"
       :settings-state="settingsState"
+      :card-cover="cardCover"
       @close="showSessionSettings = false"
       @saved="onSessionSettingsSaved"
     />

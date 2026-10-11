@@ -24,6 +24,16 @@ export interface CardSessionSeed {
   firstMes: string
 }
 
+/** Card-cover backdrop tuning (1.0.x): per-card, rides the envelope.
+ *  Absent = the defaults the view applies (enabled, blur 40px, dim 45%). */
+export interface CardBackdrop {
+  enabled: boolean
+  /** Blur radius in px (0–40). */
+  blur: number
+  /** Dim overlay opacity in % (0–80). */
+  dim: number
+}
+
 export interface CardSession {
   cardId: string
   /** Card name at creation; the live name renders from the character store. */
@@ -35,6 +45,7 @@ export interface CardSession {
   /** Session-level model override (M4-g3 parity): empty = the active
    *  profile's model. Endpoint/key still come from the active profile. */
   model?: string
+  bg?: CardBackdrop
 }
 
 interface CardSessionMeta {
@@ -44,6 +55,7 @@ interface CardSessionMeta {
   updatedAt: number
   preview: string
   model?: string
+  bg?: CardBackdrop
 }
 
 export interface CardSessionStore {
@@ -88,6 +100,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         updatedAt: meta.updatedAt,
         messages,
         ...(meta.model ? { model: meta.model } : {}),
+        ...(meta.bg ? { bg: meta.bg } : {}),
       }
     },
 
@@ -120,6 +133,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         updatedAt: session.updatedAt,
         preview: previewOf(session.messages),
         ...(session.model ? { model: session.model } : {}),
+        ...(session.bg ? { bg: session.bg } : {}),
       }
       await repository.set(metaKeyOf(session.cardId), meta)
     },

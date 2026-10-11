@@ -54,6 +54,17 @@ describe('card session store · one session per card (chat:card keys)', () => {
     expect(session.messages).toEqual([])
   })
 
+  it('backdrop tuning rides the envelope (get/save round-trip, absent = legacy)', async () => {
+    const store = createCardSessionStore(createStorageRepository(createMemoryEngine()))
+    const session = await store.create({ id: 'cc-bg', name: '带背景的卡', firstMes: '' })
+    // Legacy envelope (no bg yet) reads back without the field.
+    expect((await store.get('cc-bg'))!.bg).toBeUndefined()
+
+    session.bg = { enabled: false, blur: 12, dim: 60 }
+    await store.save(session)
+    expect(await store.get('cc-bg')).toMatchObject({ bg: { enabled: false, blur: 12, dim: 60 } })
+  })
+
   it('reset drops every floor and reseeds the greeting (D3 清空重开)', async () => {
     const store = createCardSessionStore(createStorageRepository(createMemoryEngine()))
     await store.create(SEED)
