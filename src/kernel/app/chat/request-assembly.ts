@@ -58,6 +58,8 @@ export interface RequestAssemblerDeps {
   /** syncCotPresetEntries rewrites the store; the view's snapshot ref follows. */
   setPresetSnapshot: (snapshot: PresetSnapshot) => void
   cotActive: () => boolean
+  /** 叙事风格配置器(M4-nstyle):预构建的提示块(作用域解析在视图层),空串跳过。 */
+  nstyleBlock: () => string
   variablesActive: () => boolean
   variableState: () => Record<string, VariableState>
   activeTemplates: () => CardUiTemplate[]
@@ -215,6 +217,10 @@ export function createRequestAssembler(deps: RequestAssemblerDeps) {
         if (context) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${context}` : context
       }
     }
+    // M4-nstyle 叙事风格:作用域解析(会话临时 > 故事级 > 全局)在视图层完成,
+    // 这里只注入预构建的提示块(变量区之后、系统提示词收尾之前)。
+    const nstyleBlock = deps.nstyleBlock()
+    if (nstyleBlock) systemPrompt = systemPrompt ? `${systemPrompt}\n\n${nstyleBlock}` : nstyleBlock
     if (systemPrompt.trim()) {
       result.push({ role: 'system', content: expandRequestText(systemPrompt) })
     }

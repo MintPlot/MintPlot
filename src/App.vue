@@ -20,6 +20,7 @@ import DataBackupSection from '@/kernel/app/sections/DataBackupSection.vue'
 import TemplateAnalysisSection from '@/kernel/app/sections/TemplateAnalysisSection.vue'
 import PresetSection from '@/kernel/app/sections/PresetSection.vue'
 import MemorySettingsSection from '@/kernel/app/sections/MemorySettingsSection.vue'
+import NstyleSection from '@/kernel/app/sections/NstyleSection.vue'
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 import ConfirmDialogHost from '@/kernel/ui/ConfirmDialogHost.vue'
 import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
@@ -74,6 +75,9 @@ disposers.push(
   // M4-e: the memory engine's settings face folds into the 记忆系统 plugin's
   // tools-area entry (same host-registered shape as 变量分析 / 预设设置).
   registerSettingsSection('memory', { id: 'memory-settings', title: '记忆设置', component: MemorySettingsSection, placement: 'plugin' }, 10),
+  // M4-nstyle: 叙事风格配置器 — 预设/滑块/叙述方式/标签/风格管理/预览,
+  // 面板挂在本插件的工具区条目下(同上宿主注册模式)。
+  registerSettingsSection('nstyle', { id: 'nstyle-config', title: '叙事风格配置', component: NstyleSection, placement: 'plugin' }, 10),
 )
 
 onUnmounted(() => {
