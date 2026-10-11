@@ -857,6 +857,20 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     wrapper.unmount()
   })
 
+  it('昵称未设置时 {{user}} 宏回落默认名「用户」(F5)', async () => {
+    const { wrapper, characterStore } = mountApp()
+    await characterStore.import({ ...CARD, firstMes: '你好，{{user}}！' })
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    const greeting = [...wrapper.findAll('.markdown-body')][0]?.text()
+    expect(greeting).toContain('你好，用户！')
+    wrapper.unmount()
+  })
+
   it('预设(M3-w):system 条目前置、预注入消息、宏展开、停用即回到原装配', async () => {
     const { wrapper, characterStore, presetStore } = mountApp()
     await presetStore.ensure()
@@ -881,7 +895,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // system 条目带名字包装,置顶于系统提示词(数组序,默认组多条启用)。
     const systemMessage = request.find((message) => message.role === 'system')!
     expect(systemMessage.content).toContain('[防重复]')
-    // 预注入 user 消息紧跟系统消息,宏已展开({{user}}→用户名,空则消失)。
+    // 预注入 user 消息紧跟系统消息,宏已展开({{user}}→用户名,未设置回落「用户」)。
     const prefill = request[1]!
     expect(prefill.role).toBe('user')
     expect(prefill.content).toContain('的预注入')

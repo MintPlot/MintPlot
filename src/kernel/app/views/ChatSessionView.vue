@@ -243,10 +243,11 @@ const readUserInfo = (): { name: string; persona: string } => {
 
 // M3-n display-side macro context: the card domain resolves both macros, the
 // chatbox domain has no char ({{char}} stays literal — RP replaces {{user}}
-// only as well).
+// only as well). F5: an unset nickname used to collapse {{user}} to an empty
+// string (greetings rendered 「你好，！」) — fall back to the generic name.
 const macroContext = computed(() => ({
   charName: isCardDomain.value ? card.value?.name ?? '' : '',
-  userName: readUserInfo().name,
+  userName: readUserInfo().name || '用户',
 }))
 
 const isStreamingFloor = (message: ChatboxMessage): boolean =>
