@@ -209,6 +209,32 @@ describe('M4-c · candidate tagging, rollback and filtered replay', () => {
     expect(again.events.map((event) => event.candidateIndex)).toEqual([0, 1])
   })
 
+  it('regen candidate same-value updates compare against the candidate-scoped prior state (F1)', async () => {
+    const store = createVariableStore(createStorageRepository(createMemoryEngine()))
+    await store.ensure('cc-10', seed)
+    // 候选 0(主内容):绝对值落账 10 → 77。
+    await store.apply('cc-10', [{ name: '好感度', raw: 77 }], { source: 'ai', messageId: 'm-1' })
+    // 重生成候选 1 重申同值:全局状态已是 77,但该候选的前置状态仍是 10 ——
+    // 事件必须落账,否则候选 1 的回放丢掉这次更新(2026-10-10 设备测试 F1)。
+    const snapshot = await store.apply('cc-10', [{ name: '好感度', raw: 77 }], {
+      source: 'ai',
+      messageId: 'm-1',
+      candidateIndex: 1,
+    })
+    expect(snapshot.events).toHaveLength(2)
+    expect(snapshot.events[1]!.candidateIndex).toBe(1)
+    expect(snapshot.events[1]!.before).toBe(10)
+    // 候选 1 视图回放:种子 10 ⊕ 本候选事件 77 = 77(旧实现丢事件回落 10)。
+    const candidateView = replayVariableState(
+      seed,
+      filterCandidateEvents(snapshot.events, (id) => (id === 'm-1' ? 1 : undefined)),
+    )
+    expect(candidateView['好感度']).toMatchObject({ value: 77 })
+    // 全局路径(无 candidateIndex)的全局同值跳过保持不变。
+    const dedup = await store.apply('cc-10', [{ name: '好感度', raw: 77 }], { source: 'ai', messageId: 'm-2' })
+    expect(dedup.events).toHaveLength(2)
+  })
+
   it('rollbackFloors drops every event of the removed floors and keeps the rest', async () => {
     const store = createVariableStore(createStorageRepository(createMemoryEngine()))
     await store.ensure('cc-9', seed)

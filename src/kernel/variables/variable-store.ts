@@ -184,9 +184,26 @@ export function createVariableStore(repository: StorageRepository): VariableStor
           (await repository.get<VariableRecord>(keyOf(cardId))) ?? { seed: [], events: [] }
         if (updates.length > 0) {
           const state = replayVariableState(record.seed, record.events)
+          // F1 (2026-10-10 device test): the same-value skip must compare
+          // against the CANDIDATE-SCOPED prior state — a regen candidate that
+          // re-states a value an earlier candidate already wrote would
+          // otherwise be dropped, and that candidate's replay (pre-floor
+          // events + this floor's same-candidate events) would lose the
+          // update entirely. Delta RESOLUTION stays against the full ledger
+          // (M4-c: the new candidate continues the live state); only the skip
+          // comparison and the recorded `before` become candidate-scoped.
+          const scopedBase = options.candidateIndex !== undefined && options.messageId
+            ? [
+                ...eventsBeforeFloor(record.events, options.messageId),
+                ...record.events.filter((event) => event.messageId === options.messageId && event.candidateIndex === options.candidateIndex),
+              ]
+            : null
           for (const update of updates) {
-            const before = state[update.name]?.value ?? null
-            const resolved = resolveUpdateValue(update.raw, before)
+            const globalBefore = state[update.name]?.value ?? null
+            const resolved = resolveUpdateValue(update.raw, globalBefore)
+            const before = scopedBase
+              ? (replayVariableState(record.seed, scopedBase)[update.name]?.value ?? null)
+              : globalBefore
             // Deleting an absent variable and rewriting the same value are not
             // facts worth a ledger row (structural equality for trees).
             if (resolved === null ? before === null : (before !== null && sameValue(before, resolved))) continue
@@ -205,6 +222,7 @@ export function createVariableStore(repository: StorageRepository): VariableStor
               ...(options.candidateIndex !== undefined ? { candidateIndex: options.candidateIndex } : {}),
             }
             record.events.push(event)
+            scopedBase?.push(event)
             if (event.after === null) delete state[update.name]
             else state[update.name] = { value: event.after, updatedAt: event.ts, sourceEventId: event.id }
           }
