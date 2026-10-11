@@ -26,7 +26,7 @@ const themeLabel = computed(() =>
   <div>
     <!-- 设置层级分区(用户示意 图4):设置页卡片 > 通用设置 > 主题 —— 内层
          折叠区包成内嵌圆角子卡,三层嵌套肉眼可见,而不是平铺一行。 -->
-    <div class="mx-3 mb-3 rounded-card border border-line">
+    <div class="m-3 rounded-card border border-line">
       <button
         type="button"
         class="flex w-full items-center justify-between gap-2 rounded-card px-3 py-2.5 text-left"
@@ -56,7 +56,7 @@ const themeLabel = computed(() =>
         v-show="expanded"
         class="rounded-b-card border-t border-line"
       >
-        <div class="px-3 py-3">
+        <div class="px-3 pb-4 pt-4">
           <div class="flex items-center justify-between">
             <p class="text-sm text-ink">
               整体外观
@@ -66,7 +66,7 @@ const themeLabel = computed(() =>
             </p>
           </div>
           <div
-            class="mt-2 flex rounded-full border border-line-strong p-1"
+            class="mt-3 flex rounded-full border border-line-strong p-1"
             role="radiogroup"
             aria-label="主题明暗"
           >
@@ -85,7 +85,7 @@ const themeLabel = computed(() =>
           </div>
         </div>
 
-        <div class="rounded-b-card border-t border-line px-3 py-3">
+        <div class="rounded-b-card border-t border-line px-3 pb-4 pt-4">
           <p class="text-sm text-ink">
             配色
           </p>

@@ -41,7 +41,7 @@ async function mountSession(stream: LlmProvider['stream']) {
 
 async function sendDraft(wrapper: Awaited<ReturnType<typeof mountSession>>['wrapper'], text: string): Promise<void> {
   await wrapper.find('textarea').setValue(text)
-  const send = wrapper.findAll('button').find((button) => button.text() === '发送')!
+  const send = wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!
   await send.trigger('click')
   await flushPromises()
 }
@@ -107,7 +107,7 @@ describe('M3-err1 · 聊天页错误条(D3:错误不写历史)', () => {
 
     await sendDraft(wrapper, '你好')
     // 中止按钮在流式中出现;点击走真实 abortController.abort()。
-    const stop = wrapper.findAll('button').find((button) => button.text() === '中止')!
+    const stop = wrapper.findAll('button').find((button) => button.attributes('aria-label') === '中止')!
     await stop.trigger('click')
     await flushPromises()
 

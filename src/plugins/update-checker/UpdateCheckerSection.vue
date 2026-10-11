@@ -16,7 +16,7 @@ const service = computed(() => getActiveService())
   >
     <div
       v-if="service.updateAvailable.value && !service.updateNoticeDismissedToday.value"
-      class="mb-3 overflow-hidden rounded-card border border-line bg-bg"
+      class="m-3 overflow-hidden rounded-card border border-line bg-bg"
     >
       <div class="flex items-start justify-between gap-3 border-b border-line px-4 pb-2 pt-3">
         <div>

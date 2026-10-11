@@ -114,7 +114,7 @@ describe('M4-d · 图片附件与混合识图', () => {
     expect(visionBody.messages[0].content[0].text).toContain('客观、详细')
     expect(visionBody.messages[0].content[1].image_url.detail).toBe('high')
     // 就绪前发送被禁。
-    const send = wrapper.findAll('button').find((button) => button.text() === '发送')!
+    const send = wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!
     expect(send.attributes('disabled')).toBeDefined()
 
     await wrapper.find('textarea').setValue('看这张图')
@@ -152,7 +152,7 @@ describe('M4-d · 图片附件与混合识图', () => {
     await flushPromises()
     expect(fetchMock).not.toHaveBeenCalled() // 直连模式不发起识图请求
     await wrapper.find('textarea').setValue('看图说话')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -177,12 +177,12 @@ describe('M4-d · 图片附件与混合识图', () => {
     await attachImages(wrapper, 1)
     await flushPromises()
     await wrapper.find('textarea').setValue('第一轮')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     // 第二轮无图:第一轮楼层的描述仍随历史进请求。
     await wrapper.find('textarea').setValue('第二轮')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const historyUserFloor = streamCalls.at(-1)!.filter((message) => message.role === 'user')[0]!
     expect(String(historyUserFloor.content)).toContain('<user_image_context>')
@@ -204,7 +204,7 @@ describe('M4-d · 单次指令(D3)', () => {
     await wrapper.find('[aria-label="单次指令"] + div textarea, div textarea[placeholder*="轻快"]').setValue('这段用更轻快的语气写')
     await wrapper.findAll('button').find((button) => button.text() === '完成')!.trigger('click')
     await wrapper.find('textarea').setValue('第一轮')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     expect(streamCalls.at(-1)!.some((message) => String(message.content).includes('[单次指令]'))).toBe(true)
@@ -212,7 +212,7 @@ describe('M4-d · 单次指令(D3)', () => {
 
     // 第二轮:指令已消费。
     await wrapper.find('textarea').setValue('第二轮')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect(streamCalls.at(-1)!.some((message) => String(message.content).includes('[单次指令]'))).toBe(false)
     wrapper.unmount()
@@ -231,14 +231,14 @@ describe('M4-d · 单次指令(D3)', () => {
       if (wrapper.text().includes('识别失败')) break
     }
     expect(wrapper.text()).toContain('识别失败')
-    const send = wrapper.findAll('button').find((button) => button.text() === '发送')!
+    const send = wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!
     expect(send.attributes('disabled')).toBeDefined()
 
     await wrapper.find('button[aria-label^="移除待发送图片"]').trigger('click')
     expect(wrapper.text()).not.toContain('识别失败')
     // 移除后仅剩空文本的禁用;填入草稿后发送恢复可用。
     await wrapper.find('textarea').setValue('发文字')
-    expect(wrapper.findAll('button').find((button) => button.text() === '发送')!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.attributes('disabled')).toBeUndefined()
     vi.unstubAllGlobals()
     wrapper.unmount()
   })

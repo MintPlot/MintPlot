@@ -138,7 +138,7 @@ const enterCard = async (app: ReturnType<typeof mountApp>) => {
 
 const sendTurn = async (wrapper: ReturnType<typeof mountApp>['wrapper'], text: string) => {
   await wrapper.find('textarea').setValue(text)
-  await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+  await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
   await flushPromises()
 }
 

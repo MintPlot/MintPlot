@@ -142,7 +142,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('现在如何?')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     expect(streamCalls.length).toBeGreaterThan(0)
@@ -184,7 +184,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('现在如何?')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = [...streamCalls[streamCalls.length - 1]!]
@@ -214,7 +214,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('重新开始')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect(streamCalls[streamCalls.length - 1]!.some((message) => text(message).includes('<role_memory>'))).toBe(false)
     wrapper.unmount()
@@ -257,7 +257,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
     // Reflow: the next chat request carries the fresh summary block.
     const textarea = wrapper.find('textarea')
     await textarea.setValue('现在如何?')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const request = [...streamCalls[streamCalls.length - 1]!]
     const memoryMessage = request.find((message) => text(message).includes('<role_memory>'))

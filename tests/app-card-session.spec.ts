@@ -178,7 +178,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 发送一轮:seam 流式回复落为新楼层,chatbox 列表始终为空(域隔离)。
     const textarea = wrapper.find('textarea')
     await textarea.setValue('最近可好?')
-    const sendButton = wrapper.findAll('button').find((button) => button.text() === '发送')!
+    const sendButton = wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!
     await sendButton.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('（测试回复）')
@@ -205,7 +205,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     const restarted = (await cardSessionStore.get(stored.id))!
     expect(restarted.messages).toHaveLength(1)
     expect(restarted.messages[0]).toMatchObject({ role: 'assistant', content: '你好，旅人。' })
-    expect(wrapper.findAll('button').find((button) => button.text() === '发送')!.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.attributes('disabled')).toBeDefined()
 
     confirmSpy.mockRestore()
     wrapper.unmount()
@@ -223,7 +223,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('天空为什么是蓝的?')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('（测试回复）')
@@ -276,7 +276,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     nextReply = '前文<setvars>{ "好感度": "+15", "时间": "黄昏" }</setvars>'
     const textarea = wrapper.find('textarea')
     await textarea.setValue('最近如何?')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     snapshot = (await variableStore.get(stored.id))!
@@ -301,7 +301,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 下一轮请求:系统提示词尾带 [Variables] 紧凑行分区。
     nextReply = '好的'
     await textarea.setValue('继续')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const systemRequest = streamCalls.at(-1)!.find((message) => message.role === 'system')!
     expect(systemRequest.content).toContain('[Variables]')
@@ -310,7 +310,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // getvar 请求侧展开:宏解析为当前值,存储楼层保持字面量。
     // (请求末尾的空 assistant 楼层是 M3-i 预填充占位,断言按内容定位。)
     await textarea.setValue('{{getvar::好感度}}点好感')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const expandedUserFloor = streamCalls.at(-1)!.find((message) => message.content === '25点好感')
     expect(expandedUserFloor).toMatchObject({ role: 'user' })
@@ -331,7 +331,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '状态<StatData>{"金币": 3}</StatData>'
     await wrapper.find('textarea').setValue('看看状态')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect((await variableStore.get(stored.id))!.state['金币']).toMatchObject({ value: 3 })
     wrapper.unmount()
@@ -358,7 +358,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '前文<setvars>{ "好感度": "+15" }</setvars>'
     await wrapper.find('textarea').setValue('摸摸头')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     // 面板仍开着(live 回灌):值表直接显示新值,不再需要关开刷新。
@@ -373,7 +373,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
 
     await wrapper.find('textarea').setValue('{{getvar::金币}}')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const literalFloor = streamCalls.at(-1)!.find((message) => message.content === '{{getvar::金币}}')
     expect(literalFloor).toMatchObject({ role: 'user' })
@@ -414,7 +414,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // for next message" 位置——最后指令生效),随行当前状态/schema 载荷。
     nextReply = '<ui_template_updates>{"hp": 95, "stats": {"physique": {"val": 12}}}</ui_template_updates>'
     await wrapper.find('textarea').setValue('打坐修炼')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -466,7 +466,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 请求侧:getvar 不展开(字面量直达),系统提示词无 [Variables] 分区。
     nextReply = '好的<setvars>{ "好感度": "+5" }</setvars>'
     await wrapper.find('textarea').setValue('{{getvar::好感度}}还好吗')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -514,7 +514,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 第一轮:回复带更新块 → 本楼面板按「该楼事件后」状态渲染(95/中洲)。
     nextReply = '修炼一番<ui_template_updates>{"hp": 95, "location": "中洲"}</ui_template_updates>'
     await wrapper.find('textarea').setValue('打坐')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     await nextTick()
 
@@ -528,7 +528,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 第二轮无变量变化:两楼面板沿用各自状态(共用插值缓存),楼层事件为空。
     nextReply = '（无变化回复）'
     await wrapper.find('textarea').setValue('继续')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     await nextTick()
     panels = wrapper.findAll('iframe.executable-html-frame')
@@ -604,7 +604,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '<ui_template_updates>{"hp": 95}</ui_template_updates>'
     await wrapper.find('textarea').setValue('修炼')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect((await variableStore.get(stored.id))!.state['tpl-1']).toMatchObject({ value: { hp: 95 } })
 
@@ -724,7 +724,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 主模型回复不带任何协议块 → 降级链应自动发起分析请求。
     nextReply = '（普通回复，没有变量块）'
     await wrapper.find('textarea').setValue('出发')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     await flushPromises()
 
@@ -770,7 +770,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '（回复）'
     await wrapper.find('textarea').setValue('出发去中洲')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -796,7 +796,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await nextTick()
     await flushPromises()
     await wrapper.find('textarea').setValue('再出发去中洲')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     const secondRequest = streamCalls.at(-1)!
     expect(secondRequest.some((message) => (message.content as string).includes('世界书常驻设定内容'))).toBe(false)
@@ -835,7 +835,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 但省略开关只影响提示词,显示保持文档渲染。
     nextReply = '（紧张）回复正文'
     await wrapper.find('textarea').setValue('（试探）你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     await nextTick()
 
@@ -888,7 +888,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '（回复）'
     await wrapper.find('textarea').setValue('出发')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -918,13 +918,13 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
     nextReply = '好的<setvars>{ "好感度": "+5" }</setvars>'
     await wrapper.find('textarea').setValue('第一句')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     // 下一轮:历史楼层里的 setvars 块剥除,正文保留;存储不改写。
     nextReply = '（第二条回复）'
     await wrapper.find('textarea').setValue('第二句')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     const request = streamCalls.at(-1)!
@@ -965,7 +965,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     // 首轮:普通回复落账(未标记候选)。
     nextReply = '第一次回复<setvars>{ "好感度": "+1" }</setvars>'
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect((await variableStore.get(stored.id))!.state['好感度']).toMatchObject({ value: 11 })
 
@@ -1020,7 +1020,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
     nextReply = '第一次<setvars>{ "好感度": "+1" }</setvars>'
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     nextReply = '第二次'
@@ -1041,11 +1041,11 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     const stored = await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
     nextReply = '回复一<setvars>{ "好感度": "+2" }</setvars>'
     await wrapper.find('textarea').setValue('第一句')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     nextReply = '回复二'
     await wrapper.find('textarea').setValue('第二句')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(5) // 开场白 + 用户/AI ×2
 
@@ -1074,7 +1074,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     const stored = await enterCard(app)
     nextReply = '原始回复'
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     
@@ -1092,7 +1092,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     // 下一轮请求:历史楼层带改写文。
     nextReply = '好的'
     await wrapper.find('textarea').setValue('继续')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
     expect(streamCalls.at(-1)!.some((message) => message.content === '改写后的回复')).toBe(true)
     wrapper.unmount()
@@ -1111,7 +1111,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     const stored = await enterCard(app)
     nextReply = '可以朗读的回复'
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     await wrapper.find('button[aria-label="朗读第 3 楼"]').trigger('click')
@@ -1131,7 +1131,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     await wrapper.findAll('button').find((button) => button.text() === '+')!.trigger('click')
     await flushPromises()
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
     await flushPromises()
 
     // 单候选:无 swipe 组,只有 ⟳。

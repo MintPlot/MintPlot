@@ -67,7 +67,7 @@ const restoreBackup = async (): Promise<void> => {
 </script>
 
 <template>
-  <div class="space-y-2">
+  <div class="space-y-2 p-3">
     <ImportPanel />
     <button
       type="button"
