@@ -221,12 +221,14 @@ export function useFloorActions(options: FloorActionsOptions) {
 
   // M4-g3: the sheet hands over drafts; this side owns the store objects and
   // persists through the domain's own store (C5: the save dispatch reuses
-  // persistSession instead of restating it).
-  const onSessionSettingsSaved = async (draft: { systemPrompt: string; model: string }): Promise<void> => {
+  // persistSession instead of restating it). 1.0.x: title rides the same
+  // payload for the chatbox domain — empty = keep the current title.
+  const onSessionSettingsSaved = async (draft: { title: string; systemPrompt: string; model: string }): Promise<void> => {
     if (isCardDomain() && cardSession()) {
       if (draft.model) cardSession()!.model = draft.model
       else delete cardSession()!.model
     } else if (conversation()) {
+      if (draft.title) conversation()!.title = draft.title
       conversation()!.systemPrompt = draft.systemPrompt
       conversation()!.model = draft.model
     }

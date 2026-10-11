@@ -618,10 +618,32 @@ const restartSession = async (): Promise<void> => {
       </button>
       <button
         type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-primary"
+        aria-label="会话设置"
         @click="showSessionSettings = true"
       >
-        会话
+        <svg
+          class="h-[18px] w-[18px]"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <circle
+            cx="12"
+            cy="5"
+            r="1.6"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="1.6"
+          />
+          <circle
+            cx="12"
+            cy="19"
+            r="1.6"
+          />
+        </svg>
       </button>
       <button
         v-if="isCardDomain"

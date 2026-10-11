@@ -17,8 +17,9 @@ const props = defineProps<{
   settingsState: SettingsState | null
 }>()
 
-const emit = defineEmits<{ close: []; saved: [{ systemPrompt: string; model: string }] }>()
+const emit = defineEmits<{ close: []; saved: [{ title: string; systemPrompt: string; model: string }] }>()
 
+const draftTitle = ref('')
 const draftPrompt = ref('')
 const draftModel = ref('')
 const modelOptions = ref<string[]>([])
@@ -30,6 +31,7 @@ const isChatbox = computed(() => props.domain === 'chatbox')
 watch(
   () => [props.conversation, props.cardSession] as const,
   () => {
+    draftTitle.value = props.conversation?.title ?? ''
     draftPrompt.value = props.conversation?.systemPrompt ?? ''
     draftModel.value = props.conversation?.model || props.cardSession?.model || ''
     modelOptions.value = []
@@ -57,17 +59,22 @@ const pullModels = async (): Promise<void> => {
 const save = (): void => {
   // The parent owns the store objects (vue/no-mutating-props) — hand over
   // the drafts; '' = follow the global profile (the seam treats empty as
-  // no override).
-  emit('saved', { systemPrompt: draftPrompt.value, model: draftModel.value.trim() })
+  // no override) and keep the current title (rename is opt-in).
+  emit('saved', { title: draftTitle.value.trim(), systemPrompt: draftPrompt.value, model: draftModel.value.trim() })
   emit('close')
 }
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40" @click.self="emit('close')">
+  <div
+    class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
+    @click.self="emit('close')"
+  >
     <div class="max-h-[80vh] overflow-y-auto rounded-t-2xl bg-card px-4 pb-6 pt-3">
       <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-sm font-bold text-ink">会话设置</h2>
+        <h2 class="text-sm font-bold text-ink">
+          会话设置
+        </h2>
         <button
           type="button"
           class="rounded-input px-2 py-1 text-xs text-ink-3"
@@ -78,17 +85,35 @@ const save = (): void => {
       </div>
 
       <template v-if="isChatbox">
-        <div class="mb-1 text-xs font-bold text-ink-2">会话 system prompt</div>
+        <div class="mb-1 text-xs font-bold text-ink-2">
+          会话名称
+        </div>
+        <input
+          v-model="draftTitle"
+          placeholder="留空 = 保持原标题"
+          class="w-full rounded-input border border-line bg-bg px-2.5 py-2 text-sm text-ink placeholder:text-ink-3"
+        >
+        <div class="mb-3 mt-1 text-[10px] text-ink-3">
+          默认取首句,可随时改名;对话列表同步更新。
+        </div>
+
+        <div class="mb-1 text-xs font-bold text-ink-2">
+          会话 system prompt
+        </div>
         <textarea
           v-model="draftPrompt"
           rows="4"
           placeholder="留空 = 无会话级 system prompt"
           class="w-full rounded-input border border-line bg-bg px-2.5 py-2 text-sm text-ink placeholder:text-ink-3"
         />
-        <div class="mb-3 mt-1 text-[10px] text-ink-3">与预设/角色定义组装为系统提示词,留空即无。</div>
+        <div class="mb-3 mt-1 text-[10px] text-ink-3">
+          与预设/角色定义组装为系统提示词,留空即无。
+        </div>
       </template>
 
-      <div class="mb-1 text-xs font-bold text-ink-2">会话模型覆盖</div>
+      <div class="mb-1 text-xs font-bold text-ink-2">
+        会话模型覆盖
+      </div>
       <div class="flex gap-2">
         <input
           v-model="draftModel"
@@ -106,7 +131,11 @@ const save = (): void => {
         </button>
       </div>
       <datalist id="session-model-options">
-        <option v-for="option in modelOptions" :key="option" :value="option" />
+        <option
+          v-for="option in modelOptions"
+          :key="option"
+          :value="option"
+        />
       </datalist>
       <div class="mt-1 text-[10px] text-ink-3">
         {{ fetchNote || '只覆盖模型名;端点与密钥仍走激活档案。留空 = 跟随全局。' }}

@@ -10,17 +10,32 @@ import { createMemorySettingsState as makeSettings } from '../helpers/memory-set
 import { vi as viCore } from 'vitest'
 
 describe('M4-g3 · 会话设置面板', () => {
-  it('chatbox 域:保存交回 systemPrompt 与模型草稿', async () => {
+  it('chatbox 域:保存交回标题、systemPrompt 与模型草稿', async () => {
     const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
-    const conversation = { id: 'c1', title: 't', createdAt: 1, updatedAt: 1, systemPrompt: '', model: '', messages: [] } as never
+    const conversation = { id: 'c1', title: '旧标题', createdAt: 1, updatedAt: 1, systemPrompt: '', model: '', messages: [] } as never
     const wrapper = mount(SessionSettingsSheet, {
       props: { domain: 'chatbox', conversation, cardSession: null, settingsState: settings },
     })
+    const titleInput = wrapper.findAll('input').find((input) => input.attributes('list') === undefined)!
+    await titleInput.setValue('海边的守望者')
     await wrapper.find('textarea').setValue('你是海边的守望者。')
     await wrapper.find('input[list]').setValue('qwen3.5-72b')
     await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
-    const saved = wrapper.emitted('saved')![0]![0] as { systemPrompt: string; model: string }
-    expect(saved).toEqual({ systemPrompt: '你是海边的守望者。', model: 'qwen3.5-72b' })
+    const saved = wrapper.emitted('saved')![0]![0] as { title: string; systemPrompt: string; model: string }
+    expect(saved).toEqual({ title: '海边的守望者', systemPrompt: '你是海边的守望者。', model: 'qwen3.5-72b' })
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('chatbox 域:标题清空后交回空串,由落点侧保持原标题', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const conversation = { id: 'c1', title: '旧标题', createdAt: 1, updatedAt: 1, systemPrompt: '', model: '', messages: [] } as never
+    const wrapper = mount(SessionSettingsSheet, {
+      props: { domain: 'chatbox', conversation, cardSession: null, settingsState: settings },
+    })
+    const titleInput = wrapper.findAll('input').find((input) => input.attributes('list') === undefined)!
+    await titleInput.setValue('')
+    await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
+    expect(wrapper.emitted('saved')![0]![0]).toEqual({ title: '', systemPrompt: '', model: '' })
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
@@ -31,9 +46,11 @@ describe('M4-g3 · 会话设置面板', () => {
       props: { domain: 'card', conversation: null, cardSession, settingsState: settings },
     })
     expect(wrapper.find('textarea').exists()).toBe(false)
+    // No title input in the card domain — the card name is the sheet title.
+    expect(wrapper.findAll('input').filter((input) => input.attributes('list') === undefined)).toHaveLength(0)
     await wrapper.find('input[list]').setValue('deepseek-r1')
     await wrapper.findAll('button').find((button) => button.text() === '保存')!.trigger('click')
-    expect(wrapper.emitted('saved')![0]![0]).toEqual({ systemPrompt: '', model: 'deepseek-r1' })
+    expect(wrapper.emitted('saved')![0]![0]).toEqual({ title: '', systemPrompt: '', model: 'deepseek-r1' })
   })
 
   it('拉取模型填充 datalist 选项', async () => {

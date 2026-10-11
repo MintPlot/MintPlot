@@ -50,6 +50,8 @@ export interface ChatboxConversation {
   /** Session-level model override; empty = the provider default. */
   model: string
   messages: ChatboxMessage[]
+  /** Pinned-to-top flag (1.0.x list management); absent/legacy = not pinned. */
+  pinned?: boolean
 }
 
 interface ConversationMeta {
@@ -60,6 +62,7 @@ interface ConversationMeta {
   systemPrompt: string
   model: string
   preview: string
+  pinned?: boolean
 }
 
 export interface ChatboxConversationSummary {
@@ -67,6 +70,7 @@ export interface ChatboxConversationSummary {
   title: string
   updatedAt: number
   preview: string
+  pinned?: boolean
 }
 
 export interface ChatboxStore {
@@ -76,6 +80,8 @@ export interface ChatboxStore {
   /** Persists message rows incrementally + the envelope meta. */
   save(conversation: ChatboxConversation): Promise<void>
   remove(id: string): Promise<void>
+  /** Envelope-only pin toggle (1.0.x): message rows are never touched. */
+  setPinned(id: string, pinned: boolean): Promise<void>
 }
 
 const metaKeyOf = (id: string): string => `chatmeta:chatbox:${id}`
@@ -97,10 +103,15 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
       const summaries: ChatboxConversationSummary[] = []
       for (const id of ids) {
         const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
-        if (meta) summaries.push({ id: meta.id, title: meta.title, updatedAt: meta.updatedAt, preview: meta.preview })
+        if (meta) {
+          summaries.push({ id: meta.id, title: meta.title, updatedAt: meta.updatedAt, preview: meta.preview, pinned: meta.pinned })
+        }
       }
-      // Most recent first (spec §02).
-      return summaries.sort((a, b) => b.updatedAt - a.updatedAt)
+      // Pinned group first, most recent within each group (spec §02 + 1.0.x pinning).
+      return summaries.sort((a, b) => {
+        if ((b.pinned ? 1 : 0) !== (a.pinned ? 1 : 0)) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+        return b.updatedAt - a.updatedAt
+      })
     },
 
     async get(id) {
@@ -116,6 +127,7 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
         systemPrompt: meta.systemPrompt,
         model: meta.model,
         messages,
+        pinned: meta.pinned,
       }
     },
 
@@ -154,6 +166,7 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
         systemPrompt: conversation.systemPrompt,
         model: conversation.model,
         preview: previewOf(conversation),
+        pinned: conversation.pinned,
       }
       await repository.set(metaKeyOf(conversation.id), meta)
       const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
@@ -169,6 +182,12 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
       const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
       await repository.set(INDEX_KEY, ids.filter((entry) => entry !== id))
       baselines.delete(id)
+    },
+
+    async setPinned(id, pinned) {
+      const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
+      if (!meta) return
+      await repository.set(metaKeyOf(id), { ...meta, pinned })
     },
   }
 }
