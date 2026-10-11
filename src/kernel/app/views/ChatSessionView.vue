@@ -19,6 +19,7 @@ import {
   REGEX_STORE_KEY,
   PRESET_STORE_KEY,
   MEMORY_STORE_KEY,
+  NSTYLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import { PLUGIN_RUNTIME_KEY } from '@/kernel/app/runtime-key'
 import { useChatAttachments } from '@/kernel/app/chat/use-chat-attachments'
@@ -48,6 +49,9 @@ import { uiService } from '@/kernel/ui/toasts'
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
 import { stripVariableBlocks } from '@/kernel/variables/variable-engine'
+import { buildNarrativeStyleBlock } from '@/kernel/nstyle/prompt'
+import { DEFAULT_STORY_CONFIG } from '@/kernel/nstyle/types'
+import { getTempOverride } from '@/kernel/nstyle/nstyle-store'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
@@ -75,6 +79,7 @@ const worldbookStore = inject(WORLDBOOK_STORE_KEY, null)
 const regexStore = inject(REGEX_STORE_KEY, null)
 const presetStore = inject(PRESET_STORE_KEY, null)
 const memoryStore = inject(MEMORY_STORE_KEY, null)
+const nstyleStore = inject(NSTYLE_STORE_KEY, null)
 // Variables plugin toggle (M3-q2): the tools-area entry gates the feature.
 // No runtime injected (pure kernel tests) keeps variables active.
 const runtime = inject(PLUGIN_RUNTIME_KEY, null)
@@ -108,6 +113,8 @@ const presetSnapshot = shallowRef<PresetSnapshot | null>(null)
 // preset sync, no request-side strip (raw tag passthrough). Native reasoning
 // still rides the kernel stream capture; it just stays unshown.
 const cotActive = ref(true)
+// 叙事风格配置器 (M4-nstyle): app-level — dormant = 不注入【叙事风格】块。
+// 作用域解析在 assembler 依赖里做(会话临时 > 故事级 > 全局 > 内置默认)。
 // Session settings (M4-g3 parity): session-level system prompt (chatbox) and
 // model override (both domains).
 const showSessionSettings = ref(false)
@@ -400,6 +407,17 @@ const {
   presetSnapshot: () => presetSnapshot.value,
   setPresetSnapshot: (snapshot) => { presetSnapshot.value = snapshot },
   cotActive: () => cotActive.value,
+  // M4-nstyle 叙事风格门控:请求时实时读取 runtime 状态(挂载时 bootPlugins
+  // 可能尚未轮到本插件——激活是异步序列,挂载时刻快照会卡在 false)。
+  nstyleBlock: () => {
+    if (!pluginActive(runtime, 'nstyle') || !nstyleStore) return ''
+    // 作用域解析:会话临时 > 故事级(卡域) > 全局 > 内置默认(规范 4.5)。
+    const temp = getTempOverride()
+    const cardOverride = isCardDomain.value ? nstyleStore.getCardOverrideSync(props.conversationId) : null
+    const global = nstyleStore.getGlobalSync()
+    const active = temp ?? cardOverride ?? global ?? DEFAULT_STORY_CONFIG
+    return buildNarrativeStyleBlock(active)
+  },
   variablesActive: () => variablesActive.value,
   variableState: () => variableState.value,
   activeTemplates: () => activeTemplates.value,

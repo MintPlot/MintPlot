@@ -14,6 +14,7 @@ import type { VariableStore } from '@/kernel/variables/variable-store'
 import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import type { RegexStore } from '@/kernel/regex/regex-store'
 import type { PresetStore } from '@/kernel/presets/preset-store'
+import type { NstyleStore } from '@/kernel/nstyle/nstyle-store'
 import type { MemoryStore } from '@/kernel/memory/memory-store'
 
 export const CHATBOX_STORE_KEY: InjectionKey<ChatboxStore> = Symbol('chatbox-store')
@@ -35,6 +36,9 @@ export const REGEX_STORE_KEY: InjectionKey<RegexStore> = Symbol('regex-store')
 
 /** Prompt presets (M3-w) — app-level configuration, every domain. */
 export const PRESET_STORE_KEY: InjectionKey<PresetStore> = Symbol('preset-store')
+
+/** 叙事风格配置器（M4-nstyle）— 自定义风格 CRUD、全局与故事级配置，app-level。 */
+export const NSTYLE_STORE_KEY: InjectionKey<NstyleStore> = Symbol('nstyle-store')
 
 /** Rolling-summary memory ledger (M4-e, `memory:<kind>:<id>`) — card domain
  *  first (the plugin declares sessions:['card']). */
