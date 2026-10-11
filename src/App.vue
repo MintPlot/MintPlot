@@ -117,7 +117,8 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
         >
           <component
             :is="tab.icon"
-            class="h-6 w-6"
+            class="h-7 w-7 rounded-full transition-opacity"
+            :class="tab.id === activeId ? 'opacity-100' : 'opacity-60'"
           />
           <span>{{ tab.title }}</span>
           <span
