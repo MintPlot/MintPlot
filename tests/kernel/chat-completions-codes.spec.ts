@@ -17,11 +17,11 @@ describe('kernel/llm · unified error codes on LlmRequestError (M3-err1)', () =>
     })
   })
 
-  it('connection-level failures carry MP-NET-003 with the wrapped message', async () => {
+  it('connection-level failures carry MP-NET-003 with the F3 wording (no raw English, no 请求失败 prefix)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
     await expect(
       streamChatCompletion({ baseUrl: 'https://api.example.com/v1', apiKey: '', model: 'm' }, [{ role: 'user', content: 'hi' }]),
-    ).rejects.toMatchObject({ code: 'MP-NET-003', message: '请求失败: Failed to fetch' })
+    ).rejects.toMatchObject({ code: 'MP-NET-003', message: '无法连接到端点（网络不可达、端点离线或跨域(CORS)配置异常）' })
   })
 
   it('HTTP error statuses carry MP-NET-002 with a clamped body excerpt', async () => {

@@ -247,7 +247,10 @@ export async function streamChatCompletion(
       }
       throw new LlmRequestError('请求超时', undefined, 'MP-NET-001')
     }
-    throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`, undefined, 'MP-NET-003')
+    // F3: this catch is connection-layer only (LlmRequestError/Abort handled
+    // above) — the raw TypeError text ("Failed to fetch") is unactionable and
+    // reads double-prefixed under the error bar's own 请求失败: label.
+    throw new LlmRequestError('无法连接到端点（网络不可达、端点离线或跨域(CORS)配置异常）', undefined, 'MP-NET-003')
   } finally {
     clearTimeout(timeout)
     options.signal?.removeEventListener('abort', onAbort)
@@ -332,7 +335,9 @@ export async function completeChatCompletion(
       if (options.signal?.aborted) throw new LlmRequestError('分析已取消')
       throw new LlmRequestError('请求超时')
     }
-    throw new LlmRequestError(`请求失败: ${(error as Error)?.message || 'unknown error'}`)
+    // F3: same connection-layer wording as the stream path — no 请求失败
+    // prefix (callers like the error bar add their own label).
+    throw new LlmRequestError('无法连接到端点（网络不可达、端点离线或跨域(CORS)配置异常）')
   } finally {
     clearTimeout(timeout)
     options.signal?.removeEventListener('abort', onAbort)
