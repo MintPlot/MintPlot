@@ -14,6 +14,7 @@
 import type { VariableState } from '@contracts'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { PresetStore, PresetSnapshot } from '@/kernel/presets/preset-store'
+import { resolveStyleBlock, renderStyleBlock, type CardStyleSelection } from '@/kernel/presets/style-assembly'
 import { COT_PRESET_NAME, revertCotPrefillEntries, syncCotPresetEntries } from '@/kernel/cot/cot-preset-sync'
 import { parseCot } from '@/kernel/cot/cot-parser'
 import { buildCardSystemPrompt, greetingFloorMissing } from '@/kernel/characters/card-prompt'
@@ -55,6 +56,9 @@ export interface RequestAssemblerDeps {
   memoryState: () => MemoryState | null
   presetsActive: () => boolean
   presetSnapshot: () => PresetSnapshot | null
+  /** Per-card style selection (CardSession.style, S3); null/absent = follow
+   *  global. The chatbox domain ignores it (dimension rides global, D6). */
+  cardStyle?: () => CardStyleSelection | null
   /** syncCotPresetEntries rewrites the store; the view's snapshot ref follows. */
   setPresetSnapshot: (snapshot: PresetSnapshot) => void
   cotActive: () => boolean
@@ -123,12 +127,23 @@ export function createRequestAssembler(deps: RequestAssemblerDeps) {
         // active — plugin-off means the request goes out WITHOUT the thinking
         // protocol even though the entry survives in the store.
       ).filter((entry) => deps.cotActive() || entry.name !== COT_PRESET_NAME)
-      const systemEntries = activeEntries.filter((entry) => entry.role === 'system')
-      if (systemEntries.length > 0) {
-        presetSystemArea = systemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
+      // v3 style dimensions (planning §4): the system area splits in two —
+      // plain entries keep array order, then the dimension block rides in the
+      // fixed dimension order (person→writing→length→style→mood→nsfw), still
+      // ahead of the character block. A dimension tag forces the system
+      // channel: tagged entries never ride the prefill slot (no double ride).
+      // Card override (followGlobal=false) resolves picks across the whole
+      // library; global mode reads the active group's enabled entries.
+      const plainSystemEntries = activeEntries.filter((entry) => entry.role === 'system' && !entry.dimension)
+      if (plainSystemEntries.length > 0) {
+        presetSystemArea = plainSystemEntries.map((entry) => `[${entry.name}]\n${entry.content}`).join('\n\n')
+      }
+      const styleBlock = renderStyleBlock(resolveStyleBlock(snapshot, deps.cardStyle?.() ?? null, deps.isCardDomain()))
+      if (styleBlock) {
+        presetSystemArea = presetSystemArea ? `${presetSystemArea}\n\n${styleBlock}` : styleBlock
       }
       for (const entry of activeEntries) {
-        if (entry.role === 'user' || entry.role === 'assistant') {
+        if (!entry.dimension && (entry.role === 'user' || entry.role === 'assistant')) {
           presetPrefills.push({ role: entry.role, content: entry.content })
         }
       }
