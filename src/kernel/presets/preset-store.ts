@@ -20,10 +20,9 @@
 import {
   DEFAULT_PRESET_DEFINITIONS,
   DEFAULT_PRESET_DEFINITIONS_VERSION,
-  DEFAULT_TOGGLES_CHANGED_IN_V3,
+  DEFAULT_TOGGLE_CHANGES,
   PERSON_MUTEX_SINCE_VERSION,
   PERSON_PERSPECTIVE_NAMES,
-  STYLE_DIMENSIONS_SINCE_VERSION,
 } from '@/kernel/presets/default-presets'
 import { dimensionMeta, isStyleDimension, type StyleDimension } from '@/kernel/presets/style-dimensions'
 
@@ -172,14 +171,16 @@ export function createPresetStore(repository: {
         }
       }
     }
-    // v3 migration (planning D9): definitions whose defaultEnabled changed
-    // apply the new default only when the stored toggle still equals the OLD
-    // default (= the user never touched it). A deliberate toggle survives —
-    // including an explicit off, when it differs from the old default.
-    if (applied < STYLE_DIMENSIONS_SINCE_VERSION) {
+    // Toggle-default migrations (planning D9): definitions whose
+    // defaultEnabled changed apply the new default only when the stored
+    // toggle still equals the OLD default (= the user never touched it). A
+    // deliberate toggle survives — including an explicit off, when it
+    // differs from the old default.
+    for (const { sinceVersion, changes } of DEFAULT_TOGGLE_CHANGES) {
+      if (applied >= sinceVersion) continue
       for (const entry of kept) {
         if (entry.group !== DEFAULT_GROUP) continue
-        const oldDefault = DEFAULT_TOGGLES_CHANGED_IN_V3.get(entry.name)
+        const oldDefault = changes.get(entry.name)
         if (oldDefault === undefined || entry.enabled !== oldDefault) continue
         entry.enabled = definitions.get(entry.name)!.defaultEnabled
       }

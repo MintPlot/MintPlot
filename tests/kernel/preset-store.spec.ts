@@ -15,17 +15,22 @@ function makeRepo() {
 }
 
 describe('preset store (M3-w, groups + role-selector model)', () => {
-  it('seeds the full default group on first ensure: 36 entries, dimensions tagged, 破限 enabled since v3', async () => {
+  it('seeds the full default group on first ensure: 36 entries, dimensions tagged, jailbreak class enabled since v3/v4', async () => {
     const store = createPresetStore(makeRepo())
     const snapshot = await store.ensure()
     expect(snapshot.groups).toEqual([{ id: 'default', name: '默认预设', builtin: true, enabled: true }])
     expect(snapshot.entries).toHaveLength(36)
     const byName = new Map(snapshot.entries.map((entry) => [entry.name, entry]))
-    // v3 (planning D5): 破限 ships enabled; 色情内容增强 stays disabled.
+    // v3 (planning D5): 破限 ships enabled; v4: the four 破限预注入 entries
+    // ride along; 色情内容增强 stays disabled.
     expect(byName.get('破限')!.enabled).toBe(true)
     expect(byName.get('色情内容增强')!.enabled).toBe(false)
-    expect(byName.get('防重复')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · User 1')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · AI 1')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · User 2')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · AI 2')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · AI 1')).toMatchObject({ role: 'assistant', group: 'default' })
+    expect(byName.get('防重复')!.enabled).toBe(true)
     // v2 person mutex: fresh seed = third person only; dimension tags on.
     expect(byName.get('第三人称')!.enabled).toBe(true)
     expect(byName.get('第二人称')!.enabled).toBe(false)
@@ -226,9 +231,33 @@ describe('preset store style dimensions (v3, planning style-dimension-presets-pl
     const migrated = await store.ensure()
     const byName = new Map(migrated.entries.map((entry) => [entry.name, entry]))
     expect(byName.get('破限')!.enabled).toBe(true) // untouched → flips (D9)
+    // v4 rides the same resync: untouched prefills flip on too.
+    expect(byName.get('破限预注入 · User 1')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · AI 2')!.enabled).toBe(true)
     expect(byName.get('第三人称')!.dimension).toBe('person') // tags backfilled
     expect(byName.get('自建风格')).toMatchObject({ dimension: 'style', enabled: true })
     expect(byName.get('时间戳')!.dimension).toBeUndefined()
+  })
+
+  it('v3 存量升 v4:未动过的预注入翻转启用,色情内容增强保持停用', async () => {
+    const repo = makeRepo()
+    const store = createPresetStore(repo)
+    await store.ensure()
+    // Simulate a v3 store: prefills at their old default (off), everything
+    // else as v3 shipped.
+    const v3Records = (await store.get()).entries.map((entry) =>
+      entry.name.startsWith('破限预注入') ? { ...entry, enabled: false } : entry)
+    await repo.set('presets', v3Records)
+    await repo.set('preset_definitions_version', 3)
+
+    const migrated = await store.ensure()
+    const byName = new Map(migrated.entries.map((entry) => [entry.name, entry]))
+    expect(byName.get('破限预注入 · User 1')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · AI 1')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · User 2')!.enabled).toBe(true)
+    expect(byName.get('破限预注入 · AI 2')!.enabled).toBe(true)
+    expect(byName.get('色情内容增强')!.enabled).toBe(false)
+    expect(byName.get('破限')!.enabled).toBe(true) // v3 flip not re-applied
   })
 
   it('维度编辑:updateEntry 设置与清除 dimension(null),addEntry 携带维度', async () => {

@@ -19,6 +19,7 @@ import { createCharacterStore } from '@/kernel/characters/character-store'
 import { createVariableStore } from '@/kernel/variables/variable-store'
 import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createPresetStore } from '@/kernel/presets/preset-store'
+import { DEFAULT_PRESET_DEFINITIONS, DEFAULT_PRESET_DEFINITIONS_VERSION } from '@/kernel/presets/default-presets'
 import { WORLDBOOK_STORE_KEY, PRESET_STORE_KEY } from '@/kernel/app/chat-keys'
 import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
@@ -104,13 +105,30 @@ function makeRuntimeServices() {
   }
 }
 
-function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } = {}) {
+async function mountApp(options: { runtime?: ReturnType<typeof createPluginRuntime> } = {}) {
   const chatboxStore = createChatboxStore(createStorageRepository(createMemoryEngine()))
   const cardSessionStore = createCardSessionStore(createStorageRepository(createMemoryEngine()))
   const characterStore = createCharacterStore(createStorageRepository(createMemoryEngine()))
   const variableStore = createVariableStore(createStorageRepository(createMemoryEngine()))
   const worldbookStore = createWorldbookStore(createStorageRepository(createMemoryEngine()))
-  const presetStore = createPresetStore(createStorageRepository(createMemoryEngine()))
+  const presetRepo = createMemoryEngine()
+  // v4 ships the 破限预注入 prefills ENABLED; the request-shape assertions in
+  // this file were authored before that default — park them off here (the
+  // flip itself is covered in preset-store.spec).
+  await presetRepo.set('presets', JSON.stringify(
+    DEFAULT_PRESET_DEFINITIONS.map((definition, index) => ({
+      id: 'p-seed-' + String(index),
+      name: definition.name,
+      content: definition.content,
+      enabled: definition.name.startsWith('破限预注入') ? false : definition.defaultEnabled,
+      role: definition.role,
+      group: 'default',
+      ...(definition.dimension ? { dimension: definition.dimension } : {}),
+    })),
+  ))
+  await presetRepo.set('preset_groups', JSON.stringify([{ id: 'default', name: '默认预设', builtin: true, enabled: true }]))
+  await presetRepo.set('preset_definitions_version', JSON.stringify(DEFAULT_PRESET_DEFINITIONS_VERSION))
+  const presetStore = createPresetStore(createStorageRepository(presetRepo))
   const projection = createSessionProjection()
   const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
   const seams = createSeamRegistry(() => undefined)
@@ -150,7 +168,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('点卡直进会话:标题为卡名、开场白种为首楼、发送可回复、投影卡名生效', async () => {
-    const { wrapper, cardSessionStore, chatboxStore, characterStore, projection, usageCalls } = mountApp()
+    const { wrapper, cardSessionStore, chatboxStore, characterStore, projection, usageCalls } = await mountApp()
     const stored = await characterStore.import(CARD)
     await flushPromises()
 
@@ -214,7 +232,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('chatbox 发送的用量记录归属会话标题(M3-j)', async () => {
-    const { wrapper, usageCalls } = mountApp()
+    const { wrapper, usageCalls } = await mountApp()
     await flushPromises()
 
     // 对话 tab:新建对话即进入聊天页。
@@ -234,7 +252,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('删除角色卡连带清掉其会话', async () => {
-    const { wrapper, cardSessionStore, characterStore } = mountApp()
+    const { wrapper, cardSessionStore, characterStore } = await mountApp()
     const stored = await characterStore.import(CARD)
     await cardSessionStore.create({ id: stored.id, name: stored.name, firstMes: stored.firstMes })
     await flushPromises()
@@ -255,7 +273,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('变量系统(M3-q):卡默认值播种、setvars 落账、胶囊与 [Variables] 分区、getvar 请求侧展开', async () => {
-    const { wrapper, characterStore, variableStore, cardSessionStore } = mountApp()
+    const { wrapper, characterStore, variableStore, cardSessionStore } = await mountApp()
     const stored = await characterStore.import({
       ...CARD,
       extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
@@ -320,7 +338,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('变量系统(M3-q):StatData 流派标签同样落账', async () => {
-    const { wrapper, characterStore, variableStore } = mountApp()
+    const { wrapper, characterStore, variableStore } = await mountApp()
     const stored = await characterStore.import(CARD)
     await flushPromises()
     const tabs = wrapper.findAll('nav button')
@@ -338,7 +356,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('变量面板打开期间 AI 落账回灌(M4-a):无需关开即见新值', async () => {
-    const { wrapper, characterStore } = mountApp()
+    const { wrapper, characterStore } = await mountApp()
     await characterStore.import({
       ...CARD,
       extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
@@ -367,7 +385,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('变量系统(M3-q):chatbox 域不展开 getvar —— 变量不进对话域(评审 Q4)', async () => {
-    const { wrapper } = mountApp()
+    const { wrapper } = await mountApp()
     await flushPromises()
     await wrapper.find('button[aria-label="新建对话"]').trigger('click')
     await flushPromises()
@@ -381,7 +399,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('UI模板变量(M3-r):播种状态树、schema 注入、ui_template_updates 落账、胶囊', async () => {
-    const { wrapper, characterStore, variableStore } = mountApp()
+    const { wrapper, characterStore, variableStore } = await mountApp()
     const stored = await characterStore.import({
       ...CARD,
       uiTemplates: [
@@ -447,7 +465,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   it('变量系统插件停用(M3-q2):进卡无变量入口,getvar 保持字面量,不落账', async () => {
     const runtime = createPluginRuntime(makeRuntimeServices())
     runtime.load(VariablesPlugin) // loaded but NOT activated → toggle off semantics
-    const { wrapper, characterStore, variableStore } = mountApp({ runtime })
+    const { wrapper, characterStore, variableStore } = await mountApp({ runtime })
     const stored = await characterStore.import({
       ...CARD,
       extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
@@ -479,7 +497,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('面板渲染(M3-s):逐楼快照上屏、按楼层回放、chatbox 域与流式楼不挂', async () => {
-    const { wrapper, characterStore, cardSessionStore } = mountApp()
+    const { wrapper, characterStore, cardSessionStore } = await mountApp()
     await characterStore.import({
       ...CARD,
       uiTemplates: [
@@ -543,7 +561,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
   it('面板渲染(M3-s):placement top 在正文之上,含脚本标签走风险检测纯函数', async () => {
     const { analyzeTemplateScriptRisk } = await import('@/kernel/render/template-interp')
-    const { wrapper, characterStore } = mountApp()
+    const { wrapper, characterStore } = await mountApp()
     await characterStore.import({
       ...CARD,
       uiTemplates: [
@@ -578,7 +596,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('清空重开回种模板树(M3-s 修复):账本回到完整 seed', async () => {
-    const { wrapper, characterStore, variableStore, cardSessionStore } = mountApp()
+    const { wrapper, characterStore, variableStore, cardSessionStore } = await mountApp()
     const stored = await characterStore.import({
       ...CARD,
       uiTemplates: [
@@ -630,7 +648,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
 
   it('面板按钮 triggerSlash 桥(M3-t):替用户发话,流式中拒绝,草稿不受扰', async () => {
     const { getExecutableFrameSlashHandler } = await import('@/kernel/render/html-frame')
-    const { wrapper, characterStore, cardSessionStore, seams } = mountApp()
+    const { wrapper, characterStore, cardSessionStore, seams } = await mountApp()
     // Deferred provider: the stream stays open until the test releases it,
     // creating a real streaming window to probe the reject branch.
     let resolveStream: (value: { content: string; usage: { inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens: number | null }; model: string }) => void = () => {}
@@ -680,7 +698,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('副模型降级(M3-t):主模型漏块自动补分析请求,更新落账并重渲染面板', async () => {
-    const { wrapper, characterStore, variableStore, settings } = mountApp()
+    const { wrapper, characterStore, variableStore, settings } = await mountApp()
     const analysisScope = settings.scope(['uiTemplateModel', 'apiBaseUrl'])
     analysisScope.uiTemplateModel = 'analysis-model'
     analysisScope.apiBaseUrl = 'http://analysis-endpoint/v1'
@@ -747,7 +765,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('世界书(M3-u):蓝灯进系统提示词、绿灯按深度 splice、启停覆盖生效、无书卡零注入', async () => {
-    const { wrapper, characterStore, worldbookStore } = mountApp()
+    const { wrapper, characterStore, worldbookStore } = await mountApp()
     const stored = await characterStore.import({
       ...CARD,
       book: {
@@ -806,7 +824,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('正则(M3-v):显示面美化上屏、提示词面改写、HTML 楼层省略开关、落库纪律', async () => {
-    const { wrapper, characterStore, cardSessionStore, settings } = mountApp()
+    const { wrapper, characterStore, cardSessionStore, settings } = await mountApp()
     settings.scope(['promptOmitHtmlFloors']).promptOmitHtmlFloors = true
     await characterStore.import({
       ...CARD,
@@ -858,7 +876,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('昵称未设置时 {{user}} 宏回落默认名「用户」(F5)', async () => {
-    const { wrapper, characterStore } = mountApp()
+    const { wrapper, characterStore } = await mountApp()
     await characterStore.import({ ...CARD, firstMes: '你好，{{user}}！' })
     await flushPromises()
     const tabs = wrapper.findAll('nav button')
@@ -872,7 +890,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('预设(M3-w):system 条目前置、预注入消息、宏展开、停用即回到原装配', async () => {
-    const { wrapper, characterStore, presetStore } = mountApp()
+    const { wrapper, characterStore, presetStore } = await mountApp()
     await presetStore.ensure()
     // 启用「防重复」(system 角色,默认组)并新建一条 user 预注入。
     const seedEntries = (await presetStore.get()).entries
@@ -904,7 +922,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
   })
 
   it('请求侧双剥(M3-s):历史楼层协议块不进请求,存储保持原样', async () => {
-    const { wrapper, characterStore, cardSessionStore } = mountApp()
+    const { wrapper, characterStore, cardSessionStore } = await mountApp()
     await characterStore.import({
       ...CARD,
       extensions: { mp_variables: [{ name: '好感度', value: 10 }] },
@@ -946,7 +964,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     nextReply = '（测试回复）'
   })
 
-  const enterCard = async (mount: ReturnType<typeof mountApp>, extensions?: Record<string, unknown>) => {
+  const enterCard = async (mount: Awaited<ReturnType<typeof mountApp>>, extensions?: Record<string, unknown>) => {
     const stored = await mount.characterStore.import({ ...CARD, ...(extensions ? { extensions } : {}) })
     await flushPromises()
     const tabs = mount.wrapper.findAll('nav button')
@@ -958,7 +976,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   }
 
   it('重新生成追加候选并切换:候选独立、账本按候选回放、请求见重生成前状态', async () => {
-    const app = mountApp()
+    const app = await mountApp()
     const { wrapper, variableStore, cardSessionStore } = app
     const stored = await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
 
@@ -1015,7 +1033,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   })
 
   it('重生成请求侧:[Variables] 分区与历史楼层都不含被重写楼层', async () => {
-    const app = mountApp()
+    const app = await mountApp()
     const { wrapper } = app
     await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
     nextReply = '第一次<setvars>{ "好感度": "+1" }</setvars>'
@@ -1036,7 +1054,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   })
 
   it('删除楼层连带其后:确认模态写明楼数,变量事件随之回滚;取消不动', async () => {
-    const app = mountApp()
+    const app = await mountApp()
     const { wrapper, cardSessionStore, variableStore } = app
     const stored = await enterCard(app, { mp_variables: [{ name: '好感度', value: 10 }] })
     nextReply = '回复一<setvars>{ "好感度": "+2" }</setvars>'
@@ -1069,7 +1087,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   })
 
   it('编辑楼层:原地改写存储原文与激活候选,下一轮请求携带新文', async () => {
-    const app = mountApp()
+    const app = await mountApp()
     const { wrapper, cardSessionStore } = app
     const stored = await enterCard(app)
     nextReply = '原始回复'
@@ -1106,7 +1124,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
       stateOf: () => 'active' as const,
       emit: emitSpy,
     } as unknown as ReturnType<typeof createPluginRuntime>
-    const app = mountApp({ runtime })
+    const app = await mountApp({ runtime })
     const { wrapper } = app
     const stored = await enterCard(app)
     nextReply = '可以朗读的回复'
@@ -1124,7 +1142,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   })
 
   it('chatbox 域同样可重生成:单候选首答 ⟳ 后成双候选', async () => {
-    const { wrapper, chatboxStore } = mountApp()
+    const { wrapper, chatboxStore } = await mountApp()
     const tabs = wrapper.findAll('nav button')
     await tabs[0]!.trigger('click')
     await flushPromises()
@@ -1147,7 +1165,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
   })
 
   it('顶栏世界书/正则入口恒显示:卡不带数据也露出入口,面板给空态', async () => {
-    const { wrapper, characterStore } = mountApp()
+    const { wrapper, characterStore } = await mountApp()
     await characterStore.import(CARD)
     await flushPromises()
     const tabs = wrapper.findAll('nav button')
