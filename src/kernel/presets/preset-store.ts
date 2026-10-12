@@ -7,18 +7,25 @@
  * array order = application order; exactly one group active at a time
  * (global mutex — switching groups swaps the whole set).
  *
- * Seeding mirrors RP: version-driven sync of the built-in default group —
- * version bump rewrites default-group content/role while keeping user
- * toggles, adds missing, removes retired. Sensitive-class entries (破限/
- * 色情增强) ship disabled per user policy (planning D3).
+ * v3 adds optional `dimension` (style-dimensions.ts): entries tagged with a
+ * narrative facet; single-select dimensions are mutually exclusive at the
+ * store level (generalizes the v2 person-pair mutex to every dimension
+ * entry point). Seeding mirrors RP: version-driven sync of the built-in
+ * default group — version bump rewrites default-group content/role/dimension
+ * while keeping user toggles, adds missing, removes retired. Sensitive-class
+ * entries (色情增强) ship disabled; 破限 ships ENABLED since v3 (planning D5,
+ * untouched-store migration D9).
  */
 
 import {
   DEFAULT_PRESET_DEFINITIONS,
   DEFAULT_PRESET_DEFINITIONS_VERSION,
+  DEFAULT_TOGGLES_CHANGED_IN_V3,
   PERSON_MUTEX_SINCE_VERSION,
   PERSON_PERSPECTIVE_NAMES,
+  STYLE_DIMENSIONS_SINCE_VERSION,
 } from '@/kernel/presets/default-presets'
+import { dimensionMeta, isStyleDimension, type StyleDimension } from '@/kernel/presets/style-dimensions'
 
 export type PresetRole = 'system' | 'user' | 'assistant'
 
@@ -29,6 +36,8 @@ export interface PresetEntry {
   enabled: boolean
   role: PresetRole
   group: string
+  /** Style dimension tag (v3); absent = ordinary entry outside all dimensions. */
+  dimension?: StyleDimension
 }
 
 export interface PresetGroup {
@@ -49,8 +58,9 @@ export interface PresetStore {
   get(): Promise<PresetSnapshot>
   setActiveGroup(groupId: string): Promise<PresetSnapshot>
   setEntryEnabled(entryId: string, enabled: boolean): Promise<PresetSnapshot>
-  updateEntry(entryId: string, patch: { name: string; content: string; role: PresetRole }): Promise<PresetSnapshot>
-  addEntry(entry: { name: string; content: string; role: PresetRole; /** Importers land entries disabled (M4-g2) — user opts in via the panel. */ enabled?: boolean }): Promise<PresetSnapshot>
+  /** `dimension: null` clears the tag; absent field leaves it unchanged. */
+  updateEntry(entryId: string, patch: { name: string; content: string; role: PresetRole; dimension?: StyleDimension | null }): Promise<PresetSnapshot>
+  addEntry(entry: { name: string; content: string; role: PresetRole; dimension?: StyleDimension; /** Importers land entries disabled (M4-g2) — user opts in via the panel. */ enabled?: boolean }): Promise<PresetSnapshot>
   removeEntry(entryId: string): Promise<PresetSnapshot>
   moveEntry(entryId: string, direction: -1 | 1): Promise<PresetSnapshot>
   /** Managed-entry sync (M4-f CoT): upsert by NAME in the default group —
@@ -82,6 +92,17 @@ const newId = (): string => `p-${Date.now().toString(36)}-${Math.random().toStri
 const normalizeRole = (role: unknown): PresetRole =>
   role === 'user' || role === 'assistant' ? role : 'system'
 
+/** Sanitize an incoming dimension tag: unknown/junk values drop to "no
+ *  dimension" rather than poisoning the store (import path). */
+const normalizeDimension = (value: unknown): StyleDimension | undefined =>
+  isStyleDimension(value) ? value : undefined
+
+const managedFields = (definition: { content: string; role: PresetRole; dimension?: StyleDimension }) => ({
+  content: definition.content,
+  role: definition.role,
+  dimension: definition.dimension,
+})
+
 export function createPresetStore(repository: {
   get<T>(key: string): Promise<T | undefined>
   set(key: string, value: unknown): Promise<void>
@@ -97,16 +118,15 @@ export function createPresetStore(repository: {
     entries: DEFAULT_PRESET_DEFINITIONS.map((definition) => ({
       id: newId(),
       name: definition.name,
-      content: definition.content,
+      ...managedFields(definition),
       enabled: definition.defaultEnabled,
-      role: definition.role,
       group: DEFAULT_GROUP,
     })),
   })
 
   /** RP seed-sync semantics: a version bump rewrites default-group
-   *  content/role (keeping user toggles), adds missing definitions, and
-   *  removes retired ones. Custom groups are never touched. */
+   *  content/role/dimension (keeping user toggles), adds missing definitions,
+   *  and removes retired ones. Custom groups are never touched. */
   const syncVersion = async (): Promise<void> => {
     const applied = (await repository.get<number>(KEY_VERSION)) ?? 0
     if (applied === DEFAULT_PRESET_DEFINITIONS_VERSION) return
@@ -127,7 +147,7 @@ export function createPresetStore(repository: {
       }
       const definition = definitions.get(entry.name)
       if (!definition) continue // retired
-      kept.push({ ...entry, content: definition.content, role: definition.role })
+      kept.push({ ...entry, ...managedFields(definition) })
       seen.add(entry.name)
     }
     for (const definition of DEFAULT_PRESET_DEFINITIONS) {
@@ -135,9 +155,8 @@ export function createPresetStore(repository: {
       kept.push({
         id: newId(),
         name: definition.name,
-        content: definition.content,
+        ...managedFields(definition),
         enabled: definition.defaultEnabled,
-        role: definition.role,
         group: DEFAULT_GROUP,
       })
     }
@@ -151,6 +170,18 @@ export function createPresetStore(repository: {
         for (const entry of pair) {
           if (entry.name !== '第三人称') entry.enabled = false
         }
+      }
+    }
+    // v3 migration (planning D9): definitions whose defaultEnabled changed
+    // apply the new default only when the stored toggle still equals the OLD
+    // default (= the user never touched it). A deliberate toggle survives —
+    // including an explicit off, when it differs from the old default.
+    if (applied < STYLE_DIMENSIONS_SINCE_VERSION) {
+      for (const entry of kept) {
+        if (entry.group !== DEFAULT_GROUP) continue
+        const oldDefault = DEFAULT_TOGGLES_CHANGED_IN_V3.get(entry.name)
+        if (oldDefault === undefined || entry.enabled !== oldDefault) continue
+        entry.enabled = definitions.get(entry.name)!.defaultEnabled
       }
     }
     await write({ groups: (await repository.get<PresetGroup[]>(KEY_GROUPS)) ?? seed().groups, entries: kept })
@@ -188,13 +219,23 @@ export function createPresetStore(repository: {
     async setEntryEnabled(entryId, enabled) {
       const snapshot = await load()
       const target = snapshot.entries.find((entry) => entry.id === entryId)
-      const isPerson = (name: string): boolean => (PERSON_PERSPECTIVE_NAMES as readonly string[]).includes(name)
+      // Single-select dimension mutex at the store level: lighting one entry
+      // in a single-select dimension dims its enabled siblings in the same
+      // group — every entry point (presets panel, persona chips, per-card
+      // style sheet) stays mutually exclusive, not just one selector.
+      // Multi-select dimensions and ordinary entries pass through.
+      const mutexDimension =
+        enabled && target && isStyleDimension(target.dimension) && !dimensionMeta(target.dimension).multi
+          ? target.dimension
+          : undefined
       const entries = snapshot.entries.map((entry) => {
         if (entry.id === entryId) return { ...entry, enabled }
-        // Pair mutex at the store level: lighting one perspective dims the
-        // other — every entry point (presets panel, persona chips) stays
-        // mutually exclusive, not just the settings selector.
-        if (enabled && target && isPerson(target.name) && entry.name !== target.name && isPerson(entry.name)) {
+        if (
+          mutexDimension !== undefined &&
+          entry.enabled &&
+          entry.dimension === mutexDimension &&
+          entry.group === target!.group
+        ) {
           return { ...entry, enabled: false }
         }
         return entry
@@ -205,8 +246,13 @@ export function createPresetStore(repository: {
 
     async updateEntry(entryId, patch) {
       const snapshot = await load()
-      const entries = snapshot.entries.map((entry) =>
-        entry.id === entryId ? { ...entry, name: patch.name, content: patch.content, role: normalizeRole(patch.role) } : entry)
+      const entries = snapshot.entries.map((entry) => {
+        if (entry.id !== entryId) return entry
+        const next: PresetEntry = { ...entry, name: patch.name, content: patch.content, role: normalizeRole(patch.role) }
+        if (patch.dimension === null) delete next.dimension
+        else if (patch.dimension !== undefined) next.dimension = patch.dimension
+        return next
+      })
       await write({ ...snapshot, entries })
       return { ...snapshot, entries }
     },
@@ -216,7 +262,15 @@ export function createPresetStore(repository: {
       const activeGroup = snapshot.groups.find((group) => group.enabled)?.id ?? DEFAULT_GROUP
       const next = [
         ...snapshot.entries,
-        { id: newId(), name: entry.name, content: entry.content, enabled: entry.enabled !== false, role: normalizeRole(entry.role), group: activeGroup },
+        {
+          id: newId(),
+          name: entry.name,
+          content: entry.content,
+          enabled: entry.enabled !== false,
+          role: normalizeRole(entry.role),
+          group: activeGroup,
+          ...(entry.dimension ? { dimension: entry.dimension } : {}),
+        },
       ]
       await write({ ...snapshot, entries: next })
       return { ...snapshot, entries: next }
@@ -286,6 +340,7 @@ export function createPresetStore(repository: {
       const fingerprints = new Set(snapshot.entries.map(fingerprint))
       const mergedEntries = [...snapshot.entries]
       for (const raw of incomingEntries) {
+        const dimension = normalizeDimension((raw as { dimension?: unknown }).dimension)
         const entry: PresetEntry = {
           id: newId(),
           name: String(raw.name ?? '导入条目'),
@@ -293,6 +348,7 @@ export function createPresetStore(repository: {
           enabled: raw.enabled !== false,
           role: normalizeRole(raw.role),
           group: mergedGroups.some((group) => group.id === raw.group) ? String(raw.group) : DEFAULT_GROUP,
+          ...(dimension ? { dimension } : {}),
         }
         if (!entry.content.trim() || fingerprints.has(fingerprint(entry))) continue
         fingerprints.add(fingerprint(entry))

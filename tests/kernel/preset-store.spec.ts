@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPresetStore } from '@/kernel/presets/preset-store'
+import { createPresetStore, type PresetEntry } from '@/kernel/presets/preset-store'
 
 /** In-memory repository mirroring the storage-repository get/set surface. */
 function makeRepo() {
@@ -15,20 +15,32 @@ function makeRepo() {
 }
 
 describe('preset store (M3-w, groups + role-selector model)', () => {
-  it('seeds the full default group on first ensure: 17 entries, sensitive class disabled', async () => {
+  it('seeds the full default group on first ensure: 36 entries, dimensions tagged, 破限 enabled since v3', async () => {
     const store = createPresetStore(makeRepo())
     const snapshot = await store.ensure()
     expect(snapshot.groups).toEqual([{ id: 'default', name: '默认预设', builtin: true, enabled: true }])
-    expect(snapshot.entries).toHaveLength(17)
+    expect(snapshot.entries).toHaveLength(36)
     const byName = new Map(snapshot.entries.map((entry) => [entry.name, entry]))
-    expect(byName.get('破限')!.enabled).toBe(false)
+    // v3 (planning D5): 破限 ships enabled; 色情内容增强 stays disabled.
+    expect(byName.get('破限')!.enabled).toBe(true)
     expect(byName.get('色情内容增强')!.enabled).toBe(false)
     expect(byName.get('防重复')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · AI 1')).toMatchObject({ role: 'assistant', group: 'default' })
-    // v2 person mutex: fresh seed = third person only.
+    // v2 person mutex: fresh seed = third person only; dimension tags on.
     expect(byName.get('第三人称')!.enabled).toBe(true)
     expect(byName.get('第二人称')!.enabled).toBe(false)
-    expect(byName.get('第三人称')).toMatchObject({ role: 'system' })
+    expect(byName.get('第三人称')).toMatchObject({ role: 'system', dimension: 'person' })
+    expect(byName.get('第二人称')).toMatchObject({ dimension: 'person' })
+    // New dimension seeds all ship disabled — an empty dimension means "no
+    // constraint" (planning D3).
+    expect(byName.get('第一人称')).toMatchObject({ dimension: 'person', enabled: false })
+    expect(byName.get('以对话为主')).toMatchObject({ dimension: 'writing', enabled: false })
+    expect(byName.get('细腻篇幅')).toMatchObject({ dimension: 'length', enabled: false })
+    expect(byName.get('轻小说')).toMatchObject({ dimension: 'style', enabled: false })
+    expect(byName.get('温馨治愈')).toMatchObject({ dimension: 'mood', enabled: false })
+    expect(byName.get('NSFW·直白')).toMatchObject({ dimension: 'nsfw', enabled: false })
+    // Ordinary entries carry no dimension tag.
+    expect(byName.get('时间戳')!.dimension).toBeUndefined()
   })
 
   it('group mutex: picking one group switches the whole set off for others', async () => {
@@ -151,5 +163,106 @@ describe('preset store (M3-w, groups + role-selector model)', () => {
     expect(after.entries[1]!.id).toBe(first.id)
     const withNew = await store.addEntry({ name: '追加', content: 'z', role: 'user' })
     expect(withNew.entries.at(-1)).toMatchObject({ name: '追加', role: 'user', group: 'default', enabled: true })
+  })
+})
+
+describe('preset store style dimensions (v3, planning style-dimension-presets-plan S1)', () => {
+  it('单选维度互斥泛化:同维同组熄灭,多选维度共存,跨组不牵连', async () => {
+    const store = createPresetStore(makeRepo())
+    await store.ensure()
+    const byName = async () => new Map((await store.get()).entries.map((entry) => [entry.name, entry]))
+
+    // Multi-select mood: two entries coexist.
+    await store.setEntryEnabled((await byName()).get('温馨治愈')!.id, true)
+    const bothMood = await store.setEntryEnabled((await byName()).get('紧张悬疑')!.id, true)
+    expect(bothMood.entries.find((entry) => entry.name === '温馨治愈')!.enabled).toBe(true)
+    expect(bothMood.entries.find((entry) => entry.name === '紧张悬疑')!.enabled).toBe(true)
+
+    // Single-select nsfw: lighting one dims the enabled sibling.
+    await store.setEntryEnabled((await byName()).get('NSFW·含蓄')!.id, true)
+    const afterExplicit = await store.setEntryEnabled((await byName()).get('NSFW·直白')!.id, true)
+    expect(afterExplicit.entries.find((entry) => entry.name === 'NSFW·直白')!.enabled).toBe(true)
+    expect(afterExplicit.entries.find((entry) => entry.name === 'NSFW·含蓄')!.enabled).toBe(false)
+
+    // Cross-group: the mutex is per scheme — a same-dimension sibling in
+    // another group keeps its own state.
+    const bundle = JSON.stringify({
+      type: 'rp-hub-preset-groups',
+      groups: [{ id: 'g2', name: '另一方案', builtin: false, enabled: false }],
+      presets: [{ name: '方案B·含蓄', role: 'system', content: '方案B含蓄文案', enabled: false, group: 'g2', dimension: 'nsfw' }],
+    })
+    await store.importGroups(bundle)
+    await store.setActiveGroup('g2')
+    const afterG2 = await store.setEntryEnabled((await byName()).get('方案B·含蓄')!.id, true)
+    expect(afterG2.entries.find((entry) => entry.name === '方案B·含蓄')!.enabled).toBe(true)
+    expect(afterG2.entries.find((entry) => entry.name === 'NSFW·直白')!.enabled).toBe(true)
+  })
+
+  it('v2→v3 迁移:旧默认态(停用)的破限自动翻启用,维度标签回填默认组,自定义组条目原样', async () => {
+    const repo = makeRepo()
+    const store = createPresetStore(repo)
+    await store.ensure()
+    const bundle = JSON.stringify({
+      type: 'rp-hub-preset-groups',
+      groups: [{ id: 'g2', name: '自建', builtin: false, enabled: false }],
+      presets: [{ name: '自建风格', role: 'system', content: 'x', enabled: true, group: 'g2', dimension: 'style' }],
+    })
+    await store.importGroups(bundle)
+    // Simulate a v2-era record set: default-group entries lack dimension
+    // tags and 破限 sits at its old default (off). Custom groups untouched.
+    const stripDimension = (entry: PresetEntry): PresetEntry => {
+      const next = { ...entry }
+      delete next.dimension
+      return next
+    }
+    const v2Records = (await store.get()).entries.map((entry) => {
+      if (entry.group !== 'default') return entry
+      const stripped = stripDimension(entry)
+      return entry.name === '破限' ? { ...stripped, enabled: false } : stripped
+    })
+    await repo.set('presets', v2Records)
+    await repo.set('preset_definitions_version', 2)
+
+    const migrated = await store.ensure()
+    const byName = new Map(migrated.entries.map((entry) => [entry.name, entry]))
+    expect(byName.get('破限')!.enabled).toBe(true) // untouched → flips (D9)
+    expect(byName.get('第三人称')!.dimension).toBe('person') // tags backfilled
+    expect(byName.get('自建风格')).toMatchObject({ dimension: 'style', enabled: true })
+    expect(byName.get('时间戳')!.dimension).toBeUndefined()
+  })
+
+  it('维度编辑:updateEntry 设置与清除 dimension(null),addEntry 携带维度', async () => {
+    const store = createPresetStore(makeRepo())
+    await store.ensure()
+    const target = (await store.get()).entries.find((entry) => entry.name === '时间戳')!
+    const patch = { name: '时间戳', content: target.content, role: 'system' as const }
+    const tagged = await store.updateEntry(target.id, { ...patch, dimension: 'writing' })
+    expect(tagged.entries.find((entry) => entry.id === target.id)!.dimension).toBe('writing')
+    // Absent field leaves the tag alone.
+    const kept = await store.updateEntry(target.id, patch)
+    expect(kept.entries.find((entry) => entry.id === target.id)!.dimension).toBe('writing')
+    const cleared = await store.updateEntry(target.id, { ...patch, dimension: null })
+    expect(cleared.entries.find((entry) => entry.id === target.id)!.dimension).toBeUndefined()
+    const added = await store.addEntry({ name: '自建氛围', content: 'y', role: 'system', dimension: 'mood' })
+    expect(added.entries.at(-1)).toMatchObject({ name: '自建氛围', dimension: 'mood' })
+  })
+
+  it('导入透传合法 dimension、丢弃非法值;导出携带维度标签', async () => {
+    const store = createPresetStore(makeRepo())
+    await store.ensure()
+    const exported = JSON.parse(await store.exportGroups()) as { presets: Array<{ name: string; dimension?: string }> }
+    expect(exported.presets.find((entry) => entry.name === '第三人称')!.dimension).toBe('person')
+
+    const bundle = JSON.stringify({
+      type: 'rp-hub-preset-groups',
+      groups: [],
+      presets: [
+        { name: '导入维度条目', role: 'system', content: '带维度', group: 'default', dimension: 'mood', enabled: false },
+        { name: '导入坏维度', role: 'system', content: '坏维度', group: 'default', dimension: 'not-a-dimension', enabled: false },
+      ],
+    })
+    const after = await store.importGroups(bundle)
+    expect(after.entries.find((entry) => entry.name === '导入维度条目')!.dimension).toBe('mood')
+    expect(after.entries.find((entry) => entry.name === '导入坏维度')!.dimension).toBeUndefined()
   })
 })
