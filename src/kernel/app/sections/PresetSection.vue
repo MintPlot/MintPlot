@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // 提示词预设分区(M3-w,D6):预设是应用级配置,与「变量分析」同址设置页。
-// 组切换器(互斥)+条目列表(名/角色标签/启停/上下移/编辑)+新建+导入导出
-// (RP 组包 JSON 同构——用户的 RP 预设文件可直接搬进 MP)。
+// 组切换器(互斥)+条目列表(名/角色标签/维度徽标/启停/上下移/编辑)+新建+导入
+// 导出(RP 组包 JSON 同构——用户的 RP 预设文件可直接搬进 MP)。
+// S4(风格维度):编辑器增维度下拉——打维度的条目进「风格」面板的维度块
+// (system 通道强制,选维度即锁系统角色);无维度 = 普通条目。
 import { computed, inject, onMounted, ref } from 'vue'
 import { PRESET_STORE_KEY } from '@/kernel/app/chat-keys'
 import type { PresetEntry, PresetRole, PresetSnapshot } from '@/kernel/presets/preset-store'
+import { STYLE_DIMENSIONS, type StyleDimension } from '@/kernel/presets/style-dimensions'
 
 const store = inject(PRESET_STORE_KEY, null)
 
@@ -14,6 +17,7 @@ const creating = ref(false)
 const draftName = ref('')
 const draftRole = ref<PresetRole>('system')
 const draftContent = ref('')
+const draftDimension = ref('')
 const importMessage = ref('')
 
 const activeGroupId = computed(() => snapshot.value?.groups.find((group) => group.enabled)?.id ?? 'default')
@@ -23,6 +27,8 @@ const activeEntries = computed(() =>
 const otherGroups = computed(() => (snapshot.value?.groups ?? []).filter((group) => !group.enabled))
 
 const roleLabel: Record<PresetRole, string> = { system: '系统', user: '用户', assistant: 'AI' }
+const dimensionLabel = (dimension: string): string =>
+  STYLE_DIMENSIONS.find((meta) => meta.id === dimension)?.label ?? dimension
 
 const load = async (): Promise<void> => {
   snapshot.value = (await store?.ensure()) ?? null
@@ -47,6 +53,7 @@ const openCreate = (): void => {
   draftName.value = ''
   draftRole.value = 'system'
   draftContent.value = ''
+  draftDimension.value = ''
 }
 
 const openEdit = (entry: PresetEntry): void => {
@@ -55,25 +62,37 @@ const openEdit = (entry: PresetEntry): void => {
   draftName.value = entry.name
   draftRole.value = entry.role
   draftContent.value = entry.content
+  draftDimension.value = entry.dimension ?? ''
 }
 
 const saveDraft = async (): Promise<void> => {
   if (!draftName.value.trim() || !draftContent.value.trim()) return
+  const dimension: StyleDimension | null = draftDimension.value === ''
+    ? null
+    : (draftDimension.value as StyleDimension)
   if (editing.value) {
     snapshot.value = (await store?.updateEntry(editing.value.id, {
       name: draftName.value.trim(),
       content: draftContent.value,
       role: draftRole.value,
+      dimension,
     })) ?? null
   } else {
     snapshot.value = (await store?.addEntry({
       name: draftName.value.trim(),
       content: draftContent.value,
       role: draftRole.value,
+      ...(dimension ? { dimension } : {}),
     })) ?? null
   }
   editing.value = null
   creating.value = false
+}
+
+/** S2 semantics: a dimension tag forces the system channel — picking a
+ *  dimension locks the role select to 系统. */
+const onDimensionChange = (): void => {
+  if (draftDimension.value !== '') draftRole.value = 'system'
 }
 
 const removeEntry = async (entry: PresetEntry): Promise<void> => {
@@ -177,6 +196,12 @@ const importGroups = async (event: Event): Promise<void> => {
           >
             {{ roleLabel[entry.role] }}
           </span>
+          <span
+            v-if="entry.dimension"
+            class="flex-shrink-0 rounded-full border border-line bg-card px-1.5 py-0.5 text-[10px] text-ink-2"
+          >
+            {{ dimensionLabel(entry.dimension) }}
+          </span>
           <span class="min-w-0 flex-1 truncate text-sm text-ink">{{ entry.name }}</span>
           <button
             type="button"
@@ -246,19 +271,48 @@ const importGroups = async (event: Event): Promise<void> => {
         class="w-full rounded-input border border-line bg-card px-2 py-1.5 text-sm text-ink outline-none focus:border-primary"
       >
       <select
-        v-model="draftRole"
+        v-model="draftDimension"
         class="rounded-input border border-line bg-card px-2 py-1.5 text-sm text-ink outline-none focus:border-primary"
+        @change="onDimensionChange"
+      >
+        <option value="">
+          无维度(普通预设条目)
+        </option>
+        <option
+          v-for="meta in STYLE_DIMENSIONS"
+          :key="meta.id"
+          :value="meta.id"
+        >
+          {{ meta.label }}({{ meta.multi ? '可多选' : '单选' }})
+        </option>
+      </select>
+      <select
+        v-model="draftRole"
+        class="rounded-input border border-line bg-card px-2 py-1.5 text-sm text-ink outline-none focus:border-primary disabled:opacity-50"
+        :disabled="draftDimension !== ''"
       >
         <option value="system">
           系统(进系统提示词区)
         </option>
-        <option value="user">
+        <option
+          v-if="draftDimension === ''"
+          value="user"
+        >
           用户(历史前预注入消息)
         </option>
-        <option value="assistant">
+        <option
+          v-if="draftDimension === ''"
+          value="assistant"
+        >
           AI(历史前预注入消息)
         </option>
       </select>
+      <p
+        v-if="draftDimension !== ''"
+        class="text-[10px] text-ink-3"
+      >
+        打维度的条目走「风格」面板的维度块(系统通道),在卡域顶栏「风格」中选择生效
+      </p>
       <textarea
         v-model="draftContent"
         rows="8"
