@@ -85,6 +85,42 @@ describe('M4-g3 · 会话设置面板', () => {
     expect(saved.bg!.enabled).toBe(false)
   })
 
+  it('滑杆调整实时上报 preview(父视图拿去即时渲染背景)', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const cardSession = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [] } as never
+    const wrapper = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    // Opening the sheet itself must not emit a preview (initial = envelope).
+    expect(wrapper.emitted('preview')).toBeUndefined()
+    const ranges = wrapper.findAll('input[type="range"]')
+    await ranges[0]!.setValue('12')
+    expect(wrapper.emitted('preview')).toHaveLength(1)
+    expect(wrapper.emitted('preview')![0]![0]).toEqual({ enabled: true, blur: 12, dim: 45 })
+    await ranges[1]!.setValue('60')
+    expect(wrapper.emitted('preview')!.at(-1)![0]).toEqual({ enabled: true, blur: 12, dim: 60 })
+  })
+
+  it('恢复跟随全局:仅单卡调过的卡显示,点击退回全局默认草稿并 emit reset-bg', async () => {
+    const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const untouched = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [] } as never
+    const noButton = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession: untouched, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    expect(noButton.text()).not.toContain('恢复跟随全局默认')
+
+    const tuned = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [], bg: { enabled: true, blur: 8, dim: 30 } } as never
+    const wrapper = mount(SessionSettingsSheet, {
+      props: { domain: 'card', conversation: null, cardSession: tuned, settingsState: settings, cardCover: 'data:image/png;base64,x' },
+    })
+    await wrapper.findAll('button').find((button) => button.text() === '恢复跟随全局默认')!.trigger('click')
+    expect(wrapper.emitted('reset-bg')).toHaveLength(1)
+    // The draft sliders return to the global default numbers.
+    const ranges = wrapper.findAll('input[type="range"]')
+    expect((ranges[0]!.element as HTMLInputElement).value).toBe('40')
+    expect((ranges[1]!.element as HTMLInputElement).value).toBe('45')
+  })
+
   it('卡域无封面或 chatbox 域:不出背景调节区', async () => {
     const settings = createSettingsState(createStorageRepository(createMemoryEngine()))
     const cardSession = { cardId: 'k', title: '卡', createdAt: 1, updatedAt: 1, messages: [] } as never

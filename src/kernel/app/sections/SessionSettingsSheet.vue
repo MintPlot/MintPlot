@@ -9,6 +9,7 @@ import { resolveApiConfig } from '@/kernel/llm/api-profiles'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { ChatboxConversation } from '@/kernel/sessions/chatbox-store'
 import type { CardBackdrop, CardSession } from '@/kernel/sessions/card-session-store'
+import { cardBackdropDefault } from '@/kernel/app/card-backdrop-default'
 import ToggleSwitch from '@/kernel/app/ui/ToggleSwitch.vue'
 
 const props = defineProps<{
@@ -19,22 +20,37 @@ const props = defineProps<{
   cardCover?: string
 }>()
 
-const emit = defineEmits<{ close: []; saved: [{ title: string; systemPrompt: string; model: string; bg?: CardBackdrop }] }>()
+// `preview` fires on every slider/switch move — the parent overlays it on the
+// live backdrop so tweaks show immediately; cleared on close (revert) and on
+// save (the envelope takes over). `reset-bg` drops the per-card tuning so the
+// card follows the global default again.
+const emit = defineEmits<{
+  close: []
+  saved: [{ title: string; systemPrompt: string; model: string; bg?: CardBackdrop }]
+  preview: [bg: CardBackdrop]
+  'reset-bg': []
+}>()
 
-/** Defaults mirror the view's fallback so an untouched card (no bg in the
- *  envelope) shows the same numbers the page is already rendering. */
-const BG_DEFAULTS: CardBackdrop = { enabled: true, blur: 40, dim: 45 }
+/** An untouched card follows the global default — the sheet pre-fills with
+ *  those numbers; a card-tuned envelope overrides field by field. */
+const backdropDraft = (): CardBackdrop => ({
+  enabled: true,
+  ...cardBackdropDefault.value,
+  ...(props.cardSession?.bg ?? {}),
+})
 
 const draftTitle = ref('')
 const draftPrompt = ref('')
 const draftModel = ref('')
-const draftBg = ref<CardBackdrop>({ ...BG_DEFAULTS })
+const draftBg = ref<CardBackdrop>(backdropDraft())
 const modelOptions = ref<string[]>([])
 const fetching = ref(false)
 const fetchNote = ref('')
 
 const isChatbox = computed(() => props.domain === 'chatbox')
 const hasBackdrop = computed(() => !isChatbox.value && !!props.cardCover)
+/** The reset affordance only makes sense when the card has its own tuning. */
+const cardTuned = computed(() => !!props.cardSession?.bg)
 
 watch(
   () => [props.conversation, props.cardSession] as const,
@@ -42,12 +58,23 @@ watch(
     draftTitle.value = props.conversation?.title ?? ''
     draftPrompt.value = props.conversation?.systemPrompt ?? ''
     draftModel.value = props.conversation?.model || props.cardSession?.model || ''
-    draftBg.value = { ...BG_DEFAULTS, ...(props.cardSession?.bg ?? {}) }
+    draftBg.value = backdropDraft()
     modelOptions.value = []
     fetchNote.value = ''
   },
   { immediate: true },
 )
+
+// Live preview: every draft change rides out to the parent's backdrop.
+watch(draftBg, (value) => {
+  if (hasBackdrop.value) emit('preview', { ...value })
+}, { deep: true })
+
+const resetBackdrop = (): void => {
+  draftBg.value = { enabled: true, ...cardBackdropDefault.value }
+  emit('preview', { ...draftBg.value })
+  emit('reset-bg')
+}
 
 const pullModels = async (): Promise<void> => {
   if (!props.settingsState || fetching.value) return
@@ -163,8 +190,16 @@ const save = (): void => {
           </label>
         </div>
         <div class="mb-3 mt-1 text-[10px] text-ink-3">
-          只影响本卡的对话背景,随卡保存。
+          只影响本卡,调整时背后实时预览。
         </div>
+        <button
+          v-if="cardTuned"
+          type="button"
+          class="mb-3 w-full rounded-input border border-line px-3 py-2 text-xs text-ink-2 active:bg-bg"
+          @click="resetBackdrop"
+        >
+          恢复跟随全局默认
+        </button>
       </template>
 
       <div class="mb-1 text-xs font-bold text-ink-2">

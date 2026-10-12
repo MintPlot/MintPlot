@@ -41,7 +41,8 @@ import '@/kernel/render/html-frame-lifecycle'
 import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
 import { applyRegexPipeline } from '@/kernel/regex/regex-engine'
 import { setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
-import type { CardSession } from '@/kernel/sessions/card-session-store'
+import type { CardBackdrop, CardSession } from '@/kernel/sessions/card-session-store'
+import { cardBackdropDefault } from '@/kernel/app/card-backdrop-default'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import { uiService } from '@/kernel/ui/toasts'
 // M3-q variables: tag-block parsing/ledger on the card domain only — the
@@ -88,17 +89,41 @@ const cardSession = ref<CardSession | null>(null)
 const card = ref<CharacterCard | null>(null)
 const cardCover = ref('')
 
-// Backdrop tuning (1.0.x): the card session envelope carries {enabled,blur,
-// dim}; absent = the shipped defaults. Scale stays fixed at 110% — it hides
-// the blur edge bleed, not a taste parameter.
-const backdropDisabled = computed(() => cardSession.value?.bg?.enabled === false)
+// Backdrop tuning (1.0.x): effective value = per-card envelope override, else
+// the global default (card-backdrop-default.ts). While the settings sheet is
+// open, `backdropPreview` (live slider emissions) wins so the page previews
+// each tweak; it clears on close (revert) and on save (envelope takes over).
+// Scale stays fixed at 110% — it hides the blur edge bleed, not a taste
+// parameter.
+const backdropPreview = ref<CardBackdrop | null>(null)
+const effectiveBackdrop = computed<CardBackdrop>(() => ({
+  enabled: true,
+  ...cardBackdropDefault.value,
+  ...(cardSession.value?.bg ?? {}),
+  ...(backdropPreview.value ?? {}),
+}))
 const backdropImgStyle = computed(() => ({
-  filter: `blur(${cardSession.value?.bg?.blur ?? 40}px)`,
+  filter: `blur(${effectiveBackdrop.value.blur}px)`,
   transform: 'scale(1.1)',
 }))
 const backdropDimStyle = computed(() => ({
-  backgroundColor: `rgba(0, 0, 0, ${(cardSession.value?.bg?.dim ?? 45) / 100})`,
+  backgroundColor: `rgba(0, 0, 0, ${effectiveBackdrop.value.dim / 100})`,
 }))
+const closeSessionSettings = (): void => {
+  showSessionSettings.value = false
+  backdropPreview.value = null
+}
+const onSheetSaved = (draft: Parameters<typeof onSessionSettingsSaved>[0]): void => {
+  backdropPreview.value = null
+  void onSessionSettingsSaved(draft)
+}
+const onBackdropReset = (): void => {
+  if (cardSession.value) {
+    delete cardSession.value.bg
+    void persistSession()
+  }
+  backdropPreview.value = null
+}
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
@@ -565,7 +590,7 @@ const restartSession = async (): Promise<void> => {
          envelope (SessionSettingsSheet); absent = enabled/40px/45%.
          Negative z keeps every in-flow sibling above it. -->
     <div
-      v-if="isCardDomain && cardCover && !backdropDisabled"
+      v-if="isCardDomain && cardCover && effectiveBackdrop.enabled"
       class="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
       aria-hidden="true"
     >
@@ -803,8 +828,10 @@ const restartSession = async (): Promise<void> => {
       :card-session="cardSession"
       :settings-state="settingsState"
       :card-cover="cardCover"
-      @close="showSessionSettings = false"
-      @saved="onSessionSettingsSaved"
+      @close="closeSessionSettings"
+      @saved="onSheetSaved"
+      @preview="backdropPreview = $event"
+      @reset-bg="onBackdropReset"
     />
     <MemorySheet
       v-if="isCardDomain && showMemory && card"
