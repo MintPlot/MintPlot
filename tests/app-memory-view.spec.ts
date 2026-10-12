@@ -206,7 +206,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
     await openCardChat(wrapper)
 
     const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(true)
-    await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '清空重开')!.trigger('click')
     await flushPromises()
     confirmSpy.mockRestore()
 

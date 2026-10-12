@@ -195,12 +195,12 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // 清空重开:取消不动,确认后回到仅剩开场白首楼(D3)。M4-a:confirm 走
     // 应用内模态,桩服务层而非 window.confirm。
     const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(false)
-    await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '清空重开')!.trigger('click')
     await flushPromises()
     expect((await cardSessionStore.get(stored.id))!.messages).toHaveLength(3)
 
     confirmSpy.mockResolvedValue(true)
-    await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '清空重开')!.trigger('click')
     await flushPromises()
     const restarted = (await cardSessionStore.get(stored.id))!
     expect(restarted.messages).toHaveLength(1)
@@ -609,7 +609,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     expect((await variableStore.get(stored.id))!.state['tpl-1']).toMatchObject({ value: { hp: 95 } })
 
     const confirmSpy = vi.spyOn(uiService, 'confirm').mockResolvedValue(true)
-    await wrapper.findAll('button').find((button) => button.text() === '清空重开')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '清空重开')!.trigger('click')
     await flushPromises()
     confirmSpy.mockRestore()
 

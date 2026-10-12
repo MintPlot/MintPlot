@@ -71,7 +71,7 @@ const globalSummary = computed(() =>
     <div class="max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-line bg-card px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-sm font-bold">
-          风格
+          叙事
         </h2>
         <button
           type="button"
@@ -159,7 +159,9 @@ const globalSummary = computed(() =>
       <!-- 装配披露:与请求装配同一纯函数,展示将注入的完整文本 -->
       <div class="mt-3 rounded-input border border-line bg-bg px-3 py-2">
         <p class="text-[11px] font-bold text-ink-2">
-          装配披露<template v-if="!followGlobal">（未保存的调整也实时预览）</template>
+          装配披露<template v-if="!followGlobal">
+            （未保存的调整也实时预览）
+          </template>
         </p>
         <p
           v-if="disclosure.length === 0"

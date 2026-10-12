@@ -693,7 +693,7 @@ const restartSession = async (): Promise<void> => {
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
         @click="showStyle = true"
       >
-        风格
+        叙事
       </button>
       <button
         type="button"
@@ -727,10 +727,31 @@ const restartSession = async (): Promise<void> => {
       <button
         v-if="isCardDomain"
         type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-3 active:text-danger"
+        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-danger"
+        aria-label="清空重开"
         @click="restartSession"
       >
-        清空重开
+        <!-- rotate-ccw (restart): 清空重开 keeps the confirm dialog, only the
+             bar affordance went from text to an icon (2026-10-12 user pick). -->
+        <svg
+          class="h-[18px] w-[18px]"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+          />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M3 3v5h5"
+          />
+        </svg>
       </button>
     </header>
 
