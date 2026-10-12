@@ -277,6 +277,20 @@ describe('preset store style dimensions (v3, planning style-dimension-presets-pl
     expect(byName.get('NSFW增强')).toMatchObject({ enabled: true }) // toggle carried
   })
 
+  it('addEntry 同样守单选互斥:新增启用的 person 条目熄灭种子,多选维度不牵连', async () => {
+    const store = createPresetStore(makeRepo())
+    await store.ensure()
+    const afterPerson = await store.addEntry({ name: '自建人称', content: 'x', role: 'system', dimension: 'person' })
+    const byName = new Map(afterPerson.entries.map((entry) => [entry.name, entry]))
+    expect(byName.get('自建人称')!.enabled).toBe(true)
+    expect(byName.get('第三人称')!.enabled).toBe(false)
+
+    const afterMood = await store.addEntry({ name: '自建氛围', content: 'y', role: 'system', dimension: 'mood' })
+    const mood = new Map(afterMood.entries.map((entry) => [entry.name, entry]))
+    expect(mood.get('自建氛围')!.enabled).toBe(true)
+    expect(mood.get('自建人称')!.enabled).toBe(true) // different dimension untouched
+  })
+
   it('维度编辑:updateEntry 设置与清除 dimension(null),addEntry 携带维度', async () => {
     const store = createPresetStore(makeRepo())
     await store.ensure()

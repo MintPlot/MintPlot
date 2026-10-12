@@ -267,8 +267,21 @@ export function createPresetStore(repository: {
     async addEntry(entry) {
       const snapshot = await load()
       const activeGroup = snapshot.groups.find((group) => group.enabled)?.id ?? DEFAULT_GROUP
+      // Single-select dimension mutex (D12): an ENABLED new entry in a
+      // single-select dimension dims its enabled siblings in the target
+      // group — every entry point keeps the invariant, add included.
+      const mutexDimension =
+        entry.enabled !== false && entry.dimension && isStyleDimension(entry.dimension) && !dimensionMeta(entry.dimension).multi
+          ? entry.dimension
+          : undefined
       const next = [
-        ...snapshot.entries,
+        ...snapshot.entries.map((existing) =>
+          mutexDimension !== undefined
+            && existing.enabled
+            && existing.dimension === mutexDimension
+            && existing.group === activeGroup
+            ? { ...existing, enabled: false }
+            : existing),
         {
           id: newId(),
           name: entry.name,

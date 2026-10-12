@@ -3,12 +3,12 @@
 // mp_settings(userAvatar = 压缩到长边 256 的 data URL,复用 vision 的压缩
 // 管线,免得 mp_settings 被大图撑爆)。卡玩法的提示词组装(M3+ 批次)会消费
 // 昵称/人设;头像目前只在设定面展示。点头像换图,角标清空回默认猫。
-// 人称(1.0.x):与提示词预设的「第二/第三人称」条目同源联动 —— 这里的
-// 选择就是预设仓里的条目开关(选一个关另一个,再点取消),预设面板改动
-// 回到本页即见(挂载重读)。
+// 人称(1.0.x → 风格维度 v3):与提示词预设的 person 维度条目同源联动 ——
+// 这里的选择就是预设仓里的条目开关(单选维度互斥,再点取消),预设面板改动
+// 回到本页即见(挂载重读)。全部删掉则整行隐藏。
 import { inject, onMounted, ref } from 'vue'
 import { SETTINGS_STATE_KEY, PRESET_STORE_KEY } from '@/kernel/app/chat-keys'
-import type { PresetEntry } from '@/kernel/presets/preset-store'
+import type { PresetEntry, PresetSnapshot } from '@/kernel/presets/preset-store'
 import { compressImageFile } from '@/kernel/llm/vision'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
 
@@ -20,21 +20,27 @@ const userPersona = ref('')
 const userAvatar = ref('')
 const avatarInputEl = ref<HTMLInputElement | null>(null)
 
-// Person chips: the second/third-person preset entries, by name. Absent
-// (user deleted them) → the row hides.
-const secondPerson = ref<PresetEntry | null>(null)
-const thirdPerson = ref<PresetEntry | null>(null)
+// Person chips: every person-dimension entry of the ACTIVE group (that is
+// what the global scheme actually injects). The three seeds sort in natural
+// order, custom entries follow in library order. Row hides when none exist.
+const personEntries = ref<PresetEntry[]>([])
+const PERSON_SEED_ORDER = ['第一人称', '第二人称', '第三人称']
 
-const loadPersonEntries = (snapshot: { entries: PresetEntry[] }): void => {
-  secondPerson.value = snapshot.entries.find((entry) => entry.name === '第二人称') ?? null
-  thirdPerson.value = snapshot.entries.find((entry) => entry.name === '第三人称') ?? null
+const loadPersonEntries = (snapshot: PresetSnapshot): void => {
+  const activeGroup = snapshot.groups.find((group) => group.enabled)?.id ?? 'default'
+  personEntries.value = snapshot.entries
+    .filter((entry) => entry.dimension === 'person' && entry.group === activeGroup)
+    .sort((a, b) => {
+      const ai = PERSON_SEED_ORDER.indexOf(a.name)
+      const bi = PERSON_SEED_ORDER.indexOf(b.name)
+      return (ai === -1 ? PERSON_SEED_ORDER.length : ai) - (bi === -1 ? PERSON_SEED_ORDER.length : bi)
+    })
 }
 
-const togglePerson = async (which: 'second' | 'third'): Promise<void> => {
+const togglePerson = async (entry: PresetEntry): Promise<void> => {
   if (!presetStore) return
-  const entry = which === 'second' ? secondPerson.value : thirdPerson.value
-  if (!entry) return
-  // The store enforces the pair mutex (preset panel included) — one call.
+  // The store enforces the single-select dimension mutex (presets panel
+  // included) — one call.
   const snapshot = await presetStore.setEntryEnabled(entry.id, !entry.enabled)
   loadPersonEntries(snapshot)
 }
@@ -137,32 +143,24 @@ const clearAvatar = (): void => {
         >
       </div>
     </div>
-    <div v-if="secondPerson || thirdPerson">
+    <div v-if="personEntries.length > 0">
       <label class="mb-1 block text-xs font-medium text-ink-3">人称</label>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <button
-          v-if="secondPerson"
+          v-for="entry in personEntries"
+          :key="entry.id"
           type="button"
           class="rounded-full border px-3 py-1.5 text-xs transition-colors"
-          :class="secondPerson.enabled ? 'border-primary bg-primary-wash font-medium text-primary' : 'border-line text-ink-2'"
-          :aria-pressed="secondPerson.enabled"
-          @click="togglePerson('second')"
+          :class="entry.enabled ? 'border-primary bg-primary-wash font-medium text-primary' : 'border-line text-ink-2'"
+          :aria-pressed="entry.enabled"
+          :aria-label="`选择人称「${entry.name}」`"
+          @click="togglePerson(entry)"
         >
-          第二人称
-        </button>
-        <button
-          v-if="thirdPerson"
-          type="button"
-          class="rounded-full border px-3 py-1.5 text-xs transition-colors"
-          :class="thirdPerson.enabled ? 'border-primary bg-primary-wash font-medium text-primary' : 'border-line text-ink-2'"
-          :aria-pressed="thirdPerson.enabled"
-          @click="togglePerson('third')"
-        >
-          第三人称
+          {{ entry.name }}
         </button>
       </div>
       <p class="mt-1 text-[10px] text-ink-3">
-        与「提示词预设」中的同名条目联动,选一个即关闭另一个。
+        与「提示词预设」中的同条目联动,单选可不选(全灭 = 不约束)。
       </p>
     </div>
     <div>

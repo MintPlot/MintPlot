@@ -1,6 +1,7 @@
-// 用户设定 person chips (1.0.x): the 第二/第三人称 toggles in the persona
-// section ARE the preset-store entries — mutual exclusion, tap-to-clear, and
-// the presets panel sees the same state (single source of truth).
+// 用户设定 person chips (1.0.x → 风格维度 v3): the person chips ARE the
+// preset-store's person-dimension entries (all three seeds) — mutual
+// exclusion, tap-to-clear, and the presets panel sees the same state (single
+// source of truth).
 import { beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import UserPersonaSection from '@/kernel/app/sections/UserPersonaSection.vue'
@@ -23,15 +24,20 @@ const mountSection = async () => {
 const chipOf = (wrapper: ReturnType<typeof mount>, label: string) =>
   wrapper.findAll('button').find((button) => button.text() === label)!
 
+const personChips = (wrapper: ReturnType<typeof mount>) =>
+  wrapper.findAll('button').filter((button) => (button.attributes('aria-label') ?? '').startsWith('选择人称'))
+
 describe('UserPersonaSection · 人称联动', () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  it('种子态上屏:第三人称亮、第二人称不亮(默认仅第三人称)', async () => {
+  it('种子态上屏:三颗 chips 自然序,仅第三人称亮', async () => {
     const { wrapper } = await mountSection()
+    expect(personChips(wrapper).map((chip) => chip.text())).toEqual(['第一人称', '第二人称', '第三人称'])
     expect(chipOf(wrapper, '第三人称').attributes('aria-pressed')).toBe('true')
     expect(chipOf(wrapper, '第二人称').attributes('aria-pressed')).toBe('false')
+    expect(chipOf(wrapper, '第一人称').attributes('aria-pressed')).toBe('false')
   })
 
   it('选第二人称:互斥关掉第三人称,预设仓同源可见', async () => {
@@ -57,7 +63,31 @@ describe('UserPersonaSection · 人称联动', () => {
     expect(snapshot.entries.find((entry) => entry.name === '第二人称')!.enabled).toBe(false)
   })
 
-  it('两预设条目都被删掉:人称行整体隐藏', async () => {
+  it('自建 person 条目出 chip,点亮即互斥关掉种子', async () => {
+    // Shared store across mounts — the section reads on mount only.
+    const settingsState = createSettingsState(createStorageRepository(createMemoryEngine()))
+    const presetStore = createPresetStore(createStorageRepository(createMemoryEngine()))
+    const mountWith = async () => {
+      const wrapper = mount(UserPersonaSection, {
+        global: { provide: { [SETTINGS_STATE_KEY as symbol]: settingsState, [PRESET_STORE_KEY as symbol]: presetStore } },
+      })
+      await flushPromises()
+      return wrapper
+    }
+    await presetStore.addEntry({ name: '第一人称·群像', content: 'x', role: 'system', dimension: 'person' })
+    const first = await mountWith()
+    // addEntry lands enabled and runs the single-select mutex: the custom
+    // chip is lit immediately, the seeded 第三人称 got dimmed.
+    expect(personChips(first).map((chip) => chip.text())).toEqual(['第一人称', '第二人称', '第三人称', '第一人称·群像'])
+    expect(personChips(first).at(-1)!.attributes('aria-pressed')).toBe('true')
+    expect(chipOf(first, '第三人称').attributes('aria-pressed')).toBe('false')
+
+    await personChips(first).at(-1)!.trigger('click')
+    await flushPromises()
+    expect(personChips(first).at(-1)!.attributes('aria-pressed')).toBe('false')
+  })
+
+  it('person 条目全部删掉:人称行整体隐藏', async () => {
     // Same stores across both mounts — the remount must see the deletions.
     const settingsState = createSettingsState(createStorageRepository(createMemoryEngine()))
     const presetStore = createPresetStore(createStorageRepository(createMemoryEngine()))
@@ -70,11 +100,12 @@ describe('UserPersonaSection · 人称联动', () => {
     }
     const wrapper = await mountWith()
     const snapshot = await presetStore.get()
-    for (const entry of snapshot.entries.filter((item) => item.name === '第二人称' || item.name === '第三人称')) {
+    for (const entry of snapshot.entries.filter((item) => item.dimension === 'person')) {
       await presetStore.removeEntry(entry.id)
     }
     wrapper.unmount()
     const remounted = await mountWith()
-    expect(remounted.text()).not.toContain('人称')
+    expect(personChips(remounted)).toHaveLength(0)
+    expect(remounted.text()).not.toContain('与「提示词预设」')
   })
 })
