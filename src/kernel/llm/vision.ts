@@ -48,10 +48,11 @@ export const userImageContextText = (attachments: readonly ChatImageAttachment[]
   ].join('\n')
 }
 
-/** Downscale to a long edge of 2048 and JPEG (white backdrop) for vision
- *  token discipline. Environments without canvas (jsdom, exotic webviews)
- *  fall back to the untouched file data URL. */
-export async function compressImageFile(file: File): Promise<string> {
+/** Downscale to a long edge (default 2048, vision token discipline) and JPEG
+ *  (white backdrop). Environments without canvas (jsdom, exotic webviews)
+ *  fall back to the untouched file data URL. Reused by the user-avatar picker
+ *  with a tighter edge (256) to keep mp_settings light. */
+export async function compressImageFile(file: File, longEdge = COMPRESS_LONG_EDGE): Promise<string> {
   const rawDataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
@@ -65,7 +66,7 @@ export async function compressImageFile(file: File): Promise<string> {
       createImageBitmap(file, { imageOrientation: 'from-image' }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('compress-timeout')), 300)),
     ])
-    const scale = Math.min(1, COMPRESS_LONG_EDGE / Math.max(bitmap.width, bitmap.height))
+    const scale = Math.min(1, longEdge / Math.max(bitmap.width, bitmap.height))
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(bitmap.width * scale))
     canvas.height = Math.max(1, Math.round(bitmap.height * scale))

@@ -25,6 +25,9 @@ describe('preset store (M3-w, groups + role-selector model)', () => {
     expect(byName.get('色情内容增强')!.enabled).toBe(false)
     expect(byName.get('防重复')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · AI 1')).toMatchObject({ role: 'assistant', group: 'default' })
+    // v2 person mutex: fresh seed = third person only.
+    expect(byName.get('第三人称')!.enabled).toBe(true)
+    expect(byName.get('第二人称')!.enabled).toBe(false)
     expect(byName.get('第三人称')).toMatchObject({ role: 'system' })
   })
 
@@ -64,6 +67,57 @@ describe('preset store (M3-w, groups + role-selector model)', () => {
     expect(byName.get('破限')!.enabled).toBe(true)
     // Retired name re-seeds with its default toggle.
     expect(byName.get('防重复')!.enabled).toBe(true)
+  })
+
+  it('v1→v2 迁移:双人称都开的存量仓归位为仅第三人称', async () => {
+    const repo = makeRepo()
+    const store = createPresetStore(repo)
+    await store.ensure()
+    // Simulate a v1 store: both perspectives on (the shipped-flaw state),
+    // then stamp the old version so the migration re-runs.
+    const v1 = await store.get()
+    const bothOn = v1.entries.map((entry) =>
+      entry.name === '第二人称' ? { ...entry, enabled: true } : entry)
+    await repo.set('presets', bothOn)
+    await repo.set('preset_definitions_version', 1)
+
+    const migrated = await store.ensure()
+    const byName = new Map(migrated.entries.map((entry) => [entry.name, entry]))
+    expect(byName.get('第二人称')!.enabled).toBe(false)
+    expect(byName.get('第三人称')!.enabled).toBe(true)
+  })
+
+  it('v2 之后有意开的双人称不再被后续迁移动(用户选择为准)', async () => {
+    const repo = makeRepo()
+    const store = createPresetStore(repo)
+    await store.ensure()
+    // Version already 2: enable the second person via the store mutex path —
+    // wait, the mutex forbids both-on; force the raw record instead.
+    const snapshot = await store.get()
+    const bothOn = snapshot.entries.map((entry) =>
+      entry.name === '第二人称' ? { ...entry, enabled: true } : entry)
+    await repo.set('presets', bothOn)
+    await repo.set('preset_definitions_version', 2)
+
+    const untouched = await store.ensure()
+    const byName = new Map(untouched.entries.map((entry) => [entry.name, entry]))
+    expect(byName.get('第二人称')!.enabled).toBe(true)
+    expect(byName.get('第三人称')!.enabled).toBe(true)
+  })
+
+  it('仓层互斥:点亮一个人称自动熄灭另一个(面板入口同样生效)', async () => {
+    const store = createPresetStore(makeRepo())
+    await store.ensure()
+    const third = (await store.get()).entries.find((entry) => entry.name === '第三人称')!
+    const second = (await store.get()).entries.find((entry) => entry.name === '第二人称')!
+
+    const afterSecond = await store.setEntryEnabled(second.id, true)
+    expect(afterSecond.entries.find((entry) => entry.name === '第二人称')!.enabled).toBe(true)
+    expect(afterSecond.entries.find((entry) => entry.name === '第三人称')!.enabled).toBe(false)
+
+    // Unrelated entries pass through untouched.
+    const afterOff = await store.setEntryEnabled(third.id, false)
+    expect(afterOff.entries.find((entry) => entry.name === '第二人称')!.enabled).toBe(true)
   })
 
   it('import dedupes by role+content fingerprint and remaps unknown groups to default', async () => {

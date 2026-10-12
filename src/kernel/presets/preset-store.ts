@@ -16,6 +16,8 @@
 import {
   DEFAULT_PRESET_DEFINITIONS,
   DEFAULT_PRESET_DEFINITIONS_VERSION,
+  PERSON_MUTEX_SINCE_VERSION,
+  PERSON_PERSPECTIVE_NAMES,
 } from '@/kernel/presets/default-presets'
 
 export type PresetRole = 'system' | 'user' | 'assistant'
@@ -129,15 +131,26 @@ export function createPresetStore(repository: {
       seen.add(entry.name)
     }
     for (const definition of DEFAULT_PRESET_DEFINITIONS) {
-      if (!seen.has(definition.name)) {
-        kept.push({
-          id: newId(),
-          name: definition.name,
-          content: definition.content,
-          enabled: definition.defaultEnabled,
-          role: definition.role,
-          group: DEFAULT_GROUP,
-        })
+      if (seen.has(definition.name)) continue
+      kept.push({
+        id: newId(),
+        name: definition.name,
+        content: definition.content,
+        enabled: definition.defaultEnabled,
+        role: definition.role,
+        group: DEFAULT_GROUP,
+      })
+    }
+    // v2 migration: v1 shipped both perspective entries enabled — the pair
+    // rides contradictory instructions into every request. Keep 第三人称,
+    // retire the 第二人称 toggle. Gated to pre-v2 stores only: a deliberate
+    // both-on re-enabled later must survive future version bumps.
+    if (applied < PERSON_MUTEX_SINCE_VERSION) {
+      const pair = kept.filter((entry) => (PERSON_PERSPECTIVE_NAMES as readonly string[]).includes(entry.name) && entry.enabled)
+      if (pair.length > 1) {
+        for (const entry of pair) {
+          if (entry.name !== '第三人称') entry.enabled = false
+        }
       }
     }
     await write({ groups: (await repository.get<PresetGroup[]>(KEY_GROUPS)) ?? seed().groups, entries: kept })
@@ -174,7 +187,18 @@ export function createPresetStore(repository: {
 
     async setEntryEnabled(entryId, enabled) {
       const snapshot = await load()
-      const entries = snapshot.entries.map((entry) => (entry.id === entryId ? { ...entry, enabled } : entry))
+      const target = snapshot.entries.find((entry) => entry.id === entryId)
+      const isPerson = (name: string): boolean => (PERSON_PERSPECTIVE_NAMES as readonly string[]).includes(name)
+      const entries = snapshot.entries.map((entry) => {
+        if (entry.id === entryId) return { ...entry, enabled }
+        // Pair mutex at the store level: lighting one perspective dims the
+        // other — every entry point (presets panel, persona chips) stays
+        // mutually exclusive, not just the settings selector.
+        if (enabled && target && isPerson(target.name) && entry.name !== target.name && isPerson(entry.name)) {
+          return { ...entry, enabled: false }
+        }
+        return entry
+      })
       await write({ ...snapshot, entries })
       return { ...snapshot, entries }
     },

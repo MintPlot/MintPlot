@@ -12,7 +12,14 @@ export interface DefaultPresetDefinition {
   systemManaged?: boolean
 }
 
-export const DEFAULT_PRESET_DEFINITIONS_VERSION = 1
+export const DEFAULT_PRESET_DEFINITIONS_VERSION = 2
+
+/** The two perspective entries form a mutex pair (v2 migration + store-level
+ *  exclusion): both-on is contradictory — v1 shipped them BOTH enabled. */
+export const PERSON_PERSPECTIVE_NAMES = ['第二人称', '第三人称'] as const
+/** Person-pair mutex landed in definitions v2: migrations re-run only for
+ *  stores older than this, so a later deliberate both-on stays untouched. */
+export const PERSON_MUTEX_SINCE_VERSION = 2
 
 export const DEFAULT_PRESET_DEFINITIONS: DefaultPresetDefinition[] = [
   {
@@ -110,7 +117,7 @@ export const DEFAULT_PRESET_DEFINITIONS: DefaultPresetDefinition[] = [
     name: "第二人称",
     role: "system" as const,
     content: "<second_person_perspective>\n除角色卡中的人物外，无论开场白如何，都应使用第二人称“你”来指代 {{user}}，并采用第二人称限制视角进行叙事\n</second_person_perspective>",
-    defaultEnabled: true,
+    defaultEnabled: false,
     systemManaged: true,
   },
   {
