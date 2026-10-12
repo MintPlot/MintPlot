@@ -1145,4 +1145,31 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     expect(wrapper.text()).toContain('2/2')
     wrapper.unmount()
   })
+
+  it('顶栏世界书/正则入口恒显示:卡不带数据也露出入口,面板给空态', async () => {
+    const { wrapper, characterStore } = mountApp()
+    await characterStore.import(CARD)
+    await flushPromises()
+    const tabs = wrapper.findAll('nav button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // CARD 是 v1 裸卡(无 book / 无 regex_scripts):入口仍恒显示(1.0.x 拍板)。
+    expect(wrapper.findAll('button').some((button) => button.text() === '世界书')).toBe(true)
+    expect(wrapper.findAll('button').some((button) => button.text() === '正则')).toBe(true)
+
+    await wrapper.findAll('button').find((button) => button.text() === '世界书')!.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('这张卡没有自带世界书')
+    await wrapper.findAll('button').find((button) => button.text() === '完成')!.trigger('click')
+    await nextTick()
+
+    await wrapper.findAll('button').find((button) => button.text() === '正则')!.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('这张卡没有自带正则')
+    wrapper.unmount()
+  })
 })

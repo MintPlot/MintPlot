@@ -650,7 +650,7 @@ const restartSession = async (): Promise<void> => {
         变量
       </button>
       <button
-        v-if="isCardDomain && worldbookActive && worldbookEntries.length > 0"
+        v-if="isCardDomain && worldbookActive"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
         @click="showWorldbook = true"
@@ -658,7 +658,7 @@ const restartSession = async (): Promise<void> => {
         世界书
       </button>
       <button
-        v-if="isCardDomain && regexActive && cardRegexScripts.length > 0"
+        v-if="isCardDomain && regexActive"
         type="button"
         class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
         @click="showRegex = true"
