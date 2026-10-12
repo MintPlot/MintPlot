@@ -174,8 +174,12 @@ const timeLabel = (updatedAt: number): string => {
         >
           <!-- Reveal actions: purely visual during the drag — release past the
                threshold fires the action (confirm dialog for delete, instant
-               toggle for pin), so these are never tappable. -->
+               toggle for pin), so these are never tappable. Rows are
+               translucent over the aurora, so the reveal pair must exist only
+               while its row is actually being swiped (rest state would bleed
+               them through the row). -->
           <div
+            v-show="swipeDrag?.id === conversation.id"
             class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary"
             aria-hidden="true"
           >
@@ -195,6 +199,7 @@ const timeLabel = (updatedAt: number): string => {
             <span class="text-[11px]">{{ conversation.pinned ? '取消置顶' : '置顶' }}</span>
           </div>
           <div
+            v-show="swipeDrag?.id === conversation.id"
             class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary"
             aria-hidden="true"
           >
