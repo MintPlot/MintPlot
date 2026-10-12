@@ -24,7 +24,7 @@ describe('preset store (M3-w, groups + role-selector model)', () => {
     // v3 (planning D5): 破限 ships enabled; v4: the four 破限预注入 entries
     // ride along; 色情内容增强 stays disabled.
     expect(byName.get('破限')!.enabled).toBe(true)
-    expect(byName.get('色情内容增强')!.enabled).toBe(false)
+    expect(byName.get('NSFW增强')!.enabled).toBe(false)
     expect(byName.get('破限预注入 · User 1')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · AI 1')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · User 2')!.enabled).toBe(true)
@@ -239,7 +239,7 @@ describe('preset store style dimensions (v3, planning style-dimension-presets-pl
     expect(byName.get('时间戳')!.dimension).toBeUndefined()
   })
 
-  it('v3 存量升 v4:未动过的预注入翻转启用,色情内容增强保持停用', async () => {
+  it('v3 存量升 v4:未动过的预注入翻转启用,NSFW增强保持停用', async () => {
     const repo = makeRepo()
     const store = createPresetStore(repo)
     await store.ensure()
@@ -256,8 +256,25 @@ describe('preset store style dimensions (v3, planning style-dimension-presets-pl
     expect(byName.get('破限预注入 · AI 1')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · User 2')!.enabled).toBe(true)
     expect(byName.get('破限预注入 · AI 2')!.enabled).toBe(true)
-    expect(byName.get('色情内容增强')!.enabled).toBe(false)
+    expect(byName.get('NSFW增强')!.enabled).toBe(false)
     expect(byName.get('破限')!.enabled).toBe(true) // v3 flip not re-applied
+  })
+
+  it('v4 存量升 v5:色情内容增强改名 NSFW增强且用户开关随迁,旧名不残留', async () => {
+    const repo = makeRepo()
+    const store = createPresetStore(repo)
+    await store.ensure()
+    // Simulate a v4 store where the user had ENABLED 色情内容增强 (its old
+    // name); the v5 rename must carry it — not drop + re-seed disabled.
+    const v4Records = (await store.get()).entries.map((entry) =>
+      entry.name === 'NSFW增强' ? { ...entry, name: '色情内容增强', enabled: true } : entry)
+    await repo.set('presets', v4Records)
+    await repo.set('preset_definitions_version', 4)
+
+    const migrated = await store.ensure()
+    const byName = new Map(migrated.entries.map((entry) => [entry.name, entry]))
+    expect(byName.has('色情内容增强')).toBe(false) // old name gone
+    expect(byName.get('NSFW增强')).toMatchObject({ enabled: true }) // toggle carried
   })
 
   it('维度编辑:updateEntry 设置与清除 dimension(null),addEntry 携带维度', async () => {

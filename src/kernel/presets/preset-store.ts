@@ -21,6 +21,8 @@ import {
   DEFAULT_PRESET_DEFINITIONS,
   DEFAULT_PRESET_DEFINITIONS_VERSION,
   DEFAULT_TOGGLE_CHANGES,
+  DEFINITION_RENAMES,
+  DEFINITION_RENAMES_SINCE_VERSION,
   PERSON_MUTEX_SINCE_VERSION,
   PERSON_PERSPECTIVE_NAMES,
 } from '@/kernel/presets/default-presets'
@@ -137,6 +139,9 @@ export function createPresetStore(repository: {
       return
     }
     const definitions = new Map(DEFAULT_PRESET_DEFINITIONS.map((definition) => [definition.name, definition]))
+    // v5+: seed-entry renames — an old name resolves to its new definition
+    // (toggle state survives the rename instead of drop + re-seed).
+    const renames = applied < DEFINITION_RENAMES_SINCE_VERSION ? DEFINITION_RENAMES : null
     const kept: PresetEntry[] = []
     const seen = new Set<string>()
     for (const entry of entries) {
@@ -144,10 +149,11 @@ export function createPresetStore(repository: {
         kept.push(entry)
         continue
       }
-      const definition = definitions.get(entry.name)
+      const entryName = renames?.get(entry.name) ?? entry.name
+      const definition = definitions.get(entryName)
       if (!definition) continue // retired
-      kept.push({ ...entry, ...managedFields(definition) })
-      seen.add(entry.name)
+      kept.push({ ...entry, name: entryName, ...managedFields(definition) })
+      seen.add(entryName)
     }
     for (const definition of DEFAULT_PRESET_DEFINITIONS) {
       if (seen.has(definition.name)) continue
