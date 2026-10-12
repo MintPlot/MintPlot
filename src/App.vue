@@ -101,18 +101,20 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       />
     </div>
 
+    <!-- Theme v3 floating chrome: the tab bar is an inset glass pill
+         (mockup-aligned), not a full-bleed bar. -->
     <nav
       v-show="!chatOverlay"
-      class="mp-glass-bar shrink-0 border-t border-line"
+      class="mp-glass mx-3 mb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 rounded-full"
       aria-label="主导航"
     >
-      <div class="mx-auto flex max-w-xl pb-[env(safe-area-inset-bottom)]">
+      <div class="mx-auto flex max-w-xl">
         <button
           v-for="tab in tabs"
           :key="tab.id"
           type="button"
-          class="relative flex min-h-[44px] flex-1 flex-col items-center justify-end gap-0.5 pb-1.5 pt-2 text-xs"
-          :class="tab.id === activeId ? 'text-primary' : 'text-ink-3'"
+          class="relative my-1.5 flex min-h-[44px] flex-1 flex-col items-center justify-end gap-0.5 rounded-full pb-1.5 pt-2 text-xs"
+          :class="tab.id === activeId ? 'bg-accent-wash text-primary' : 'text-ink-3'"
           :aria-current="tab.id === activeId ? 'page' : undefined"
           @click="activeId = tab.id"
         >
@@ -121,10 +123,6 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
             class="h-6 w-6"
           />
           <span>{{ tab.title }}</span>
-          <span
-            v-if="tab.id === activeId"
-            class="absolute inset-x-7 top-0 h-0.5 rounded-full bg-primary"
-          />
         </button>
       </div>
     </nav>

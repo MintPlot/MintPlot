@@ -37,112 +37,114 @@ const mode = (
   edge: string,
 ): AuroraMode => ({ base, blobs, edge })
 
-/** Hand-tuned per family/mode; mint + ocean mirror the approved preview. */
+/** Hand-tuned per family/mode; blobs sit mostly on-canvas and read clearly in
+ *  both modes (the first cut parked them in the corners where they vanished). */
 export const AURORA_RECIPES: Record<MpColorFamilyId, AuroraRecipe> = {
   mint: {
     light: mode(
-      ['#EDF6F1', '#F6FBF8', '#EBF4EF'],
-      [b('#8DEAC4', 0.5), b('#2BB39B', 0.24), b('#7BD8E8', 0.3), b('#8DEAC4', 0.18)],
+      ['#DCEFE6', '#EFF9F3', '#E2F1EA'],
+      [b('#5FD8AE', 0.5), b('#2BB39B', 0.28), b('#7BD8E8', 0.38), b('#A5E8C8', 0.3)],
       'rgba(140,240,200,0.08)',
     ),
     dark: mode(
-      ['#071310', '#0A1815', '#060F0D'],
-      [b('#146E5F', 0.55), b('#1B6F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
-      'rgba(140,240,200,0.08)',
+      ['#08150F', '#0B1C16', '#061009'],
+      [b('#17B08D', 0.38), b('#0F4A40', 0.55), b('#0D6E5E', 0.38), b('#0B5E72', 0.3)],
+      'rgba(140,240,200,0.1)',
     ),
   },
   ocean: {
     light: mode(
-      ['#D8E8F6', '#E9F1F8', '#DFE9F3'],
-      [b('#7BB8E8', 0.6), b('#3D7FC4', 0.34), b('#8DE0E8', 0.42), b('#E8D9B8', 0.3)],
+      ['#D3E6F6', '#E8F1F9', '#DBE8F4'],
+      [b('#6FB1E8', 0.55), b('#3D7FC4', 0.32), b('#8DE0E8', 0.4), b('#E8D9B8', 0.26)],
       'rgba(160,200,255,0.1)',
     ),
     dark: mode(
-      ['#0A1424', '#0C172A', '#081020'],
-      [b('#1E5FA8', 0.5), b('#0FA3C6', 0.26), b('#2D6EB8', 0.34), b('#7A5A28', 0.16)],
+      ['#081020', '#0A1628', '#060C18'],
+      [b('#2E7CD6', 0.4), b('#123B66', 0.55), b('#1E5FA8', 0.36), b('#0FA3C6', 0.26)],
       'rgba(160,200,255,0.1)',
     ),
   },
   cyan: {
     light: mode(
-      ['#E4F2F1', '#EDF7F6', '#E0F0EE'],
-      [b('#7BD8CB', 0.45), b('#0E9488', 0.26), b('#8DD8E8', 0.34), b('#B8E8D9', 0.2)],
+      ['#D8EEEB', '#EBF7F5', '#DDEEEB'],
+      [b('#54CBBB', 0.48), b('#0E9488', 0.26), b('#7BC8E8', 0.34), b('#A8E8CE', 0.22)],
       'rgba(140,235,225,0.08)',
     ),
     dark: mode(
-      ['#081413', '#0B1917', '#06110F'],
-      [b('#0B6E64', 0.5), b('#0FA3A8', 0.26), b('#128A7C', 0.32), b('#0F7A9E', 0.15)],
+      ['#061110', '#081715', '#050D0B'],
+      [b('#0FA08F', 0.36), b('#0C443E', 0.55), b('#0B6E64', 0.36), b('#0C6E8A', 0.24)],
       'rgba(140,235,225,0.08)',
     ),
   },
   forest: {
     light: mode(
-      ['#EAF2E6', '#F2F8EF', '#E6EFE1'],
-      [b('#A8D89C', 0.42), b('#43875F', 0.24), b('#C8E8B8', 0.34), b('#9CD8C8', 0.18)],
+      ['#DFEED8', '#EFF7EA', '#E2EFDC'],
+      [b('#8CCB7E', 0.45), b('#43875F', 0.24), b('#C8E8B8', 0.34), b('#8CD8C0', 0.2)],
       'rgba(180,235,190,0.07)',
     ),
     dark: mode(
-      ['#0B140E', '#0E1A12', '#08110B'],
-      [b('#2F6347', 0.48), b('#4C8A5E', 0.28), b('#356B4C', 0.3), b('#6E8A4A', 0.14)],
+      ['#080F0A', '#0B140D', '#060B07'],
+      [b('#3F9E62', 0.34), b('#1C4429', 0.55), b('#2F6B47', 0.36), b('#3E6E2F', 0.24)],
       'rgba(180,235,190,0.07)',
     ),
   },
   amber: {
     light: mode(
-      ['#F4ECD9', '#FAF4E7', '#F1E8D4'],
-      [b('#E8C173', 0.42), b('#D9924E', 0.3), b('#F2E3C2', 0.55), b('#B8C4D9', 0.22)],
+      ['#F0E3C8', '#F8F1E2', '#EFE2CB'],
+      [b('#E0B45E', 0.5), b('#D9924E', 0.3), b('#F2E3C2', 0.5), b('#A8BCDD', 0.22)],
       'rgba(240,200,140,0.09)',
     ),
     dark: mode(
-      ['#110D07', '#171109', '#0F0B06'],
-      [b('#8A5A1E', 0.5), b('#B8802A', 0.3), b('#E5A54B', 0.14), b('#8A4A3E', 0.14)],
+      ['#0D0A05', '#120D07', '#0A0704'],
+      [b('#C88A2E', 0.36), b('#4A3312', 0.55), b('#8A5E1E', 0.36), b('#7A4028', 0.24)],
       'rgba(240,200,140,0.09)',
     ),
   },
   vermilion: {
     light: mode(
-      ['#F5EEE4', '#FAF4EC', '#F1E9DC'],
-      [b('#E0A898', 0.36), b('#B85450', 0.22), b('#EAC8B0', 0.42), b('#9CB8D0', 0.18)],
+      ['#F2E4D8', '#FAF2EA', '#F0E3D6'],
+      [b('#E09A82', 0.45), b('#B85450', 0.22), b('#EAC8B0', 0.4), b('#9CB8D0', 0.2)],
       'rgba(240,190,180,0.08)',
     ),
     dark: mode(
-      ['#120E0C', '#181210', '#0E0B09'],
-      [b('#7A3A36', 0.48), b('#9C4541', 0.28), b('#D4756B', 0.13), b('#8A6A28', 0.12)],
+      ['#0F0A08', '#140D0B', '#0B0706'],
+      [b('#C05A4A', 0.34), b('#4A211C', 0.55), b('#8A3A32', 0.36), b('#7A5A20', 0.22)],
       'rgba(240,190,180,0.08)',
     ),
   },
   rose: {
     light: mode(
-      ['#F5ECF0', '#FBF4F7', '#F1E8ED'],
-      [b('#E8B0C8', 0.4), b('#C2577F', 0.22), b('#F2D0DE', 0.42), b('#B8D0E8', 0.2)],
+      ['#F2E2EA', '#FAF1F5', '#EFE1E9'],
+      [b('#E096B8', 0.45), b('#C2577F', 0.22), b('#F2D0DE', 0.4), b('#A8C8E8', 0.2)],
       'rgba(240,190,215,0.08)',
     ),
     dark: mode(
-      ['#120D10', '#181115', '#0E0A0C'],
-      [b('#8A3A5C', 0.48), b('#A04A6E', 0.26), b('#DA7FA7', 0.14), b('#7A5A9E', 0.14)],
+      ['#100A0D', '#150D11', '#0C070A'],
+      [b('#C05888', 0.34), b('#4A1F32', 0.55), b('#8A3A5C', 0.36), b('#5E3A7A', 0.24)],
       'rgba(240,190,215,0.08)',
     ),
   },
   violet: {
     light: mode(
-      ['#EEECF4', '#F5F4F9', '#EBE9F2'],
-      [b('#B9AEE8', 0.38), b('#8F7CC8', 0.28), b('#D9A8C4', 0.26), b('#A8D8E8', 0.22)],
+      ['#E4E0F0', '#F1EFF8', '#E6E2F1'],
+      [b('#A494E0', 0.45), b('#7160BE', 0.26), b('#D9A8C4', 0.3), b('#94C8E0', 0.24)],
       'rgba(210,200,255,0.09)',
     ),
     dark: mode(
-      ['#0B0A12', '#0E0D17', '#090810'],
-      [b('#4A3A8C', 0.5), b('#6F5AB8', 0.3), b('#B06A9C', 0.2), b('#3A6E9E', 0.18)],
+      ['#0A0812', '#0E0B18', '#070610'],
+      [b('#7C68D0', 0.36), b('#2C2350', 0.55), b('#584698', 0.36), b('#2E5E8A', 0.24)],
       'rgba(210,200,255,0.09)',
     ),
   },
 }
 
-/** Fixed blob geometry (viewport-relative ellipses, shared by all recipes). */
+/** Fixed blob geometry — ellipses parked on-canvas (the corner-parked first
+ *  cut swallowed the glows); shared by all recipes. */
 const BLOB_LAYERS = [
-  'radial-gradient(56% 44% at 6% -6%, %C 0%, transparent 72%)',
-  'radial-gradient(50% 46% at 106% 32%, %C 0%, transparent 72%)',
-  'radial-gradient(54% 42% at -8% 106%, %C 0%, transparent 72%)',
-  'radial-gradient(38% 36% at 96% 76%, %C 0%, transparent 72%)',
+  'radial-gradient(52% 44% at 12% 4%, %C 0%, transparent 70%)',
+  'radial-gradient(46% 42% at 94% 24%, %C 0%, transparent 70%)',
+  'radial-gradient(50% 44% at 4% 80%, %C 0%, transparent 70%)',
+  'radial-gradient(42% 38% at 88% 90%, %C 0%, transparent 70%)',
 ] as const
 
 const BASE_ANGLE = 168

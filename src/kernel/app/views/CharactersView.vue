@@ -85,7 +85,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
 
 <template>
   <section class="flex h-full flex-col">
-    <header class="flex shrink-0 items-center justify-between mp-glass-bar border-b border-line px-4">
+    <header class="mp-glass mx-3 mt-3 flex shrink-0 items-center justify-between rounded-panel px-4 py-2.5">
       <h1 class="py-3 text-lg">
         角色
       </h1>

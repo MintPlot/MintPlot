@@ -619,7 +619,7 @@ const restartSession = async (): Promise<void> => {
         :style="backdropDimStyle"
       />
     </div>
-    <header class="mp-glass-bar flex shrink-0 items-center gap-2 border-b border-line px-2">
+    <header class="mp-glass mx-3 mt-3 flex shrink-0 items-center gap-2 rounded-panel px-1.5 py-1">
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"

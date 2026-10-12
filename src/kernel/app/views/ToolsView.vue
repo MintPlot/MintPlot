@@ -26,7 +26,7 @@ const areaViews = computed(() => views.value.map((view) => ({ key: `view:${view.
 
 <template>
   <section class="flex h-full flex-col">
-    <header class="shrink-0 mp-glass-bar border-b border-line px-4">
+    <header class="mp-glass mx-3 mt-3 shrink-0 rounded-panel px-4 py-2.5">
       <h1 class="py-3 text-lg">
         工具
       </h1>

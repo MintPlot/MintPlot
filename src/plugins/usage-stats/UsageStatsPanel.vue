@@ -19,7 +19,7 @@ const attributionLabel = (record: TokenUsageRecord): string =>
     v-if="service"
     class="flex h-full flex-col"
   >
-    <header class="shrink-0 mp-glass-bar border-b border-line px-4">
+    <header class="mp-glass mx-3 mt-3 shrink-0 rounded-panel px-4 py-2.5">
       <div class="flex items-center justify-between py-3">
         <h1 class="text-lg">
           用量统计

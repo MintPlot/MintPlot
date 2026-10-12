@@ -48,7 +48,7 @@
 
   /* ── 主题 v3 亚克力材质(薄荷默认;与 design/acrylic.ts 构建器同值,
        对拍 spec 钉一致 —— 双真源漂移由 tests/kernel/acrylic.spec 拦截)── */
-  --mp-bg-image: linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%), radial-gradient(56% 44% at 6% -6%, rgba(141,234,196,0.5) 0%, transparent 72%), radial-gradient(50% 46% at 106% 32%, rgba(43,179,155,0.24) 0%, transparent 72%), radial-gradient(54% 42% at -8% 106%, rgba(123,216,232,0.3) 0%, transparent 72%), radial-gradient(38% 36% at 96% 76%, rgba(141,234,196,0.18) 0%, transparent 72%);
+  --mp-bg-image: linear-gradient(168deg, #DCEFE6 0%, #EFF9F3 46%, #E2F1EA 100%), radial-gradient(52% 44% at 12% 4%, rgba(95,216,174,0.5) 0%, transparent 70%), radial-gradient(46% 42% at 94% 24%, rgba(43,179,155,0.28) 0%, transparent 70%), radial-gradient(50% 44% at 4% 80%, rgba(123,216,232,0.38) 0%, transparent 70%), radial-gradient(42% 38% at 88% 90%, rgba(165,232,200,0.3) 0%, transparent 70%);
   --mp-glass-bg: rgba(255, 255, 255, 0.55);       /* T1 chrome frosted fill (§05 配方升级) */
   --mp-glass-border: rgba(255, 255, 255, 0.7);
   --mp-glass-edge: rgba(255, 255, 255, 0.8);      /* inner top highlight, acrylic edge light */
@@ -95,10 +95,10 @@
   --mp-danger-wash: rgba(196, 68, 58, 0.14);
 
   /* 夜航亚克力(主题 v3):墨绿黑基底 + 薄荷极光,值同 acrylic.ts 构建器 */
-  --mp-bg-image: linear-gradient(168deg, #071310 0%, #0A1815 46%, #060F0D 100%), radial-gradient(56% 44% at 6% -6%, rgba(20,110,95,0.55) 0%, transparent 72%), radial-gradient(50% 46% at 106% 32%, rgba(27,111,112,0.38) 0%, transparent 72%), radial-gradient(54% 42% at -8% 106%, rgba(43,179,155,0.14) 0%, transparent 72%), radial-gradient(38% 36% at 96% 76%, rgba(15,138,158,0.16) 0%, transparent 72%);
+  --mp-bg-image: linear-gradient(168deg, #08150F 0%, #0B1C16 46%, #061009 100%), radial-gradient(52% 44% at 12% 4%, rgba(23,176,141,0.38) 0%, transparent 70%), radial-gradient(46% 42% at 94% 24%, rgba(15,74,64,0.55) 0%, transparent 70%), radial-gradient(50% 44% at 4% 80%, rgba(13,110,94,0.38) 0%, transparent 70%), radial-gradient(42% 38% at 88% 90%, rgba(11,94,114,0.3) 0%, transparent 70%);
   --mp-glass-bg: rgba(16, 29, 26, 0.55);
   --mp-glass-border: rgba(220, 231, 226, 0.16);
-  --mp-glass-edge: rgba(140, 240, 200, 0.08);
+  --mp-glass-edge: rgba(140, 240, 200, 0.1);
   --mp-glass-solid: rgba(16, 29, 26, 0.88);
   --mp-card-fill-alpha: 0.74;
   --mp-surface-ai-bubble: rgba(16, 29, 26, 0.74);

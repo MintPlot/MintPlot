@@ -57,8 +57,8 @@ describe('acrylic 极光配方(八系 × 明暗)', () => {
 describe('buildMaterialVars(辉光缩放 / 透明度映射)', () => {
   it('默认滑杆 = 预览拍板值:四色斑 + 基底、chrome 0.55、内容面 0.72/0.74', () => {
     const light = buildMaterialVars(mint, 'light')
-    expect(light['--mp-bg-image']).toContain('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
-    expect(light['--mp-bg-image']).toContain('rgba(141,234,196,0.5)')
+    expect(light['--mp-bg-image']).toContain('linear-gradient(168deg, #DCEFE6 0%, #EFF9F3 46%, #E2F1EA 100%)')
+    expect(light['--mp-bg-image']).toContain('rgba(95,216,174,0.5)')
     expect((light['--mp-bg-image']!.match(/radial-gradient/g) ?? [])).toHaveLength(4)
     expect(light['--mp-glass-bg']).toBe('rgba(255,255,255,0.55)')
     expect(light['--mp-card-fill-alpha']).toBe('0.72')
@@ -67,7 +67,7 @@ describe('buildMaterialVars(辉光缩放 / 透明度映射)', () => {
     const dark = buildMaterialVars(mint, 'dark')
     expect(dark['--mp-glass-bg']).toBe('rgba(16,29,26,0.55)')
     expect(dark['--mp-glass-border']).toBe('rgba(220,231,226,0.16)')
-    expect(dark['--mp-glass-edge']).toBe('rgba(140,240,200,0.08)')
+    expect(dark['--mp-glass-edge']).toBe('rgba(140,240,200,0.1)')
     expect(dark['--mp-card-fill-alpha']).toBe('0.74')
     expect(dark['--mp-surface-ai-bubble']).toBe('rgba(16,29,26,0.74)')
     expect(dark['--mp-c-primary-hi']).toBe('85 194 175')
@@ -75,15 +75,15 @@ describe('buildMaterialVars(辉光缩放 / 透明度映射)', () => {
 
   it('辉光滑杆按乘数缩放色斑 alpha;0 档整层丢弃只留基底', () => {
     const half = buildMaterialVars(mint, 'dark', 50, GLASS_T_DEFAULT)
-    expect(half['--mp-bg-image']).toContain('rgba(20,110,95,0.28)') // 0.55 × 0.5
+    expect(half['--mp-bg-image']).toContain('rgba(23,176,141,0.19)') // 0.38 × 0.5
     expect((half['--mp-bg-image']!.match(/radial-gradient/g) ?? [])).toHaveLength(4)
 
     const off = buildMaterialVars(mint, 'dark', 0, GLASS_T_DEFAULT)
     expect(off['--mp-bg-image']).not.toContain('radial-gradient')
-    expect(off['--mp-bg-image']).toContain('linear-gradient(168deg, #071310')
+    expect(off['--mp-bg-image']).toContain('linear-gradient(168deg, #08150F')
 
     const boost = buildMaterialVars(mint, 'dark', 150, GLASS_T_DEFAULT)
-    expect(boost['--mp-bg-image']).toContain('rgba(20,110,95,0.83)') // 0.825 → round
+    expect(boost['--mp-bg-image']).toContain('rgba(23,176,141,0.57)') // 0.38 × 1.5
   })
 
   it('透明度滑杆映射两级表面 alpha 并钳制在可读区间', () => {
@@ -124,14 +124,14 @@ describe('acrylic × 色系应用(mint 单一来源纪律)', () => {
     applyMpColorFamily('mint', 'dark')
     expect(inlineVar('--mp-c-bg')).toBe('')
     expect(inlineVar('--mp-c-primary')).toBe('')
-    expect(inlineVar('--mp-bg-image')).toContain('#071310')
+    expect(inlineVar('--mp-bg-image')).toContain('#08150F')
     expect(inlineVar('--mp-glass-bg')).toBe('rgba(16,29,26,0.4)') // 1 − 0.6
   })
 
   it('非薄荷系写本系极光与玻璃;海蓝基底实锤', () => {
     applyMpColorFamily('ocean', 'light')
-    expect(inlineVar('--mp-bg-image')).toContain('#D8E8F6')
-    expect(inlineVar('--mp-bg-image')).toContain('rgba(123,184,232,0.6)')
+    expect(inlineVar('--mp-bg-image')).toContain('#D3E6F6')
+    expect(inlineVar('--mp-bg-image')).toContain('rgba(111,177,232,0.55)')
     expect(inlineVar('--mp-glass-bg')).toBe('rgba(255,255,255,0.55)')
   })
 
@@ -140,7 +140,7 @@ describe('acrylic × 色系应用(mint 单一来源纪律)', () => {
     setFamily('ocean')
     const { setGlow } = useAcrylicSliders()
     setGlow(120)
-    expect(inlineVar('--mp-bg-image')).toContain('rgba(123,184,232,0.72)') // 0.6 × 1.2
+    expect(inlineVar('--mp-bg-image')).toContain('rgba(111,177,232,0.66)') // 0.55 × 1.2
     expect(inlineVar('--mp-c-bubble-user')).toBe('46 124 214')
   })
 
@@ -185,7 +185,7 @@ describe('AppearanceSection 材质滑杆(主题 v3)', () => {
     expect(wrapper.text()).toContain('玻璃透明度')
 
     await ranges[0]!.setValue(120)
-    expect(inlineVar('--mp-bg-image')).toContain('rgba(141,234,196,0.6)') // 0.5 × 1.2
+    expect(inlineVar('--mp-bg-image')).toContain('rgba(95,216,174,0.6)') // 0.5 × 1.2
     expect(localStorage.getItem('mp_acrylic_glow')).toBe('120')
 
     await ranges[1]!.setValue(60)
