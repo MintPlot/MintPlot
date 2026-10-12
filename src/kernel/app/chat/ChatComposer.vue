@@ -36,7 +36,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
       <!-- M4-d pending attachment strip: thumbnails with per-image status. -->
       <div
         v-if="pendingImages.length > 0"
-        class="mb-2 flex gap-2 overflow-x-auto rounded-3xl border border-line bg-card p-2 shadow-md shadow-black/5"
+        class="mp-glass mb-2 flex gap-2 overflow-x-auto rounded-3xl p-2"
       >
         <div
           v-for="image in pendingImages"
@@ -89,7 +89,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
           </button>
         </div>
       </div>
-      <div class="relative rounded-3xl border border-line bg-card shadow-lg shadow-black/10">
+      <div class="mp-glass relative rounded-3xl">
         <!-- Toolbar row: attach + single-shot instruction (D2/D3, RP composer
              left controls); the inputActions panel stays reserved. -->
         <div class="flex items-center gap-0.5 px-1 pt-1">
@@ -146,7 +146,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
             </button>
             <div
               v-if="showOneShotPanel"
-              class="absolute left-0 top-10 z-40 w-64 rounded-bubble-ai border border-line bg-card p-2 shadow-lg"
+              class="mp-glass absolute left-0 top-10 z-40 w-64 rounded-bubble-ai p-2"
             >
               <p class="mb-1 text-xs font-bold text-ink">
                 单次指令
@@ -211,7 +211,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
         <button
           v-else
           type="button"
-          class="absolute bottom-1.5 right-1.5 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-on-primary disabled:opacity-40"
+          class="mp-accent-fill absolute bottom-1.5 right-1.5 flex h-9 w-9 items-center justify-center rounded-full text-on-primary disabled:opacity-40"
           :disabled="sendDisabled"
           aria-label="发送"
           @click="emit('send')"

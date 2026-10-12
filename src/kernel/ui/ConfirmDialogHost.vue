@@ -17,7 +17,7 @@ const current = computed(() => queue.value[0] ?? null)
       aria-modal="true"
       :aria-label="current.title"
     >
-      <div class="w-full max-w-sm rounded-bubble-ai border border-line bg-card p-5">
+      <div class="mp-glass w-full max-w-sm rounded-bubble-ai p-5">
         <h2 class="text-base font-bold text-ink">
           {{ current.title }}
         </h2>

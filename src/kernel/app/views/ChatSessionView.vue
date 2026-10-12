@@ -598,7 +598,7 @@ const restartSession = async (): Promise<void> => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 flex flex-col bg-bg">
+  <div class="fixed inset-0 z-40 flex flex-col">
     <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
          and dimmed behind the whole page. Tuning rides the card session
          envelope (SessionSettingsSheet); absent = enabled/40px/45%.
@@ -619,7 +619,7 @@ const restartSession = async (): Promise<void> => {
         :style="backdropDimStyle"
       />
     </div>
-    <header class="flex shrink-0 items-center gap-2 border-b border-line bg-card px-2">
+    <header class="mp-glass-bar flex shrink-0 items-center gap-2 border-b border-line px-2">
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"

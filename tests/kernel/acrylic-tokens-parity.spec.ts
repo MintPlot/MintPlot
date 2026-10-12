@@ -1,0 +1,52 @@
+// @vitest-environment node
+// Parity gate: tokens.css mint defaults must equal buildMaterialVars output
+// byte-for-byte (whitespace-normalized). tokens.css is the no-JS fallback and
+// mint's single source; acrylic.ts is the runtime builder — this spec is the
+// anti-drift net for that dual source. Node env because jsdom vite-resolve
+// rejects node: built-ins at top-level import (M4-g4 lesson).
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { buildMaterialVars, GLASS_T_DEFAULT, GLOW_DEFAULT } from '../../src/kernel/design/acrylic'
+import { findFamily } from '../../src/kernel/design/color-families'
+
+const css = readFileSync(resolve(process.cwd(), 'src/kernel/design/tokens.css'), 'utf8')
+const rootBlock = css.slice(css.indexOf(':root'), css.indexOf('.dark'))
+const darkBlock = css.slice(css.indexOf('.dark'))
+
+const readVar = (block: string, name: string): string => {
+  const match = block.match(new RegExp(`${name}:\\s*([^;]+);`))
+  if (!match?.[1]) throw new Error(`[parity] ${name} not found in block`)
+  return match[1]
+}
+
+const norm = (value: string): string => value.replace(/\s+/g, '')
+
+const mint = findFamily('mint')!
+
+const MATERIAL_KEYS = [
+  '--mp-bg-image',
+  '--mp-glass-bg',
+  '--mp-glass-border',
+  '--mp-glass-solid',
+  '--mp-glass-edge',
+  '--mp-card-fill-alpha',
+  '--mp-surface-ai-bubble',
+  '--mp-c-primary-hi',
+] as const
+
+describe('对拍:tokens.css 薄荷默认 ↔ acrylic 构建器(双真源防漂移)', () => {
+  it('浅色默认逐项相等', () => {
+    const built = buildMaterialVars(mint, 'light', GLOW_DEFAULT, GLASS_T_DEFAULT)
+    for (const key of MATERIAL_KEYS) {
+      expect(norm(readVar(rootBlock, key)), key).toBe(norm(built[key]!))
+    }
+  })
+
+  it('深色默认逐项相等', () => {
+    const built = buildMaterialVars(mint, 'dark', GLOW_DEFAULT, GLASS_T_DEFAULT)
+    for (const key of MATERIAL_KEYS) {
+      expect(norm(readVar(darkBlock, key)), key).toBe(norm(built[key]!))
+    }
+  })
+})

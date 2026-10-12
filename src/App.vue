@@ -92,7 +92,8 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
 </script>
 
 <template>
-  <div class="flex h-dvh flex-col bg-bg text-ink">
+  <!-- Theme v3: body carries the aurora stack; the shell stays transparent. -->
+  <div class="flex h-dvh flex-col text-ink">
     <div class="min-h-0 flex-1">
       <component
         :is="activeTab.component"
@@ -102,7 +103,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
 
     <nav
       v-show="!chatOverlay"
-      class="shrink-0 border-t border-line bg-card"
+      class="mp-glass-bar shrink-0 border-t border-line"
       aria-label="主导航"
     >
       <div class="mx-auto flex max-w-xl pb-[env(safe-area-inset-bottom)]">

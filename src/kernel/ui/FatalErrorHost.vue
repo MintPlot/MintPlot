@@ -17,7 +17,7 @@ const fatal = useFatalError()
       aria-modal="true"
       aria-label="严重错误"
     >
-      <div class="w-full max-w-sm rounded-bubble-ai border border-line bg-card p-5">
+      <div class="mp-glass w-full max-w-sm rounded-bubble-ai p-5">
         <div class="mb-2 flex items-center gap-2">
           <svg
             class="h-5 w-5 text-danger"

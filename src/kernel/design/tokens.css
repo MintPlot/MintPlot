@@ -45,9 +45,17 @@
   --mp-accent-wash: rgba(43, 179, 155, 0.09);
   --mp-danger: #c4443a;                    /* §06 危险 = 降饱和红,永远不做实心大块 */
   --mp-danger-wash: #fff1f0;
-  --mp-glass-bg: rgba(255, 255, 255, 0.62);      /* §05 薄荷玻璃配方 */
+
+  /* ── 主题 v3 亚克力材质(薄荷默认;与 design/acrylic.ts 构建器同值,
+       对拍 spec 钉一致 —— 双真源漂移由 tests/kernel/acrylic.spec 拦截)── */
+  --mp-bg-image: linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%), radial-gradient(56% 44% at 6% -6%, rgba(141,234,196,0.5) 0%, transparent 72%), radial-gradient(50% 46% at 106% 32%, rgba(43,179,155,0.24) 0%, transparent 72%), radial-gradient(54% 42% at -8% 106%, rgba(123,216,232,0.3) 0%, transparent 72%), radial-gradient(38% 36% at 96% 76%, rgba(141,234,196,0.18) 0%, transparent 72%);
+  --mp-glass-bg: rgba(255, 255, 255, 0.55);       /* T1 chrome frosted fill (§05 配方升级) */
   --mp-glass-border: rgba(255, 255, 255, 0.7);
-  --mp-glass-solid: rgba(255, 255, 255, 0.85);   /* @supports 降级为实色 */
+  --mp-glass-edge: rgba(255, 255, 255, 0.8);      /* inner top highlight, acrylic edge light */
+  --mp-glass-solid: rgba(255, 255, 255, 0.88);    /* @supports 降级为近实色 */
+  --mp-card-fill-alpha: 0.72;                            /* T2 scrolling-content surface alpha */
+  --mp-surface-ai-bubble: rgba(255, 255, 255, 0.72); /* AI floor bubble, translucent no blur */
+  --mp-c-primary-hi: 85 194 175;                  /* accent gradient hi end (user bubble/send) */
 
   /* ── 形状(§03 圆角尺度:像猫一样圆)── */
   --mp-radius-input: 10px;                  /* 输入框 / 小按钮 */
@@ -85,7 +93,14 @@
   --mp-line-strong: rgba(220, 231, 226, 0.18);
   --mp-accent-wash: rgba(92, 221, 180, 0.12);
   --mp-danger-wash: rgba(196, 68, 58, 0.14);
-  --mp-glass-bg: rgba(16, 29, 26, 0.55);         /* 深色玻璃底改墨绿黑 55%(§05) */
+
+  /* 夜航亚克力(主题 v3):墨绿黑基底 + 薄荷极光,值同 acrylic.ts 构建器 */
+  --mp-bg-image: linear-gradient(168deg, #071310 0%, #0A1815 46%, #060F0D 100%), radial-gradient(56% 44% at 6% -6%, rgba(20,110,95,0.55) 0%, transparent 72%), radial-gradient(50% 46% at 106% 32%, rgba(27,111,112,0.38) 0%, transparent 72%), radial-gradient(54% 42% at -8% 106%, rgba(43,179,155,0.14) 0%, transparent 72%), radial-gradient(38% 36% at 96% 76%, rgba(15,138,158,0.16) 0%, transparent 72%);
+  --mp-glass-bg: rgba(16, 29, 26, 0.55);
   --mp-glass-border: rgba(220, 231, 226, 0.16);
-  --mp-glass-solid: rgba(16, 29, 26, 0.85);
+  --mp-glass-edge: rgba(140, 240, 200, 0.08);
+  --mp-glass-solid: rgba(16, 29, 26, 0.88);
+  --mp-card-fill-alpha: 0.74;
+  --mp-surface-ai-bubble: rgba(16, 29, 26, 0.74);
+  --mp-c-primary-hi: 85 194 175;
 }

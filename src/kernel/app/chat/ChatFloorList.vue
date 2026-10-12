@@ -97,8 +97,8 @@ const emit = defineEmits<{
       class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
       :class="[
         view.message.role === 'user'
-          ? 'rounded-bubble-user bg-chat-bubble-user text-chat-on-bubble-user'
-          : 'border border-line bg-chat-bubble-ai text-chat-on-bubble-ai',
+          ? 'mp-accent-fill rounded-bubble-user text-chat-on-bubble-user'
+          : 'border border-line bg-[var(--mp-surface-ai-bubble)] text-chat-on-bubble-ai',
         view.wide ? 'w-full max-w-none' : 'max-w-[85%]',
       ]"
     >
@@ -138,14 +138,14 @@ const emit = defineEmits<{
       <button
         v-if="view.capsule.total > 0"
         type="button"
-        class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg px-2 py-0.5 text-[10px] text-ink-2"
+        class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg/50 px-2 py-0.5 text-[10px] text-ink-2"
         @click="emit('toggle-capsule', view.message.id)"
       >
         ⚙ 变量 ×{{ view.capsule.total }}
       </button>
       <div
         v-if="view.capsuleOpen"
-        class="mt-1 rounded-input border border-line bg-bg px-2 py-1 text-[10px] text-ink-2"
+        class="mt-1 rounded-input border border-line bg-bg/50 px-2 py-1 text-[10px] text-ink-2"
       >
         <div
           v-for="update in view.capsule.flat"

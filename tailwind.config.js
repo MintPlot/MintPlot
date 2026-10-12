@@ -7,7 +7,10 @@ export default {
       // 主色替换 = 换表操作(设计语言 §02):token 真源在 kernel/design/tokens.css
       colors: {
         bg: 'rgb(var(--mp-c-bg) / <alpha-value>)',
-        card: 'rgb(var(--mp-c-card) / <alpha-value>)',
+        // Theme v3: every card surface is translucent by default — the fill
+        // alpha is slider-driven (--mp-card-fill-alpha, from design/acrylic.ts);
+        // explicit /xx modifiers compose with it via calc.
+        card: 'rgb(var(--mp-c-card) / calc(<alpha-value> * var(--mp-card-fill-alpha, 1)))',
         ink: {
           DEFAULT: 'rgb(var(--mp-c-ink) / <alpha-value>)',
           2: 'rgb(var(--mp-c-ink-2) / <alpha-value>)',

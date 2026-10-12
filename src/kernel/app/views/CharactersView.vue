@@ -85,7 +85,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
 
 <template>
   <section class="flex h-full flex-col">
-    <header class="flex shrink-0 items-center justify-between border-b border-line bg-card px-4">
+    <header class="flex shrink-0 items-center justify-between mp-glass-bar border-b border-line px-4">
       <h1 class="py-3 text-lg">
         角色
       </h1>
@@ -144,7 +144,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
             >
             <span
               v-else
-              class="absolute inset-0 flex items-center justify-center bg-bg"
+              class="absolute inset-0 flex items-center justify-center bg-bg/40"
             >
               <MintCat class="h-12 w-12 text-ink-3" />
             </span>

@@ -42,7 +42,7 @@ const toggleSection = (id: string): void => {
 
 <template>
   <section class="flex h-full flex-col">
-    <header class="shrink-0 border-b border-line bg-card px-4">
+    <header class="shrink-0 mp-glass-bar border-b border-line px-4">
       <h1 class="py-3 text-lg">
         设置
       </h1>

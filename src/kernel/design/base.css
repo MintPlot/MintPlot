@@ -22,7 +22,12 @@
   }
 
   body {
-    background: rgb(var(--mp-c-bg));
+    background-color: rgb(var(--mp-c-bg));
+    /* Theme v3 aurora: five family-tinted gradient layers from --mp-bg-image
+       plus a static grain tile; the grain blends in overlay (last blend-mode
+       entry matches the trailing layer). */
+    background-image: var(--mp-bg-image, none), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-blend-mode: normal, normal, normal, normal, normal, overlay;
     color: rgb(var(--mp-c-ink));
     font-family: var(--mp-font-sans);
     line-height: 1.65; /* §04:行高放宽,楼层沉浸感的主要来源 */
@@ -52,17 +57,35 @@
   }
 }
 
-/* §05 薄荷玻璃:只给固定 chrome 层(顶栏 / 输入区 / 遮罩 / 抽屉),滚动内容区保持实心。 */
+/* 主题 v3 两级材质(§05 纪律:模糊只给固定 chrome 层,滚动内容区保持无 filter)。
+   T1 .mp-glass = 浮层卡(模态/toast/输入坞):真磨砂 + 发丝描边;
+   T1 .mp-glass-bar = 通栏 chrome(顶栏/tab 栏/底部 sheet):磨砂底 + 内顶高光,
+   描边方向留给模板的 border-b/border-t;
+   T2 = bg-card 工具类本身(tailwind card 映射乘 --mp-card-fill-alpha)。 */
 @layer components {
   .mp-glass {
     background: var(--mp-glass-bg);
-    -webkit-backdrop-filter: blur(14px) saturate(1.5);
-    backdrop-filter: blur(14px) saturate(1.5);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5);
+    backdrop-filter: blur(22px) saturate(1.5);
     border: 1px solid var(--mp-glass-border);
+    box-shadow: inset 0 1px 0 var(--mp-glass-edge), 0 12px 32px -18px rgba(0, 0, 0, 0.3);
   }
 
-  @supports not ((backdrop-filter: blur(14px)) or (-webkit-backdrop-filter: blur(14px))) {
-    .mp-glass {
+  .mp-glass-bar {
+    background: var(--mp-glass-bg);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5);
+    backdrop-filter: blur(22px) saturate(1.5);
+    box-shadow: inset 0 1px 0 var(--mp-glass-edge);
+  }
+
+  /* 强调面(用户气泡/发送钮):主色渐变,hi 端随色系派生。 */
+  .mp-accent-fill {
+    background: linear-gradient(140deg, rgb(var(--mp-c-primary-hi)), rgb(var(--mp-c-primary)));
+  }
+
+  @supports not ((backdrop-filter: blur(22px)) or (-webkit-backdrop-filter: blur(22px))) {
+    .mp-glass,
+    .mp-glass-bar {
       background: var(--mp-glass-solid);
     }
   }

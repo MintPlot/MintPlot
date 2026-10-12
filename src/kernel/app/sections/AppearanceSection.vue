@@ -6,6 +6,7 @@ import { computed, inject, onMounted, ref } from 'vue'
 import { useMpTheme } from '@/kernel/design/theme'
 import type { MpThemePref } from '@/kernel/design/theme'
 import { COLOR_FAMILIES, useMpColorFamily } from '@/kernel/design/color-families'
+import { useAcrylicSliders } from '@/kernel/design/acrylic'
 import { cardBackdropDefault } from '@/kernel/app/card-backdrop-default'
 import { CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
@@ -13,7 +14,10 @@ import type { CharacterStore } from '@/kernel/characters/character-store'
 
 const { pref, theme, setPref } = useMpTheme()
 const { familyId, setFamily } = useMpColorFamily()
+const { glow, transparency, setGlow, setTransparency } = useAcrylicSliders()
 const expanded = ref(false)
+
+const rangeValue = (event: Event): number => Number((event.target as HTMLInputElement).value)
 
 // Backdrop preview: the newest card cover gives the sliders something real to
 // act on; cards without covers (or a bare library) fall back to the brand cat.
@@ -131,6 +135,40 @@ const themeLabel = computed(() =>
             />
           </div>
         </div>
+
+        <!-- 材质(主题 v3):辉光 = 极光色斑强度,透明度 = 玻璃表面 alpha;
+             两者即时重应用,跨启动持久。 -->
+        <div class="rounded-b-card border-t border-line px-3 pb-4 pt-4">
+          <p class="text-sm text-ink">
+            材质
+          </p>
+          <label class="mt-3 flex items-center gap-2">
+            <span class="w-14 flex-shrink-0 text-xs text-ink-2">辉光强度</span>
+            <input
+              :value="glow"
+              type="range"
+              min="0"
+              max="150"
+              step="5"
+              class="min-w-0 flex-1 accent-primary"
+              @input="setGlow(rangeValue($event))"
+            >
+            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ glow }}%</span>
+          </label>
+          <label class="mt-2 flex items-center gap-2">
+            <span class="w-14 flex-shrink-0 text-xs text-ink-2">玻璃透明度</span>
+            <input
+              :value="transparency"
+              type="range"
+              min="10"
+              max="70"
+              step="5"
+              class="min-w-0 flex-1 accent-primary"
+              @input="setTransparency(rangeValue($event))"
+            >
+            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ transparency }}%</span>
+          </label>
+        </div>
       </div>
     </div>
 
@@ -141,7 +179,7 @@ const themeLabel = computed(() =>
         卡图背景
       </div>
       <div class="rounded-b-card border-t border-line px-3 pb-4 pt-4">
-        <div class="relative h-28 overflow-hidden rounded-input border border-line bg-bg">
+        <div class="relative h-28 overflow-hidden rounded-input border border-line">
           <img
             v-if="previewCover"
             :src="previewCover"

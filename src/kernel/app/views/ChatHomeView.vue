@@ -138,7 +138,7 @@ const timeLabel = (updatedAt: number): string => {
 
 <template>
   <section class="flex h-full flex-col">
-    <header class="flex shrink-0 items-center justify-between border-b border-line bg-card px-4">
+    <header class="flex shrink-0 items-center justify-between mp-glass-bar border-b border-line px-4">
       <h1 class="py-3 text-lg">
         对话
       </h1>
@@ -218,7 +218,7 @@ const timeLabel = (updatedAt: number): string => {
           </div>
           <button
             type="button"
-            class="relative flex w-full touch-pan-y select-none items-start gap-3 border-b border-line bg-bg px-4 py-3 text-left transition-[transform,background-color]"
+            class="relative flex w-full touch-pan-y select-none items-start gap-3 border-b border-line px-4 py-3 text-left transition-[transform,background-color]"
             :class="swipeDrag?.id === conversation.id ? 'duration-0' : 'duration-150'"
             :style="{ transform: `translateX(${swipeOffsetOf(conversation.id)}px)` }"
             @pointerdown="onRowPointerDown(conversation.id, $event)"

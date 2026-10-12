@@ -52,7 +52,7 @@ const toggle = (script: RegexScript): void => emit('toggle', script.uid)
     class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
     @click.self="emit('close')"
   >
-    <div class="max-h-[75vh] overflow-y-auto rounded-t-2xl border-t border-line bg-card px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
+    <div class="max-h-[75vh] overflow-y-auto rounded-t-2xl mp-glass-bar border-t border-line px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-sm font-bold">
           正则

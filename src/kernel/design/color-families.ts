@@ -1,5 +1,13 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { subscribeEffectiveTheme, useMpTheme, type MpTheme } from './theme'
+import {
+  MATERIAL_VARS,
+  acrylicGlow,
+  acrylicTransparency,
+  buildMaterialVars,
+  initAcrylicSliders,
+  slidersAtDefault,
+} from './acrylic'
 
 /**
  * Color families (Edge-style appearance): one curated hue row, each family
@@ -154,11 +162,24 @@ const FAMILY_VARS = [
   '--mp-c-chat-accent',
 ] as const
 
-/** Apply a family for the given resolved mode; mint falls back to tokens.css. */
+/** Apply a family for the given resolved mode; mint falls back to tokens.css
+ *  (family tokens + material defaults) unless the acrylic sliders deviate. */
 export function applyMpColorFamily(familyId: string, mode: MpTheme): void {
   if (typeof document === 'undefined') return
   const style = document.documentElement.style
+  if (familyId === DEFAULT_FAMILY_ID && slidersAtDefault()) {
+    for (const key of [...FAMILY_VARS, ...MATERIAL_VARS]) style.removeProperty(key)
+    return
+  }
   if (familyId === DEFAULT_FAMILY_ID) {
+    // Mint family tokens stay in tokens.css; only slider-driven material
+    // overrides go inline.
+    const mint = findFamily(DEFAULT_FAMILY_ID)!
+    for (const [key, value] of Object.entries(
+      buildMaterialVars(mint, mode, acrylicGlow.value, acrylicTransparency.value),
+    )) {
+      style.setProperty(key, value)
+    }
     for (const key of FAMILY_VARS) style.removeProperty(key)
     return
   }
@@ -189,16 +210,10 @@ export function applyMpColorFamily(familyId: string, mode: MpTheme): void {
   set('--mp-c-bubble-ai', tripletOf(rgbOf(tokens.aiBubble)))
   set('--mp-c-on-bubble-ai', tripletOf(ink))
   set('--mp-c-chat-accent', tripletOf(rgbOf(tokens.accentText)))
-  if (mode === 'dark') {
-    // Dark glass derives from the family surfaces; light mode keeps the
-    // hue-neutral white glass defaults from tokens.css.
-    set('--mp-glass-bg', rgbaOf(bg, 0.55))
-    set('--mp-glass-border', rgbaOf(ink, 0.16))
-    set('--mp-glass-solid', rgbaOf(bg, 0.85))
-  } else {
-    style.removeProperty('--mp-glass-bg')
-    style.removeProperty('--mp-glass-border')
-    style.removeProperty('--mp-glass-solid')
+  for (const [key, value] of Object.entries(
+    buildMaterialVars(family, mode, acrylicGlow.value, acrylicTransparency.value),
+  )) {
+    set(key, value)
   }
 }
 
@@ -232,6 +247,11 @@ const reapply = (): void => {
   applyMpColorFamily(familyId.value, useMpTheme().theme.value)
 }
 
+// Slider tweaks re-apply the current family's material layer in place.
+// Sync flush keeps the effect immediate (a slider read-back must never see
+// a stale inline var), and the refs are cheap scalars.
+watch([acrylicGlow, acrylicTransparency], reapply, { flush: 'sync' })
+
 export function useMpColorFamily() {
   const setFamily = (id: MpColorFamilyId): void => {
     if (!FAMILY_IDS.includes(id)) return
@@ -244,6 +264,7 @@ export function useMpColorFamily() {
 
 /** Composition-root bootstrap: drop the v1 key, restore and bind the family. */
 export function initMpColorFamily(): void {
+  initAcrylicSliders()
   if (typeof localStorage !== 'undefined') {
     try {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
