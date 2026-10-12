@@ -65,6 +65,22 @@ describe('card session store · one session per card (chat:card keys)', () => {
     expect(await store.get('cc-bg')).toMatchObject({ bg: { enabled: false, blur: 12, dim: 60 } })
   })
 
+  it('style selection rides the envelope (get/save round-trip, absent = follow global)', async () => {
+    const store = createCardSessionStore(createStorageRepository(createMemoryEngine()))
+    const session = await store.create({ id: 'cc-style', name: '带风格的卡', firstMes: '' })
+    // Legacy envelope (no style yet) = follow global (planning D6).
+    expect((await store.get('cc-style'))!.style).toBeUndefined()
+
+    session.style = {
+      followGlobal: false,
+      picks: { length: ['p1'], mood: ['m1', 'm2'], person: ['person2'] },
+    }
+    await store.save(session)
+    expect(await store.get('cc-style')).toMatchObject({
+      style: { followGlobal: false, picks: { length: ['p1'], mood: ['m1', 'm2'], person: ['person2'] } },
+    })
+  })
+
   it('reset drops every floor and reseeds the greeting (D3 清空重开)', async () => {
     const store = createCardSessionStore(createStorageRepository(createMemoryEngine()))
     await store.create(SEED)

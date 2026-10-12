@@ -61,6 +61,10 @@ import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 import { createEmptyMemoryState } from '@/kernel/memory/memory-engine'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
 import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
+// 叙事风格维度系统(S3):卡域顶栏「风格」面板;选择落 CardSession.style,
+// 请求装配经 cardStyle dep 读三态取材(全局/本卡覆盖)。chatbox 域无入口(D14)。
+import StyleSheet from '@/kernel/app/sections/StyleSheet.vue'
+import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
 
 const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
 
@@ -149,6 +153,15 @@ const cotActive = ref(true)
 // model override (both domains).
 const showSessionSettings = ref(false)
 const showVariables = ref(false)
+const showStyle = ref(false)
+/** S3: per-card style override → the assembler's cardStyle dep. Absent =
+ *  follow global (the resolver treats null as follow). */
+const cardStyle = computed<CardStyleSelection | null>(() => cardSession.value?.style ?? null)
+const onStyleSaved = (selection: CardStyleSelection): void => {
+  if (!cardSession.value) return
+  cardSession.value.style = selection
+  void persistSession()
+}
 // M4-d single-shot system instruction: rides one request, then clears.
 const oneShotInstruction = ref('')
 
@@ -436,6 +449,7 @@ const {
   memoryState: () => memoryState.value,
   presetsActive: () => presetsActive.value,
   presetSnapshot: () => presetSnapshot.value,
+  cardStyle: () => cardStyle.value,
   setPresetSnapshot: (snapshot) => { presetSnapshot.value = snapshot },
   cotActive: () => cotActive.value,
   variablesActive: () => variablesActive.value,
@@ -674,6 +688,14 @@ const restartSession = async (): Promise<void> => {
         记忆
       </button>
       <button
+        v-if="isCardDomain && presetsActive"
+        type="button"
+        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
+        @click="showStyle = true"
+      >
+        风格
+      </button>
+      <button
         type="button"
         class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-primary"
         aria-label="会话设置"
@@ -832,6 +854,13 @@ const restartSession = async (): Promise<void> => {
       @saved="onSheetSaved"
       @preview="backdropPreview = $event"
       @reset-bg="onBackdropReset"
+    />
+    <StyleSheet
+      v-if="isCardDomain && showStyle && cardSession"
+      :selection="cardStyle"
+      :snapshot="presetSnapshot"
+      @save="onStyleSaved"
+      @close="showStyle = false"
     />
     <MemorySheet
       v-if="isCardDomain && showMemory && card"

@@ -16,6 +16,7 @@
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
 import { createBaseline, createChanges } from '@/kernel/store/chat-persistence'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
+import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
 
 /** The card fields a session needs at creation (from the character store). */
 export interface CardSessionSeed {
@@ -46,6 +47,9 @@ export interface CardSession {
    *  profile's model. Endpoint/key still come from the active profile. */
   model?: string
   bg?: CardBackdrop
+  /** Per-card style-dimension selection (style-dimension-presets-plan S3):
+   *  absent or followGlobal=true = the global active-group combination. */
+  style?: CardStyleSelection
 }
 
 interface CardSessionMeta {
@@ -56,6 +60,7 @@ interface CardSessionMeta {
   preview: string
   model?: string
   bg?: CardBackdrop
+  style?: CardStyleSelection
 }
 
 export interface CardSessionStore {
@@ -101,6 +106,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         messages,
         ...(meta.model ? { model: meta.model } : {}),
         ...(meta.bg ? { bg: meta.bg } : {}),
+        ...(meta.style ? { style: meta.style } : {}),
       }
     },
 
@@ -134,6 +140,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
         preview: previewOf(session.messages),
         ...(session.model ? { model: session.model } : {}),
         ...(session.bg ? { bg: session.bg } : {}),
+        ...(session.style ? { style: session.style } : {}),
       }
       await repository.set(metaKeyOf(session.cardId), meta)
     },
