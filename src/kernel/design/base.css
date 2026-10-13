@@ -58,7 +58,12 @@
    滚动卡面(bg-card 乘 --mp-card-fill-alpha)不带 filter。投影取参考件
    surf-shadow/accent-shadow,随色系走。 */
 @layer components {
+  /* isolation + 合成层强制:部分合成器(chromium 内嵌 WebView)会把
+     backdrop-filter 的模糊图层溢出圆角裁剪、以矩形画到元素外(用户实测),
+     自建合成层 + 隔离组让圆角裁剪正确套住模糊结果。 */
   .mp-glass {
+    isolation: isolate;
+    transform: translateZ(0);
     background: var(--mp-glass-bg);
     -webkit-backdrop-filter: blur(22px) saturate(1.5);
     backdrop-filter: blur(22px) saturate(1.5);
@@ -73,6 +78,8 @@
   }
 
   .mp-glass-bar {
+    isolation: isolate;
+    transform: translateZ(0);
     background: var(--mp-glass-bg);
     -webkit-backdrop-filter: blur(22px) saturate(1.5);
     backdrop-filter: blur(22px) saturate(1.5);
@@ -83,6 +90,8 @@
 
   /* AI 楼层气泡(参考件配方):半透 + 16px 磨砂 + 发丝边 + 内顶高光。 */
   .mp-bubble {
+    isolation: isolate;
+    transform: translateZ(0);
     background: var(--mp-surface-ai-bubble);
     border: 1px solid var(--mp-glass-border);
     box-shadow: inset 0 1px 0 var(--mp-glass-edge), 0 10px 26px -14px var(--mp-glass-shadow);
