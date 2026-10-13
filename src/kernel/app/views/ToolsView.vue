@@ -26,7 +26,7 @@ const areaViews = computed(() => views.value.map((view) => ({ key: `view:${view.
 
 <template>
   <section class="relative h-full">
-    <div class="absolute inset-0 overflow-y-auto px-4 pt-[98px] pb-[104px]">
+    <div class="absolute inset-0 overflow-y-auto px-4 pt-[98px] pb-[calc(104px+env(safe-area-inset-bottom))]">
       <div class="mx-auto flex max-w-xl flex-col gap-3">
         <section class="overflow-hidden rounded-card border border-line bg-card">
           <button

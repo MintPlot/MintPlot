@@ -164,7 +164,7 @@ const timeLabel = (updatedAt: number): string => {
 
     <div
       v-else
-      class="absolute inset-0 overflow-y-auto pt-[98px] pb-[104px]"
+      class="absolute inset-0 overflow-y-auto pt-[98px] pb-[calc(104px+env(safe-area-inset-bottom))]"
     >
       <ul class="mx-auto max-w-xl">
         <li
