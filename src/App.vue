@@ -111,12 +111,12 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       class="mp-glass relative z-10 mx-3 mb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 rounded-full"
       aria-label="主导航"
     >
-      <div class="mx-auto flex max-w-xl">
+      <div class="mx-auto flex max-w-xl p-1.5">
         <button
           v-for="tab in tabs"
           :key="tab.id"
           type="button"
-          class="relative my-1.5 flex min-h-[44px] flex-1 flex-col items-center justify-end gap-0.5 rounded-full pb-1.5 pt-2 text-xs"
+          class="relative flex min-h-[44px] flex-1 flex-col items-center justify-end gap-0.5 rounded-full pb-1.5 pt-2 text-xs"
           :class="tab.id === activeId ? 'bg-accent-wash text-primary' : 'text-ink-3'"
           :aria-current="tab.id === activeId ? 'page' : undefined"
           @click="activeId = tab.id"
