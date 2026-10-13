@@ -40,8 +40,16 @@ const blobStyles = computed(() => auroraBlobStyles(familyId.value, theme.value, 
 .mp-aurora-blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(55px);
+  filter: blur(62px);
 }
+
+/* Alternating rotations: at phone widths the big ellipses' lower arcs would
+   otherwise run near-horizontal right behind the chrome rows and read as
+   rectangular slabs — tilting them keeps the glow organic. */
+.mp-aurora-blob-1 { transform: rotate(-12deg); }
+.mp-aurora-blob-2 { transform: rotate(9deg); }
+.mp-aurora-blob-3 { transform: rotate(11deg); }
+.mp-aurora-blob-4 { transform: rotate(-9deg); }
 
 /* Grain tile at the mockup's 4.5% overlay — a full-strength blend flattens
    the aurora field (measured in the v1 postmortem). */

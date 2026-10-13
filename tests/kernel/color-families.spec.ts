@@ -95,7 +95,7 @@ describe('色系应用(内联变量接管,mint 回落 tokens.css)', () => {
     const vermilion = findFamily('vermilion')!
     expect(inlineVar('--mp-c-bg')).toBe(hexToRgbTriplet(vermilion.dark.bg))
     expect(inlineVar('--mp-c-bubble-user')).toBe(hexToRgbTriplet(vermilion.dark.accent))
-    expect(inlineVar('--mp-glass-bg')).toBe('rgba(24,17,15,0.55)')
+    expect(inlineVar('--mp-glass-bg')).toBe('rgba(24,17,15,0.78)')
   })
 
   it('薄荷 = 清除全部内联变量,默认观感零位移', () => {

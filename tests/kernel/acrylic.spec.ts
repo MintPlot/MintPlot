@@ -90,7 +90,7 @@ describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
   it('默认透明度 45% → 参考件原值逐项', () => {
     const light = buildMaterialVars('mint', 'light')
     expect(light['--mp-aurora-base']).toBe('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
-    expect(light['--mp-glass-bg']).toBe('rgba(255,255,255,0.55)')
+    expect(light['--mp-glass-bg']).toBe('rgba(255,255,255,0.78)')
     expect(light['--mp-glass-border']).toBe('rgba(255,255,255,0.7)')
     expect(light['--mp-glass-edge']).toBe('rgba(255,255,255,0.85)')
     expect(light['--mp-glass-shadow']).toBe('rgba(16,40,34,0.18)')
@@ -100,27 +100,27 @@ describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
 
     const dark = buildMaterialVars('mint', 'dark')
     expect(dark['--mp-aurora-base']).toBe('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)')
-    expect(dark['--mp-glass-bg']).toBe('rgba(12,24,21,0.55)')
+    expect(dark['--mp-glass-bg']).toBe('rgba(12,24,21,0.78)')
     expect(dark['--mp-surface-ai-bubble']).toBe('rgba(16,32,28,0.5)')
     expect(dark['--mp-c-primary-hi']).toBe('53 196 168')
     expect(dark['--mp-card-fill-alpha']).toBe('0.74')
   })
 
-  it('透明度滑杆绕参考锚点(45%)缩放玻璃与气泡,alpha 钳制可读区间', () => {
+  it('透明度滑杆:玻璃走加实映射,气泡绕参考锚点缩放', () => {
     const t60 = buildMaterialVars('mint', 'light', 60)
-    expect(t60['--mp-glass-bg']).toBe('rgba(255,255,255,0.4)')
+    expect(t60['--mp-glass-bg']).toBe('rgba(255,255,255,0.63)') // 1.23 − 0.6
     expect(t60['--mp-surface-ai-bubble']).toBe('rgba(255,255,255,0.45)') // 0.62 × 0.727
     expect(t60['--mp-card-fill-alpha']).toBe('0.57')
 
     const t10 = buildMaterialVars('mint', 'light', 10)
-    expect(t10['--mp-glass-bg']).toBe('rgba(255,255,255,0.9)') // 0.55 × 1.636
+    expect(t10['--mp-glass-bg']).toBe('rgba(255,255,255,0.95)') // clamp 上限
     expect(t10['--mp-surface-ai-bubble']).toBe('rgba(255,255,255,0.95)') // clamp 上限
   })
 
   it('非薄荷系输出本系配方(海蓝实锤)', () => {
     const ocean = buildMaterialVars('ocean', 'light')
     expect(ocean['--mp-aurora-base']).toContain('#D8E8F6')
-    expect(ocean['--mp-glass-bg']).toBe('rgba(255,255,255,0.52)')
+    expect(ocean['--mp-glass-bg']).toBe('rgba(255,255,255,0.78)') // 加实映射与锚点无关
   })
 })
 
@@ -147,7 +147,7 @@ describe('acrylic × 色系应用(mint 单一来源纪律)', () => {
     applyMpColorFamily('mint', 'dark')
     expect(inlineVar('--mp-c-bg')).toBe('')
     expect(inlineVar('--mp-c-primary')).toBe('')
-    expect(inlineVar('--mp-glass-bg')).toBe('rgba(12,24,21,0.4)')
+    expect(inlineVar('--mp-glass-bg')).toBe('rgba(12,24,21,0.63)')
     expect(inlineVar('--mp-aurora-base')).toContain('#071310')
   })
 
@@ -156,7 +156,7 @@ describe('acrylic × 色系应用(mint 单一来源纪律)', () => {
     setFamily('ocean')
     const { setTransparency } = useAcrylicSliders()
     setTransparency(60)
-    expect(inlineVar('--mp-glass-bg')).toBe('rgba(255,255,255,0.38)') // 海蓝 surf 0.52 × 0.727
+    expect(inlineVar('--mp-glass-bg')).toBe('rgba(255,255,255,0.63)')
   })
 
   it('滑杆持久化;脏值经 init 钳制回落', () => {
@@ -220,7 +220,7 @@ describe('AppearanceSection 材质滑杆(主题 v3)', () => {
     expect(localStorage.getItem('mp_acrylic_glow')).toBe('120')
 
     await ranges[1]!.setValue(60)
-    expect(inlineVar('--mp-glass-bg')).toBe('rgba(255,255,255,0.4)')
+    expect(inlineVar('--mp-glass-bg')).toBe('rgba(255,255,255,0.63)') // 1.23 − 0.6
     expect(localStorage.getItem('mp_acrylic_glass')).toBe('60')
   })
 })

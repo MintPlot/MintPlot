@@ -230,17 +230,18 @@ const hexTriplet = (hex: string): string => {
   return `${r} ${g} ${b2}`
 }
 
-/** Glass chrome alpha at the transparency slider's default — the anchor the
- *  recipe alphas are written against (mint surf 0.55 = 1 − 0.45). */
-const CHROME_ANCHOR = 1 - GLASS_T_DEFAULT / 100
+/** Glass chrome fill alpha — no backdrop-filter (it leaks rectangular bands
+ *  on some chromium compositors, user-confirmed), so the fill itself carries
+ *  the frosted read: more opaque than the mockup's 0.55, anchored so the
+ *  transparency slider's default (45%) lands on 0.78.
+ *  The bubble keeps its mockup translucency — it only ever floats over the
+ *  static aurora, where the blur had nothing to show anyway. */
+const chromeAlphaOf = (transparencyPercent: number): number =>
+  clamp(1.23 - transparencyPercent / 100, 0.5, 0.95)
 
-/**
- * Transparency percent → surf alpha ratio. At the default (45%) the ratio is
- * 1, so every family renders its mockup value verbatim; lower t = more
- * opaque, higher t = more translucent, clamped to a readable band.
- */
+/** Bubble fill ratio around the mockup anchor (t=45 → 1). */
 const glassRatioOf = (transparencyPercent: number): number =>
-  clamp((1 - transparencyPercent / 100) / CHROME_ANCHOR, 0.5, 1.73)
+  clamp((1 - transparencyPercent / 100) / (1 - GLASS_T_DEFAULT / 100), 0.5, 1.73)
 
 /** CSS variables for the frosted surfaces (consumed by base.css classes). */
 export function buildMaterialVars(
@@ -251,7 +252,7 @@ export function buildMaterialVars(
   const material = MATERIAL_RECIPES[familyId][mode]
   const ratio = glassRatioOf(transparencyPercent)
   const surf = rgbaParts(material.surf)
-  const surfAlpha = clamp(surf.alpha * ratio, 0.3, 0.95)
+    const surfAlpha = chromeAlphaOf(transparencyPercent)
   const ai = rgbaParts(material.aiBubble)
   return {
     '--mp-aurora-base': material.base,
@@ -259,7 +260,6 @@ export function buildMaterialVars(
     '--mp-glass-border': material.hairline,
     '--mp-glass-edge': material.edge,
     '--mp-glass-shadow': material.surfShadow,
-    '--mp-glass-solid': rgbaOf(surf.rgb, Math.min(0.95, surfAlpha + 0.35)),
     '--mp-accent-shadow': material.accentShadow,
     '--mp-surface-ai-bubble': rgbaOf(ai.rgb, clamp(ai.alpha * ratio, 0.35, 0.95)),
     '--mp-c-primary-hi': hexTriplet(material.accentHi),
@@ -274,7 +274,6 @@ export const MATERIAL_VARS = [
   '--mp-glass-border',
   '--mp-glass-edge',
   '--mp-glass-shadow',
-  '--mp-glass-solid',
   '--mp-accent-shadow',
   '--mp-surface-ai-bubble',
   '--mp-c-primary-hi',

@@ -27,7 +27,6 @@ const MATERIAL_KEYS = [
   '--mp-glass-border',
   '--mp-glass-edge',
   '--mp-glass-shadow',
-  '--mp-glass-solid',
   '--mp-accent-shadow',
   '--mp-surface-ai-bubble',
   '--mp-c-primary-hi',
