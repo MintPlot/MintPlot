@@ -5,7 +5,7 @@ import {
   GLASS_T_DEFAULT,
   MATERIAL_RECIPES,
   MATERIAL_VARS,
-  auroraBlobStyles,
+  buildAuroraImage,
   buildMaterialVars,
   initAcrylicSliders,
   slidersAtDefault,
@@ -69,27 +69,27 @@ describe('材质配方(八系 × 明暗,预览值即代码)', () => {
   })
 })
 
-describe('auroraBlobStyles(辉光 = 色斑 alpha 倍率)', () => {
-  it('默认辉光输出参考件原值;零辉光整层透明', () => {
-    expect(auroraBlobStyles('mint', 'light')).toEqual([
-      'rgba(141,234,196,0.5)', 'rgba(43,179,155,0.24)', 'rgba(123,216,232,0.3)', 'rgba(141,234,196,0.18)',
-    ])
-    expect(auroraBlobStyles('mint', 'light', 0)).toEqual([
-      'transparent', 'transparent', 'transparent', 'transparent',
-    ])
+describe('buildAuroraImage(辉光 = 色斑 alpha 倍率,单层无边界)', () => {
+  it('默认辉光 = 基底 + 4 层高斯衰减径向渐变,参考件原值', () => {
+    const img = buildAuroraImage('mint', 'light')
+    expect((img.match(/radial-gradient/g) ?? [])).toHaveLength(4)
+    expect(img).toContain('rgba(141,234,196,0.5) 0%, rgba(141,234,196,0.5) 75%')
+    expect(img).toContain('rgba(43,179,155,0.24) 0%')
   })
 
-  it('辉光 50% 减半;150% 封顶不溢出', () => {
-    expect(auroraBlobStyles('mint', 'light', 50)[0]).toBe('rgba(141,234,196,0.25)')
-    expect(auroraBlobStyles('mint', 'light', 150)[0]).toBe('rgba(141,234,196,0.75)')
-    expect(auroraBlobStyles('ocean', 'light', 150)[0]).toBe('rgba(123,184,232,0.9)') // 0.6 × 1.5
+  it('零辉光只剩基底;50% 减半;150% 封顶不溢出', () => {
+    expect(buildAuroraImage('mint', 'light', 0)).toBe('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
+    expect(buildAuroraImage('mint', 'light', 50)).toContain('rgba(141,234,196,0.25) 0%')
+    expect(buildAuroraImage('mint', 'light', 150)).toContain('rgba(141,234,196,0.75) 0%')
+    expect(buildAuroraImage('ocean', 'light', 150)).toContain('rgba(123,184,232,0.9) 0%') // 0.6 × 1.5
   })
 })
 
 describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
   it('默认透明度 45% → 参考件原值逐项', () => {
     const light = buildMaterialVars('mint', 'light')
-    expect(light['--mp-aurora-base']).toBe('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
+    expect(light['--mp-aurora-base']).toContain('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
+    expect((light['--mp-aurora-base']!.match(/radial-gradient/g) ?? [])).toHaveLength(4)
     expect(light['--mp-glass-bg']).toBe('rgba(255,255,255,0.78)')
     expect(light['--mp-glass-border']).toBe('rgba(255,255,255,0.7)')
     expect(light['--mp-glass-edge']).toBe('rgba(255,255,255,0.85)')
@@ -99,7 +99,7 @@ describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
     expect(light['--mp-card-fill-alpha']).toBe('0.72')
 
     const dark = buildMaterialVars('mint', 'dark')
-    expect(dark['--mp-aurora-base']).toBe('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)')
+    expect(dark['--mp-aurora-base']).toContain('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)')
     expect(dark['--mp-glass-bg']).toBe('rgba(12,24,21,0.78)')
     expect(dark['--mp-surface-ai-bubble']).toBe('rgba(16,32,28,0.5)')
     expect(dark['--mp-c-primary-hi']).toBe('53 196 168')
@@ -107,12 +107,12 @@ describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
   })
 
   it('透明度滑杆:玻璃走加实映射,气泡绕参考锚点缩放', () => {
-    const t60 = buildMaterialVars('mint', 'light', 60)
+    const t60 = buildMaterialVars('mint', 'light', GLOW_DEFAULT, 60)
     expect(t60['--mp-glass-bg']).toBe('rgba(255,255,255,0.63)') // 1.23 − 0.6
     expect(t60['--mp-surface-ai-bubble']).toBe('rgba(255,255,255,0.45)') // 0.62 × 0.727
     expect(t60['--mp-card-fill-alpha']).toBe('0.57')
 
-    const t10 = buildMaterialVars('mint', 'light', 10)
+    const t10 = buildMaterialVars('mint', 'light', GLOW_DEFAULT, 10)
     expect(t10['--mp-glass-bg']).toBe('rgba(255,255,255,0.95)') // clamp 上限
     expect(t10['--mp-surface-ai-bubble']).toBe('rgba(255,255,255,0.95)') // clamp 上限
   })
@@ -187,12 +187,13 @@ describe('AuroraLayer(真 DOM 模糊色块 + 噪点)', () => {
     resetSliders()
   })
 
-  it('渲染 4 个色斑 + 噪点层;色斑带参考件填充与几何', () => {
+  it('单元素承载辉光图(基底 + 4 层渐变)+ 噪点层', () => {
     const wrapper = mount(AuroraLayer)
-    const blobs = wrapper.findAll('.mp-aurora-blob')
-    expect(blobs).toHaveLength(4)
-    expect(blobs[0]!.attributes('style')).toContain('141, 234, 196')
-    expect(blobs[0]!.attributes('style')).toContain('width: 120%')
+    const root = wrapper.find('.mp-aurora')
+    expect(root.exists()).toBe(true)
+    expect(root.attributes('style')).toContain('radial-gradient')
+    expect(root.attributes('style')).toContain('141, 234, 196')
+    expect(wrapper.findAll('.mp-aurora-blob')).toHaveLength(0) // 无 DOM 色斑 = 无可见层边界
     expect(wrapper.find('.mp-aurora-grain').exists()).toBe(true)
   })
 })

@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildMaterialVars, GLASS_T_DEFAULT } from '../../src/kernel/design/acrylic'
+import { buildMaterialVars, GLASS_T_DEFAULT, GLOW_DEFAULT } from '../../src/kernel/design/acrylic'
 
 const css = readFileSync(resolve(process.cwd(), 'src/kernel/design/tokens.css'), 'utf8')
 const rootBlock = css.slice(css.indexOf(':root'), css.indexOf('.dark'))
@@ -35,14 +35,14 @@ const MATERIAL_KEYS = [
 
 describe('对拍:tokens.css 薄荷默认 ↔ acrylic 构建器(双真源防漂移)', () => {
   it('浅色默认逐项相等', () => {
-    const built = buildMaterialVars('mint', 'light', GLASS_T_DEFAULT)
+    const built = buildMaterialVars('mint', 'light', GLOW_DEFAULT, GLASS_T_DEFAULT)
     for (const key of MATERIAL_KEYS) {
       expect(norm(readVar(rootBlock, key)), key).toBe(norm(built[key]!))
     }
   })
 
   it('深色默认逐项相等', () => {
-    const built = buildMaterialVars('mint', 'dark', GLASS_T_DEFAULT)
+    const built = buildMaterialVars('mint', 'dark', GLOW_DEFAULT, GLASS_T_DEFAULT)
     for (const key of MATERIAL_KEYS) {
       expect(norm(readVar(darkBlock, key)), key).toBe(norm(built[key]!))
     }

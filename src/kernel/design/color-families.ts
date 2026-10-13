@@ -176,7 +176,7 @@ export function applyMpColorFamily(familyId: string, mode: MpTheme): void {
     // overrides go inline.
     const mint = findFamily(DEFAULT_FAMILY_ID)!
     for (const [key, value] of Object.entries(
-      buildMaterialVars(mint.id, mode, acrylicTransparency.value),
+      buildMaterialVars(mint.id, mode, acrylicGlow.value, acrylicTransparency.value),
     )) {
       style.setProperty(key, value)
     }
@@ -211,7 +211,7 @@ export function applyMpColorFamily(familyId: string, mode: MpTheme): void {
   set('--mp-c-on-bubble-ai', tripletOf(ink))
   set('--mp-c-chat-accent', tripletOf(rgbOf(tokens.accentText)))
   for (const [key, value] of Object.entries(
-    buildMaterialVars(family.id, mode, acrylicTransparency.value),
+    buildMaterialVars(family.id, mode, acrylicGlow.value, acrylicTransparency.value),
   )) {
     set(key, value)
   }

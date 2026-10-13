@@ -1,31 +1,26 @@
 <script setup lang="ts">
-// Theme v3 aurora backdrop (replica route): four real blurred blob divs plus
-// the grain overlay — the exact technique of the approved mockup. Fully
-// static (no animation, no pointer events); blur rasterizes once, so scroll
-// perf is unaffected. The parent positions the root (fixed in the shell,
-// absolute inside the chat overlay) and owns its stacking context.
+// Theme v3 aurora backdrop: the glow is BAKED into one background-image stack
+// (base gradient + gaussian-falloff radial gradients from design/acrylic.ts)
+// — no DOM blob shapes, so no visible layer boundary and nothing for a
+// compositor to leak. Fully static; the parent positions the root and owns
+// its stacking context. Reactive: family/mode/glow rebuild the paint.
 import { computed } from 'vue'
 import { useMpTheme } from './theme'
 import { useMpColorFamily } from './color-families'
-import { AURORA_BLOB_GEOMETRY, acrylicGlow, auroraBlobStyles } from './acrylic'
+import { acrylicGlow, buildAuroraImage } from './acrylic'
 
 const { theme } = useMpTheme()
 const { familyId } = useMpColorFamily()
 
-const blobStyles = computed(() => auroraBlobStyles(familyId.value, theme.value, acrylicGlow.value))
+const auroraImage = computed(() => buildAuroraImage(familyId.value, theme.value, acrylicGlow.value))
 </script>
 
 <template>
   <div
     class="mp-aurora"
+    :style="{ backgroundImage: auroraImage }"
     aria-hidden="true"
   >
-    <div
-      v-for="(fill, index) in blobStyles"
-      :key="index"
-      class="mp-aurora-blob"
-      :style="{ ...AURORA_BLOB_GEOMETRY[index], background: fill }"
-    />
     <div class="mp-aurora-grain" />
   </div>
 </template>
@@ -34,22 +29,8 @@ const blobStyles = computed(() => auroraBlobStyles(familyId.value, theme.value, 
 .mp-aurora {
   overflow: hidden;
   pointer-events: none;
-  background: var(--mp-aurora-base, rgb(var(--mp-c-bg)));
+  background-color: rgb(var(--mp-c-bg));
 }
-
-.mp-aurora-blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(62px);
-}
-
-/* Alternating rotations: at phone widths the big ellipses' lower arcs would
-   otherwise run near-horizontal right behind the chrome rows and read as
-   rectangular slabs — tilting them keeps the glow organic. */
-.mp-aurora-blob-1 { transform: rotate(-12deg); }
-.mp-aurora-blob-2 { transform: rotate(9deg); }
-.mp-aurora-blob-3 { transform: rotate(11deg); }
-.mp-aurora-blob-4 { transform: rotate(-9deg); }
 
 /* Grain tile at the mockup's 4.5% overlay — a full-strength blend flattens
    the aurora field (measured in the v1 postmortem). */
