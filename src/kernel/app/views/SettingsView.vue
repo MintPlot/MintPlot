@@ -41,14 +41,8 @@ const toggleSection = (id: string): void => {
 </script>
 
 <template>
-  <section class="flex h-full flex-col">
-    <header class="mp-glass mx-3 mt-3 shrink-0 rounded-panel px-4 py-2.5">
-      <h1 class="py-3 text-lg">
-        设置
-      </h1>
-    </header>
-
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+  <section class="relative h-full">
+    <div class="absolute inset-0 overflow-y-auto px-4 pt-[98px] pb-[104px]">
       <div class="mx-auto flex max-w-xl flex-col gap-3">
         <section
           v-for="section in sections"
@@ -98,5 +92,11 @@ const toggleSection = (id: string): void => {
         </p>
       </div>
     </div>
+
+    <header class="mp-glass absolute inset-x-3 top-3 rounded-panel px-4 py-2.5">
+      <h1 class="py-3 text-lg">
+        设置
+      </h1>
+    </header>
   </section>
 </template>

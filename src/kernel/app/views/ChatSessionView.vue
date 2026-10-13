@@ -626,7 +626,7 @@ const restartSession = async (): Promise<void> => {
         :style="backdropDimStyle"
       />
     </div>
-    <header class="mp-glass mx-3 mt-3 flex shrink-0 items-center gap-2 rounded-panel px-1.5 py-1">
+    <header class="mp-glass absolute inset-x-3 top-3 z-10 flex items-center gap-2 rounded-panel px-1.5 py-1">
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"
@@ -772,7 +772,7 @@ const restartSession = async (): Promise<void> => {
     <template v-else-if="conversation || cardSession">
       <div
         ref="messagesEl"
-        class="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        class="absolute inset-0 overflow-y-auto px-4 pt-24 pb-[calc(112px+env(safe-area-inset-bottom))]"
       >
         <div class="mx-auto flex max-w-xl flex-col gap-3">
           <ChatFloorList
@@ -797,44 +797,48 @@ const restartSession = async (): Promise<void> => {
         </div>
       </div>
 
-      <div
-        v-if="sendError"
-        class="shrink-0 border-t border-danger/30 bg-danger-wash px-3 py-2"
-        role="alert"
-      >
-        <div class="mx-auto flex max-w-xl items-center gap-2">
-          <span class="min-w-0 flex-1 break-words text-xs text-danger">请求失败:{{ sendError }}</span>
-          <button
-            type="button"
-            class="flex-shrink-0 rounded-input border border-danger/40 px-2 py-1 text-xs font-bold text-danger"
-            @click="retryLastSend"
-          >
-            重试
-          </button>
-          <button
-            type="button"
-            class="flex-shrink-0 px-1 text-xs text-ink-3"
-            aria-label="关闭错误提示"
-            @click="sendError = ''"
-          >
-            ✕
-          </button>
+      <!-- Error bar + composer float over the scrolling floors (theme v3
+           content-under-glass): floors slide beneath them. -->
+      <div class="absolute inset-x-0 bottom-0 z-10">
+        <div
+          v-if="sendError"
+          class="border-t border-danger/30 bg-danger-wash px-3 py-2"
+          role="alert"
+        >
+          <div class="mx-auto flex max-w-xl items-center gap-2">
+            <span class="min-w-0 flex-1 break-words text-xs text-danger">请求失败:{{ sendError }}</span>
+            <button
+              type="button"
+              class="flex-shrink-0 rounded-input border border-danger/40 px-2 py-1 text-xs font-bold text-danger"
+              @click="retryLastSend"
+            >
+              重试
+            </button>
+            <button
+              type="button"
+              class="flex-shrink-0 px-1 text-xs text-ink-3"
+              aria-label="关闭错误提示"
+              @click="sendError = ''"
+            >
+              ✕
+            </button>
+          </div>
         </div>
-      </div>
 
-      <ChatComposer
-        :pending-images="pendingImages"
-        :draft="draft"
-        :streaming="streaming"
-        :one-shot-instruction="oneShotInstruction"
-        :send-disabled="!draft.trim() || pendingImagesNotReady"
-        @update:draft="draft = $event"
-        @update:one-shot-instruction="oneShotInstruction = $event"
-        @send="send()"
-        @stop="stopStreaming"
-        @files="onChatImageSelected"
-        @remove-image="removePendingImage"
-      />
+        <ChatComposer
+          :pending-images="pendingImages"
+          :draft="draft"
+          :streaming="streaming"
+          :one-shot-instruction="oneShotInstruction"
+          :send-disabled="!draft.trim() || pendingImagesNotReady"
+          @update:draft="draft = $event"
+          @update:one-shot-instruction="oneShotInstruction = $event"
+          @send="send()"
+          @stop="stopStreaming"
+          @files="onChatImageSelected"
+          @remove-image="removePendingImage"
+        />
+      </div>
     </template>
 
     <ImageViewer

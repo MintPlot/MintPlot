@@ -31,7 +31,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
 </script>
 
 <template>
-  <footer class="shrink-0 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2">
+  <footer class="px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2">
     <div class="mx-auto max-w-xl">
       <!-- M4-d pending attachment strip: thumbnails with per-image status. -->
       <div

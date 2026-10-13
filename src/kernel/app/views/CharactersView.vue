@@ -84,8 +84,8 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
 </script>
 
 <template>
-  <section class="flex h-full flex-col">
-    <header class="mp-glass mx-3 mt-3 flex shrink-0 items-center justify-between rounded-panel px-4 py-2.5">
+  <section class="relative h-full">
+    <header class="mp-glass absolute inset-x-3 top-3 z-10 flex items-center justify-between rounded-panel px-4 py-2.5">
       <h1 class="py-3 text-lg">
         角色
       </h1>
@@ -108,7 +108,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
 
     <div
       v-if="!loading && cards.length === 0"
-      class="flex flex-1 flex-col items-center justify-center gap-4 px-8 pb-16 text-center"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8 pb-28 pt-20 text-center"
     >
       <MintCat class="h-24 w-24 text-ink" />
       <p class="text-sm text-ink-2">
@@ -121,7 +121,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
 
     <div
       v-else
-      class="min-h-0 flex-1 overflow-y-auto"
+      class="absolute inset-0 overflow-y-auto pt-[98px] pb-[104px]"
     >
       <div class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4">
         <div

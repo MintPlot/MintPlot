@@ -108,7 +108,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
          (mockup-aligned), not a full-bleed bar. -->
     <nav
       v-show="!chatOverlay"
-      class="mp-glass relative z-10 mx-3 mb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 rounded-full"
+      class="mp-glass absolute inset-x-3 bottom-[max(env(safe-area-inset-bottom),0.75rem)] z-20 rounded-full"
       aria-label="主导航"
     >
       <div class="mx-auto flex max-w-xl p-1.5">
