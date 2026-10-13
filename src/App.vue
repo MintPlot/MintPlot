@@ -23,6 +23,7 @@ import MemorySettingsSection from '@/kernel/app/sections/MemorySettingsSection.v
 import ToastHost from '@/kernel/ui/ToastHost.vue'
 import ConfirmDialogHost from '@/kernel/ui/ConfirmDialogHost.vue'
 import FatalErrorHost from '@/kernel/ui/FatalErrorHost.vue'
+import AuroraLayer from '@/kernel/design/AuroraLayer.vue'
 
 // Four-tab IA (spec v1.2 §02) registered through the view registry — the tab bar is a
 // projection of the registry, not hardcoded; from M2+ the card workshop (characters tab)
@@ -92,9 +93,11 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
 </script>
 
 <template>
-  <!-- Theme v3: body carries the aurora stack; the shell stays transparent. -->
+  <!-- Theme v3: body carries the solid base; the aurora is a real-DOM layer
+       (blurred blobs + grain) pinned behind the shell content. -->
   <div class="flex h-dvh flex-col text-ink">
-    <div class="min-h-0 flex-1">
+    <AuroraLayer class="fixed inset-0 z-0" />
+    <div class="relative z-10 min-h-0 flex-1">
       <component
         :is="activeTab.component"
         v-bind="activeTab.props"
@@ -105,7 +108,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
          (mockup-aligned), not a full-bleed bar. -->
     <nav
       v-show="!chatOverlay"
-      class="mp-glass mx-3 mb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 rounded-full"
+      class="mp-glass relative z-10 mx-3 mb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 rounded-full"
       aria-label="主导航"
     >
       <div class="mx-auto flex max-w-xl">

@@ -61,6 +61,7 @@ import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 import { createEmptyMemoryState } from '@/kernel/memory/memory-engine'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
 import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
+import AuroraLayer from '@/kernel/design/AuroraLayer.vue'
 // 叙事风格维度系统(S3):卡域顶栏「风格」面板;选择落 CardSession.style,
 // 请求装配经 cardStyle dep 读三态取材(全局/本卡覆盖)。chatbox 域无入口(D14)。
 import StyleSheet from '@/kernel/app/sections/StyleSheet.vue'
@@ -599,6 +600,12 @@ const restartSession = async (): Promise<void> => {
 
 <template>
   <div class="fixed inset-0 z-40 flex flex-col">
+    <!-- Theme v3: the page is a fixed overlay — its own aurora instance gives
+         the opaque base (gradient) plus the real blob field, hiding the list
+         behind. Sits at -z-20 so the card cover (-z-10) stays above it. -->
+    <AuroraLayer
+      class="absolute inset-0 -z-20"
+    />
     <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
          and dimmed behind the whole page. Tuning rides the card session
          envelope (SessionSettingsSheet); absent = enabled/40px/45%.

@@ -1,14 +1,15 @@
 import { ref } from 'vue'
 import type { MpTheme } from './theme'
-import type { MpColorFamily, MpColorFamilyId } from './color-families'
+import type { MpColorFamilyId } from './color-families'
 
 /**
- * Acrylic material layer (theme v3): aurora background stacks + glass
- * recipes per color family, modulated by two user sliders (glow intensity,
- * glass transparency). The aurora is pure CSS background layers on body —
- * no DOM nodes, no blur filters. Frosted surfaces come from .mp-glass
- * (fixed chrome, backdrop-filter) and .mp-surface (scrolling content,
- * translucent only) in base.css.
+ * Theme v3 material recipes (replica route): the values below are extracted
+ * verbatim from the approved mockup (mp-mint-v2-reference.html / the original
+ * five-variant carousel). The aurora is REAL blurred DOM blobs — never a
+ * gradient approximation; the feel dies in that translation.
+ *
+ * Families without a mockup variant (cyan/forest/vermilion/rose) follow the
+ * same structure derived from their color-families hues (noted in the plan).
  */
 
 export interface AuroraBlob {
@@ -16,138 +17,132 @@ export interface AuroraBlob {
   readonly alpha: number
 }
 
-export interface AuroraMode {
-  /** Base gradient stops (0% / 46% / 100%). */
-  readonly base: readonly [string, string, string]
-  /** Four hue blobs: main / neighbor / variant / counterpoint. */
+export interface MaterialMode {
+  /** Base gradient behind the blobs — verbatim from the mockup (per-mode
+   *  angle AND mid-stop: mint light 46% vs dark 44%, ocean light 48%). */
+  readonly base: string
   readonly blobs: readonly [AuroraBlob, AuroraBlob, AuroraBlob, AuroraBlob]
-  /** Dark-mode inner top highlight for glass; light always uses white. */
+  /** Frosted chrome fill, full rgba() as in the mockup. */
+  readonly surf: string
+  readonly hairline: string
   readonly edge: string
+  readonly surfShadow: string
+  /** AI floor bubble fill (translucent, blurred via .mp-bubble). */
+  readonly aiBubble: string
+  /** Accent gradient bright end (user bubble / send button). */
+  readonly accentHi: string
+  readonly accentShadow: string
 }
 
-export interface AuroraRecipe {
-  readonly light: AuroraMode
-  readonly dark: AuroraMode
-}
+export type MaterialRecipe = Readonly<{ light: MaterialMode; dark: MaterialMode }>
+
+const recipe = (light: MaterialMode, dark: MaterialMode): MaterialRecipe => ({ light, dark })
+const mode = (
+  base: string,
+  blobs: readonly [AuroraBlob, AuroraBlob, AuroraBlob, AuroraBlob],
+  surf: string,
+  hairline: string,
+  edge: string,
+  surfShadow: string,
+  aiBubble: string,
+  accentHi: string,
+  accentShadow: string,
+): MaterialMode => ({ base, blobs, surf, hairline, edge, surfShadow, aiBubble, accentHi, accentShadow })
 
 const b = (hex: string, alpha: number): AuroraBlob => ({ hex, alpha })
-const mode = (
-  base: readonly [string, string, string],
-  blobs: readonly [AuroraBlob, AuroraBlob, AuroraBlob, AuroraBlob],
-  edge: string,
-): AuroraMode => ({ base, blobs, edge })
 
-/** Hand-tuned per family/mode; blobs sit mostly on-canvas and read clearly in
- *  both modes (the first cut parked them in the corners where they vanished). */
-export const AURORA_RECIPES: Record<MpColorFamilyId, AuroraRecipe> = {
-  mint: {
-    light: mode(
-      ['#DCEFE6', '#EFF9F3', '#E2F1EA'],
-      [b('#5FD8AE', 0.5), b('#2BB39B', 0.28), b('#7BD8E8', 0.38), b('#A5E8C8', 0.3)],
-      'rgba(140,240,200,0.08)',
-    ),
-    dark: mode(
-      ['#08150F', '#0B1C16', '#061009'],
-      [b('#17B08D', 0.38), b('#0F4A40', 0.55), b('#0D6E5E', 0.38), b('#0B5E72', 0.3)],
-      'rgba(140,240,200,0.1)',
-    ),
-  },
-  ocean: {
-    light: mode(
-      ['#D3E6F6', '#E8F1F9', '#DBE8F4'],
-      [b('#6FB1E8', 0.55), b('#3D7FC4', 0.32), b('#8DE0E8', 0.4), b('#E8D9B8', 0.26)],
-      'rgba(160,200,255,0.1)',
-    ),
-    dark: mode(
-      ['#081020', '#0A1628', '#060C18'],
-      [b('#2E7CD6', 0.4), b('#123B66', 0.55), b('#1E5FA8', 0.36), b('#0FA3C6', 0.26)],
-      'rgba(160,200,255,0.1)',
-    ),
-  },
-  cyan: {
-    light: mode(
-      ['#D8EEEB', '#EBF7F5', '#DDEEEB'],
-      [b('#54CBBB', 0.48), b('#0E9488', 0.26), b('#7BC8E8', 0.34), b('#A8E8CE', 0.22)],
-      'rgba(140,235,225,0.08)',
-    ),
-    dark: mode(
-      ['#061110', '#081715', '#050D0B'],
-      [b('#0FA08F', 0.36), b('#0C443E', 0.55), b('#0B6E64', 0.36), b('#0C6E8A', 0.24)],
-      'rgba(140,235,225,0.08)',
-    ),
-  },
-  forest: {
-    light: mode(
-      ['#DFEED8', '#EFF7EA', '#E2EFDC'],
-      [b('#8CCB7E', 0.45), b('#43875F', 0.24), b('#C8E8B8', 0.34), b('#8CD8C0', 0.2)],
-      'rgba(180,235,190,0.07)',
-    ),
-    dark: mode(
-      ['#080F0A', '#0B140D', '#060B07'],
-      [b('#3F9E62', 0.34), b('#1C4429', 0.55), b('#2F6B47', 0.36), b('#3E6E2F', 0.24)],
-      'rgba(180,235,190,0.07)',
-    ),
-  },
-  amber: {
-    light: mode(
-      ['#F0E3C8', '#F8F1E2', '#EFE2CB'],
-      [b('#E0B45E', 0.5), b('#D9924E', 0.3), b('#F2E3C2', 0.5), b('#A8BCDD', 0.22)],
-      'rgba(240,200,140,0.09)',
-    ),
-    dark: mode(
-      ['#0D0A05', '#120D07', '#0A0704'],
-      [b('#C88A2E', 0.36), b('#4A3312', 0.55), b('#8A5E1E', 0.36), b('#7A4028', 0.24)],
-      'rgba(240,200,140,0.09)',
-    ),
-  },
-  vermilion: {
-    light: mode(
-      ['#F2E4D8', '#FAF2EA', '#F0E3D6'],
-      [b('#E09A82', 0.45), b('#B85450', 0.22), b('#EAC8B0', 0.4), b('#9CB8D0', 0.2)],
-      'rgba(240,190,180,0.08)',
-    ),
-    dark: mode(
-      ['#0F0A08', '#140D0B', '#0B0706'],
-      [b('#C05A4A', 0.34), b('#4A211C', 0.55), b('#8A3A32', 0.36), b('#7A5A20', 0.22)],
-      'rgba(240,190,180,0.08)',
-    ),
-  },
-  rose: {
-    light: mode(
-      ['#F2E2EA', '#FAF1F5', '#EFE1E9'],
-      [b('#E096B8', 0.45), b('#C2577F', 0.22), b('#F2D0DE', 0.4), b('#A8C8E8', 0.2)],
-      'rgba(240,190,215,0.08)',
-    ),
-    dark: mode(
-      ['#100A0D', '#150D11', '#0C070A'],
-      [b('#C05888', 0.34), b('#4A1F32', 0.55), b('#8A3A5C', 0.36), b('#5E3A7A', 0.24)],
-      'rgba(240,190,215,0.08)',
-    ),
-  },
-  violet: {
-    light: mode(
-      ['#E4E0F0', '#F1EFF8', '#E6E2F1'],
-      [b('#A494E0', 0.45), b('#7160BE', 0.26), b('#D9A8C4', 0.3), b('#94C8E0', 0.24)],
-      'rgba(210,200,255,0.09)',
-    ),
-    dark: mode(
-      ['#0A0812', '#0E0B18', '#070610'],
-      [b('#7C68D0', 0.36), b('#2C2350', 0.55), b('#584698', 0.36), b('#2E5E8A', 0.24)],
-      'rgba(210,200,255,0.09)',
-    ),
-  },
-}
-
-/** Fixed blob geometry — ellipses parked on-canvas (the corner-parked first
- *  cut swallowed the glows); shared by all recipes. */
-const BLOB_LAYERS = [
-  'radial-gradient(52% 44% at 12% 4%, %C 0%, transparent 70%)',
-  'radial-gradient(46% 42% at 94% 24%, %C 0%, transparent 70%)',
-  'radial-gradient(50% 44% at 4% 80%, %C 0%, transparent 70%)',
-  'radial-gradient(42% 38% at 88% 90%, %C 0%, transparent 70%)',
+/** Blob geometry — viewport-relative translation of the mockup's pixel blobs
+ *  (300px-wide screen): 120%/48% top-left, 107%/58% right, 110%/43.5%
+ *  bottom-left, 77%/37% bottom-right; blur stays a fixed 55px. */
+export const AURORA_BLOB_GEOMETRY = [
+  { width: '120%', height: '48.4%', left: '-23.3%', top: '-14.5%' },
+  { width: '106.7%', height: '58.1%', right: '-43.3%', top: '17.7%' },
+  { width: '110%', height: '43.5%', left: '-16.7%', bottom: '-11.3%' },
+  { width: '76.7%', height: '37.1%', right: '-16.7%', bottom: '21%' },
 ] as const
 
-const BASE_ANGLE = 168
+export const MATERIAL_RECIPES: Record<MpColorFamilyId, MaterialRecipe> = {
+  mint: recipe(
+    mode('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)',
+      [b('#8DEAC4', 0.5), b('#2BB39B', 0.24), b('#7BD8E8', 0.3), b('#8DEAC4', 0.18)],
+      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
+      'rgba(16,40,34,0.18)', 'rgba(255,255,255,0.62)', '#46C7AC', 'rgba(43,179,155,0.35)'),
+    mode('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)',
+      [b('#146E5F', 0.55), b('#1B6F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
+      'rgba(12,24,21,0.55)', 'rgba(200,235,220,0.14)', 'rgba(140,240,200,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(16,32,28,0.5)', '#35C4A8', 'rgba(43,179,155,0.4)'),
+  ),
+  ocean: recipe(
+    mode('linear-gradient(160deg, #D8E8F6 0%, #E9F1F8 48%, #DFE9F3 100%)',
+      [b('#7BB8E8', 0.6), b('#3D7FC4', 0.34), b('#8DE0E8', 0.42), b('#E8D9B8', 0.3)],
+      'rgba(255,255,255,0.52)', 'rgba(255,255,255,0.65)', 'rgba(255,255,255,0.8)',
+      'rgba(23,42,66,0.22)', 'rgba(255,255,255,0.6)', '#57A0E6', 'rgba(46,124,214,0.4)'),
+    mode('linear-gradient(168deg, #0A1424 0%, #0C172A 46%, #081020 100%)',
+      [b('#1E5FA8', 0.5), b('#0FA3C6', 0.26), b('#2D6EB8', 0.34), b('#7A5A28', 0.16)],
+      'rgba(13,22,40,0.52)', 'rgba(255,255,255,0.12)', 'rgba(160,200,255,0.1)',
+      'rgba(0,0,0,0.45)', 'rgba(18,30,52,0.55)', '#4E97DA', 'rgba(61,127,196,0.45)'),
+  ),
+  cyan: recipe(
+    mode('linear-gradient(168deg, #E0F0EE 0%, #EDF7F5 46%, #DCEEEB 100%)',
+      [b('#7DD8CB', 0.5), b('#0E9488', 0.24), b('#7BC8E8', 0.3), b('#A8E8CE', 0.18)],
+      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
+      'rgba(10,40,36,0.18)', 'rgba(255,255,255,0.62)', '#2BBFAF', 'rgba(14,148,136,0.35)'),
+    mode('linear-gradient(170deg, #061110 0%, #0A1817 44%, #050D0B 100%)',
+      [b('#0B6E64', 0.55), b('#116F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
+      'rgba(10,22,20,0.55)', 'rgba(200,235,230,0.14)', 'rgba(140,235,225,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(14,30,28,0.5)', '#2DD4BF', 'rgba(11,110,100,0.4)'),
+  ),
+  forest: recipe(
+    mode('linear-gradient(168deg, #E9F1E4 0%, #F3F8EF 46%, #E4EFE0 100%)',
+      [b('#94C88A', 0.5), b('#43875F', 0.24), b('#B4D896', 0.3), b('#96D8BE', 0.18)],
+      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
+      'rgba(20,40,24,0.18)', 'rgba(255,255,255,0.62)', '#55A374', 'rgba(67,135,95,0.35)'),
+    mode('linear-gradient(170deg, #0A120C 0%, #0F1A12 44%, #080F0A 100%)',
+      [b('#356B4C', 0.55), b('#4C8A5E', 0.38), b('#7CC08B', 0.14), b('#6E8A4A', 0.16)],
+      'rgba(14,22,16,0.55)', 'rgba(220,240,225,0.14)', 'rgba(180,235,190,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(20,30,23,0.5)', '#7CC08B', 'rgba(53,107,76,0.4)'),
+  ),
+  amber: recipe(
+    mode('linear-gradient(162deg, #F4ECD9 0%, #FAF4E7 46%, #F1E8D4 100%)',
+      [b('#E8C173', 0.42), b('#D9924E', 0.3), b('#F2E3C2', 0.55), b('#B8C4D9', 0.22)],
+      'rgba(255,255,255,0.5)', 'rgba(255,255,255,0.6)', 'rgba(255,255,255,0.8)',
+      'rgba(60,45,20,0.2)', 'rgba(255,255,255,0.58)', '#DA9534', 'rgba(192,122,29,0.35)'),
+    mode('linear-gradient(166deg, #110D07 0%, #171109 46%, #0F0B06 100%)',
+      [b('#8A5A1E', 0.5), b('#B8802A', 0.3), b('#E5A54B', 0.14), b('#8A4A3E', 0.14)],
+      'rgba(30,22,12,0.55)', 'rgba(240,230,210,0.13)', 'rgba(240,200,140,0.09)',
+      'rgba(0,0,0,0.45)', 'rgba(36,27,15,0.52)', '#C68A28', 'rgba(162,103,18,0.4)'),
+  ),
+  vermilion: recipe(
+    mode('linear-gradient(168deg, #F4EBE2 0%, #FBF5ED 46%, #F2E9DE 100%)',
+      [b('#E09A82', 0.5), b('#B85450', 0.24), b('#EAC8B0', 0.3), b('#C8D8E8', 0.18)],
+      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
+      'rgba(60,30,24,0.18)', 'rgba(255,255,255,0.62)', '#C96B66', 'rgba(184,84,80,0.35)'),
+    mode('linear-gradient(170deg, #120D0B 0%, #181110 44%, #0D0908 100%)',
+      [b('#9C4541', 0.55), b('#D4756B', 0.38), b('#8A6A28', 0.14), b('#8A4A3E', 0.16)],
+      'rgba(24,17,15,0.55)', 'rgba(240,225,220,0.14)', 'rgba(240,190,180,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(34,24,22,0.5)', '#D4756B', 'rgba(156,69,65,0.4)'),
+  ),
+  rose: recipe(
+    mode('linear-gradient(168deg, #F5EAF0 0%, #FBF4F8 46%, #F2E7EE 100%)',
+      [b('#E096B8', 0.5), b('#C2577F', 0.24), b('#F2D0DE', 0.3), b('#A8C8E8', 0.18)],
+      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
+      'rgba(60,26,40,0.18)', 'rgba(255,255,255,0.62)', '#CE6F94', 'rgba(194,87,127,0.35)'),
+    mode('linear-gradient(170deg, #130D11 0%, #191218 44%, #0E0A0D 100%)',
+      [b('#A04A6E', 0.55), b('#DA7FA7', 0.38), b('#7A5A9E', 0.14), b('#8A4A3E', 0.16)],
+      'rgba(25,17,21,0.55)', 'rgba(240,225,235,0.14)', 'rgba(240,190,215,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(36,24,30,0.5)', '#DA7FA7', 'rgba(160,74,110,0.4)'),
+  ),
+  violet: recipe(
+    mode('linear-gradient(166deg, #EEECF4 0%, #F5F4F9 46%, #EBE9F2 100%)',
+      [b('#B9AEE8', 0.38), b('#8F7CC8', 0.28), b('#D9A8C4', 0.26), b('#A8D8E8', 0.22)],
+      'rgba(255,255,255,0.52)', 'rgba(255,255,255,0.65)', 'rgba(255,255,255,0.8)',
+      'rgba(30,26,50,0.2)', 'rgba(255,255,255,0.6)', '#8A79D2', 'rgba(113,96,190,0.35)'),
+    mode('linear-gradient(166deg, #0B0A12 0%, #0E0D17 46%, #090810 100%)',
+      [b('#4A3A8C', 0.5), b('#6F5AB8', 0.3), b('#B06A9C', 0.2), b('#3A6E9E', 0.18)],
+      'rgba(19,17,29,0.55)', 'rgba(230,225,245,0.13)', 'rgba(210,200,255,0.09)',
+      'rgba(0,0,0,0.45)', 'rgba(26,23,38,0.52)', '#7C6BD0', 'rgba(95,81,168,0.4)'),
+  ),
+}
 
 /* ── Slider state (shell-level appearance domain, same as mp_color_family) ── */
 
@@ -208,81 +203,94 @@ export function useAcrylicSliders() {
   return { glow: acrylicGlow, transparency: acrylicTransparency, setGlow, setTransparency }
 }
 
-/* ── Material variable builder ── */
+/* ── Builders ── */
+
+const RGBA = /^rgba\((\d+),(\d+),(\d+),([0-9.]+)\)$/
+
+const rgbaParts = (rgba: string): { rgb: [number, number, number]; alpha: number } => {
+  const m = RGBA.exec(rgba.replace(/\s+/g, ''))
+  if (!m) throw new Error(`[acrylic] invalid rgba in recipe: ${rgba}`)
+  return { rgb: [Number(m[1]), Number(m[2]), Number(m[3])], alpha: Number(m[4]) }
+}
+
+const rgbaOf = (rgb: readonly [number, number, number], alpha: number): string =>
+  `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${Math.round(alpha * 100) / 100})`
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/
 
 const rgbOf = (hex: string): [number, number, number] => {
   if (!HEX6.test(hex)) throw new Error(`[acrylic] invalid hex: ${hex}`)
-  const value = Number.parseInt(hex.slice(1), 16)
-  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]
+  const v = Number.parseInt(hex.slice(1), 16)
+  return [(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff]
 }
 
-const fmtAlpha = (alpha: number): string => String(Math.round(alpha * 100) / 100)
+/** '#46C7AC' → '70 199 172' (tokens.css RGB-triplet discipline). */
+const hexTriplet = (hex: string): string => {
+  const [r, g, b2] = rgbOf(hex)
+  return `${r} ${g} ${b2}`
+}
 
-const rgbaOf = (rgb: readonly [number, number, number], alpha: number): string =>
-  `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${fmtAlpha(alpha)})`
+/** Glass chrome alpha at the transparency slider's default — the anchor the
+ *  recipe alphas are written against (mint surf 0.55 = 1 − 0.45). */
+const CHROME_ANCHOR = 1 - GLASS_T_DEFAULT / 100
 
 /**
- * Transparency percent → surface alpha. Chrome glass runs the raw mapping;
- * scrolling content stays slightly more opaque for text readability
- * (dark mode +0.02 vs light, matching the approved dark preview).
+ * Transparency percent → surf alpha ratio. At the default (45%) the ratio is
+ * 1, so every family renders its mockup value verbatim; lower t = more
+ * opaque, higher t = more translucent, clamped to a readable band.
  */
-const chromeAlphaOf = (transparency: number): number => clamp(1 - transparency, 0.3, 0.9)
-const contentAlphaOf = (transparency: number, mode: MpTheme): number =>
-  clamp(1.17 - transparency + (mode === 'dark' ? 0.02 : 0), 0.45, 0.95)
+const glassRatioOf = (transparencyPercent: number): number =>
+  clamp((1 - transparencyPercent / 100) / CHROME_ANCHOR, 0.5, 1.73)
 
+/** CSS variables for the frosted surfaces (consumed by base.css classes). */
 export function buildMaterialVars(
-  family: MpColorFamily,
+  familyId: MpColorFamilyId,
   mode: MpTheme,
-  glowPercent: number = GLOW_DEFAULT,
   transparencyPercent: number = GLASS_T_DEFAULT,
 ): Record<string, string> {
-  const aurora = AURORA_RECIPES[family.id][mode]
-  const glow = glowPercent / 100
-  const layers = [
-    `linear-gradient(${BASE_ANGLE}deg, ${aurora.base[0]} 0%, ${aurora.base[1]} 46%, ${aurora.base[2]} 100%)`,
-  ]
-  aurora.blobs.forEach((blob, index) => {
-    const alpha = Math.min(1, blob.alpha * glow)
-    if (alpha < 0.01) return // glow at zero drops the layer entirely
-    const layer = BLOB_LAYERS[index]!
-    layers.push(layer.replace('%C', rgbaOf(rgbOf(blob.hex), alpha)))
-  })
-
-  const transparency = transparencyPercent / 100
-  const chromeAlpha = chromeAlphaOf(transparency)
-  const contentAlpha = contentAlphaOf(transparency, mode)
-  const surfaceRgb: readonly [number, number, number] =
-    mode === 'dark' ? rgbOf(family.dark.bg) : [255, 255, 255]
-  const accent = rgbOf(family[mode].accent)
-  const primaryHi: readonly [number, number, number] = [
-    Math.round(accent[0]! + 0.2 * (255 - accent[0]!)),
-    Math.round(accent[1]! + 0.2 * (255 - accent[1]!)),
-    Math.round(accent[2]! + 0.2 * (255 - accent[2]!)),
-  ]
-
+  const material = MATERIAL_RECIPES[familyId][mode]
+  const ratio = glassRatioOf(transparencyPercent)
+  const surf = rgbaParts(material.surf)
+  const surfAlpha = clamp(surf.alpha * ratio, 0.3, 0.95)
+  const ai = rgbaParts(material.aiBubble)
   return {
-    '--mp-bg-image': layers.join(', '),
-    '--mp-glass-bg': rgbaOf(surfaceRgb, chromeAlpha),
-    '--mp-glass-border':
-      mode === 'dark' ? rgbaOf(rgbOf(family.dark.ink), 0.16) : 'rgba(255,255,255,0.7)',
-    '--mp-glass-solid': rgbaOf(surfaceRgb, 0.88),
-    '--mp-glass-edge': mode === 'dark' ? aurora.edge : 'rgba(255,255,255,0.8)',
-    '--mp-card-fill-alpha': fmtAlpha(contentAlpha),
-    '--mp-surface-ai-bubble': rgbaOf(rgbOf(family[mode].aiBubble), contentAlpha),
-    '--mp-c-primary-hi': primaryHi.join(' '),
+    '--mp-aurora-base': material.base,
+    '--mp-glass-bg': rgbaOf(surf.rgb, surfAlpha),
+    '--mp-glass-border': material.hairline,
+    '--mp-glass-edge': material.edge,
+    '--mp-glass-shadow': material.surfShadow,
+    '--mp-glass-solid': rgbaOf(surf.rgb, Math.min(0.95, surfAlpha + 0.35)),
+    '--mp-accent-shadow': material.accentShadow,
+    '--mp-surface-ai-bubble': rgbaOf(ai.rgb, clamp(ai.alpha * ratio, 0.35, 0.95)),
+    '--mp-c-primary-hi': hexTriplet(material.accentHi),
+    '--mp-card-fill-alpha': String(Math.round(clamp(1.17 - transparencyPercent / 100 + (mode === 'dark' ? 0.02 : 0), 0.45, 0.95) * 100) / 100),
   }
 }
 
 /** Every inline material variable a family application may own. */
 export const MATERIAL_VARS = [
-  '--mp-bg-image',
+  '--mp-aurora-base',
   '--mp-glass-bg',
   '--mp-glass-border',
-  '--mp-glass-solid',
   '--mp-glass-edge',
-  '--mp-card-fill-alpha',
+  '--mp-glass-shadow',
+  '--mp-glass-solid',
+  '--mp-accent-shadow',
   '--mp-surface-ai-bubble',
   '--mp-c-primary-hi',
+  '--mp-card-fill-alpha',
 ] as const
+
+/** Blob fills for AuroraLayer — glow scales each blob's alpha; at glow 0 the
+ *  blobs go fully transparent and only the base gradient remains. */
+export function auroraBlobStyles(
+  familyId: MpColorFamilyId,
+  mode: MpTheme,
+  glowPercent: number = GLOW_DEFAULT,
+): string[] {
+  const glow = clamp(glowPercent, GLOW_MIN, GLOW_MAX) / 100
+  return MATERIAL_RECIPES[familyId][mode].blobs.map((blob) => {
+    const alpha = Math.round(blob.alpha * glow * 100) / 100
+    return alpha < 0.01 ? 'transparent' : rgbaOf(rgbOf(blob.hex), alpha)
+  })
+}

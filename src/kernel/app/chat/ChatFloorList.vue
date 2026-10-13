@@ -98,7 +98,7 @@ const emit = defineEmits<{
       :class="[
         view.message.role === 'user'
           ? 'mp-accent-fill rounded-bubble-user text-chat-on-bubble-user'
-          : 'border border-line bg-[var(--mp-surface-ai-bubble)] text-chat-on-bubble-ai',
+          : 'mp-bubble text-chat-on-bubble-ai',
         view.wide ? 'w-full max-w-none' : 'max-w-[85%]',
       ]"
     >
