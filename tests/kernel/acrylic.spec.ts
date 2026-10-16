@@ -9,6 +9,7 @@ import {
   buildMaterialVars,
   initAcrylicSliders,
   slidersAtDefault,
+  statusBarFillOf,
   useAcrylicSliders,
 } from '../../src/kernel/design/acrylic'
 import AuroraLayer from '../../src/kernel/design/AuroraLayer.vue'
@@ -66,6 +67,23 @@ describe('材质配方(八系 × 明暗,预览值即代码)', () => {
     expect(dk.base).toBe('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)')
     expect(dk.surf).toBe('rgba(12,24,21,0.55)')
     expect(dk.aiBubble).toBe('rgba(16,32,28,0.5)')
+  })
+
+  it('status-bar fill: valid #RRGGBB first stop of the base for every family/mode', () => {
+    // Regression net for the vivo white-strip bug: apply() used to pass
+    // material.base[0] ('l'), which native Color.parseColor rejects and the
+    // caller's catch swallowed — the bar stayed white in every mode.
+    for (const family of COLOR_FAMILIES) {
+      for (const modeName of ['light', 'dark'] as const) {
+        const fill = statusBarFillOf(family.id, modeName)
+        expect(HEX6.test(fill), `${family.id}.${modeName} got ${fill}`).toBe(true)
+        const base = MATERIAL_RECIPES[family.id][modeName].base
+        expect(base.startsWith('linear-gradient(')).toBe(true)
+        expect(base.indexOf(fill), `${family.id}.${modeName} fill must be the first stop`).toBe(base.indexOf('#'))
+      }
+    }
+    expect(statusBarFillOf('mint', 'dark')).toBe('#071310')
+    expect(statusBarFillOf('mint', 'light')).toBe('#EDF6F1')
   })
 })
 

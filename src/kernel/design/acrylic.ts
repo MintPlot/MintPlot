@@ -146,6 +146,19 @@ export const MATERIAL_RECIPES: Record<MpColorFamilyId, MaterialRecipe> = {
   ),
 }
 
+/** Solid fill for the native status-bar strip (status-bar.ts). The aurora
+ *  base is authored as a gradient string, but the native side needs one
+ *  solid color — take the base's FIRST stop: at the near-vertical angles
+ *  (160-170deg) every recipe uses, stop 0% sits at the top edge the strip
+ *  abuts, so the seam reads as the aurora continuing upward. Every base is
+ *  authored `linear-gradient(<deg>, #RRGGBB 0%, ...` — the first hex token
+ *  is that stop (guarded by the acrylic spec across all 16 combos). */
+export function statusBarFillOf(familyId: MpColorFamilyId, mode: MpTheme): string {
+  const base = MATERIAL_RECIPES[familyId][mode].base
+  const start = base.indexOf('#')
+  return base.slice(start, start + 7)
+}
+
 /* ── Slider state (shell-level appearance domain, same as mp_color_family) ── */
 
 export const GLOW_MIN = 0
