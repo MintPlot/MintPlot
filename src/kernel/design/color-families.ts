@@ -23,8 +23,6 @@ import {
 export type MpColorFamilyId =
   | 'mint'
   | 'ocean'
-  | 'cyan'
-  | 'forest'
   | 'amber'
   | 'vermilion'
   | 'rose'
@@ -59,9 +57,11 @@ export const COLOR_FAMILIES: readonly MpColorFamily[] = [
   {
     id: 'mint',
     label: '薄荷',
-    // Brand defaults — values mirror tokens.css; applying mint just clears.
-    light: { bg: '#FAFAF7', card: '#FFFFFF', ink: '#17231F', ink2: '#4C5B55', ink3: '#8A978F', accent: '#2BB39B', onAccent: '#FFFFFF', accentText: '#1B6F70', aiBubble: '#FFFFFF' },
-    dark: { bg: '#101D1A', card: '#101D1A', ink: '#DCE7E2', ink2: '#9FB3AB', ink3: '#6F857A', accent: '#2BB39B', onAccent: '#FFFFFF', accentText: '#5CDDB4', aiBubble: '#101D1A' },
+    // Brand defaults since 2026-10-16 — the former 青碧 family promoted to
+    // the default slot (user decision: old mint + forest retired). Values
+    // mirror tokens.css; applying mint just clears inline vars.
+    light: { bg: '#EAF5F4', card: '#FFFFFF', ink: '#14211F', ink2: '#3A504D', ink3: '#6A817D', accent: '#0E9488', onAccent: '#FFFFFF', accentText: '#0A6E65', aiBubble: '#DFEFED' },
+    dark: { bg: '#0B1514', card: '#12201E', ink: '#DFF0EC', ink2: '#9DB8B3', ink3: '#647D78', accent: '#0B6E64', onAccent: '#FFFFFF', accentText: '#2DD4BF', aiBubble: '#172825' },
   },
   {
     id: 'ocean',
@@ -70,18 +70,6 @@ export const COLOR_FAMILIES: readonly MpColorFamily[] = [
     // Dark fills stay deep (tonal, white-on-ink); only text emphasis keeps the
     // bright hue for readability on dark surfaces.
     dark: { bg: '#0E141C', card: '#161E28', ink: '#E2E9F2', ink2: '#A3B2C4', ink3: '#6B7A8C', accent: '#2E63B0', onAccent: '#FFFFFF', accentText: '#5B9BFF', aiBubble: '#1A2430' },
-  },
-  {
-    id: 'cyan',
-    label: '青碧',
-    light: { bg: '#EAF5F4', card: '#FFFFFF', ink: '#14211F', ink2: '#3A504D', ink3: '#6A817D', accent: '#0E9488', onAccent: '#FFFFFF', accentText: '#0A6E65', aiBubble: '#DFEFED' },
-    dark: { bg: '#0B1514', card: '#12201E', ink: '#DFF0EC', ink2: '#9DB8B3', ink3: '#647D78', accent: '#0B6E64', onAccent: '#FFFFFF', accentText: '#2DD4BF', aiBubble: '#172825' },
-  },
-  {
-    id: 'forest',
-    label: '森绿',
-    light: { bg: '#EFF5EC', card: '#FFFFFF', ink: '#1A2318', ink2: '#48543F', ink3: '#75826B', accent: '#43875F', onAccent: '#FFFFFF', accentText: '#2F6347', aiBubble: '#E4EDDF' },
-    dark: { bg: '#0F1611', card: '#16201A', ink: '#E4EEE3', ink2: '#A8B8A0', ink3: '#71806A', accent: '#356B4C', onAccent: '#FFFFFF', accentText: '#7CC08B', aiBubble: '#1B271F' },
   },
   {
     id: 'amber',
@@ -273,6 +261,17 @@ export function initMpColorFamily(): void {
     }
   }
   familyId.value = readStoredFamilyId()
+  // Retired family ids (cyan/forest, cut 2026-10-16) resolve to the default
+  // at read time — rewrite the stored key so storage never keeps a ghost id.
+  if (typeof localStorage !== 'undefined') {
+    try {
+      if (localStorage.getItem(STORAGE_KEY) !== familyId.value) {
+        persistFamilyId(familyId.value)
+      }
+    } catch {
+      /* persistence failure must not block boot */
+    }
+  }
   reapply()
   subscribeEffectiveTheme(() => reapply())
 }

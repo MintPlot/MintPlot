@@ -33,7 +33,7 @@ const resetSliders = (): void => {
   setTransparency(GLASS_T_DEFAULT)
 }
 
-describe('材质配方(八系 × 明暗,预览值即代码)', () => {
+describe('材质配方(六系 × 明暗,预览值即代码)', () => {
   it('每系明暗配方齐全:基底三停、四色斑、表面 rgba 组、accentHi', () => {
     for (const family of COLOR_FAMILIES) {
       const recipeSet = MATERIAL_RECIPES[family.id]
@@ -56,17 +56,17 @@ describe('材质配方(八系 × 明暗,预览值即代码)', () => {
     }
   })
 
-  it('薄荷配方 = 定稿参考件原值(逐字)', () => {
+  it('薄荷配方(原青碧升档,2026-10-16 定档值逐字)', () => {
     const lt = MATERIAL_RECIPES.mint.light
-    expect(lt.base).toBe('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)')
-    expect(lt.blobs[0]).toEqual({ hex: '#8DEAC4', alpha: 0.5 })
+    expect(lt.base).toBe('linear-gradient(168deg, #E0F0EE 0%, #EDF7F5 46%, #DCEEEB 100%)')
+    expect(lt.blobs[0]).toEqual({ hex: '#7DD8CB', alpha: 0.5 })
     expect(lt.surf).toBe('rgba(255,255,255,0.55)')
     expect(lt.aiBubble).toBe('rgba(255,255,255,0.62)')
-    expect(lt.accentHi).toBe('#46C7AC')
+    expect(lt.accentHi).toBe('#2BBFAF')
     const dk = MATERIAL_RECIPES.mint.dark
-    expect(dk.base).toBe('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)')
-    expect(dk.surf).toBe('rgba(12,24,21,0.55)')
-    expect(dk.aiBubble).toBe('rgba(16,32,28,0.5)')
+    expect(dk.base).toBe('linear-gradient(170deg, #061110 0%, #0A1817 44%, #050D0B 100%)')
+    expect(dk.surf).toBe('rgba(10,22,20,0.55)')
+    expect(dk.aiBubble).toBe('rgba(14,30,28,0.5)')
   })
 
   it('status-bar fill: valid #RRGGBB first stop of the base for every family/mode', () => {
@@ -82,8 +82,8 @@ describe('材质配方(八系 × 明暗,预览值即代码)', () => {
         expect(base.indexOf(fill), `${family.id}.${modeName} fill must be the first stop`).toBe(base.indexOf('#'))
       }
     }
-    expect(statusBarFillOf('mint', 'dark')).toBe('#071310')
-    expect(statusBarFillOf('mint', 'light')).toBe('#EDF6F1')
+    expect(statusBarFillOf('mint', 'dark')).toBe('#061110')
+    expect(statusBarFillOf('mint', 'light')).toBe('#E0F0EE')
   })
 })
 
@@ -91,14 +91,14 @@ describe('auroraBlobStyles(辉光 = 色斑 alpha 倍率,真 DOM 色块填充)', 
   it('默认辉光 = 配方原值 rgba 填充 ×4', () => {
     const fills = auroraBlobStyles('mint', 'light')
     expect(fills).toHaveLength(4)
-    expect(fills[0]).toBe('rgba(141,234,196,0.5)')
-    expect(fills[1]).toBe('rgba(43,179,155,0.24)')
+    expect(fills[0]).toBe('rgba(125,216,203,0.5)')
+    expect(fills[1]).toBe('rgba(14,148,136,0.24)')
   })
 
   it('零辉光全透明;50% 减半;150% 增半(配方上限内不越 1)', () => {
     expect(auroraBlobStyles('mint', 'light', 0).every((fill) => fill === 'transparent')).toBe(true)
-    expect(auroraBlobStyles('mint', 'light', 50)[0]).toBe('rgba(141,234,196,0.25)')
-    expect(auroraBlobStyles('mint', 'light', 150)[0]).toBe('rgba(141,234,196,0.75)')
+    expect(auroraBlobStyles('mint', 'light', 50)[0]).toBe('rgba(125,216,203,0.25)')
+    expect(auroraBlobStyles('mint', 'light', 150)[0]).toBe('rgba(125,216,203,0.75)')
     expect(auroraBlobStyles('ocean', 'light', 150)[0]).toBe('rgba(123,184,232,0.9)') // 0.6 × 1.5
   })
 })
@@ -110,15 +110,15 @@ describe('buildMaterialVars(透明度映射,默认 = 参考件)', () => {
     expect(light['--mp-glass-bg']).toBe('rgba(255,255,255,0.78)')
     expect(light['--mp-glass-border']).toBe('rgba(255,255,255,0.7)')
     expect(light['--mp-glass-edge']).toBe('rgba(255,255,255,0.85)')
-    expect(light['--mp-glass-shadow']).toBe('rgba(16,40,34,0.18)')
+    expect(light['--mp-glass-shadow']).toBe('rgba(10,40,36,0.18)')
     expect(light['--mp-surface-ai-bubble']).toBe('rgba(255,255,255,0.62)')
-    expect(light['--mp-c-primary-hi']).toBe('70 199 172')
+    expect(light['--mp-c-primary-hi']).toBe('43 191 175')
     expect(light['--mp-card-fill-alpha']).toBe('0.72')
 
     const dark = buildMaterialVars('mint', 'dark')
-    expect(dark['--mp-glass-bg']).toBe('rgba(12,24,21,0.78)')
-    expect(dark['--mp-surface-ai-bubble']).toBe('rgba(16,32,28,0.5)')
-    expect(dark['--mp-c-primary-hi']).toBe('53 196 168')
+    expect(dark['--mp-glass-bg']).toBe('rgba(10,22,20,0.78)')
+    expect(dark['--mp-surface-ai-bubble']).toBe('rgba(14,30,28,0.5)')
+    expect(dark['--mp-c-primary-hi']).toBe('45 212 191')
     expect(dark['--mp-card-fill-alpha']).toBe('0.74')
   })
 
@@ -162,7 +162,7 @@ describe('acrylic × 色系应用(mint 单一来源纪律)', () => {
     applyMpColorFamily('mint', 'dark')
     expect(inlineVar('--mp-c-bg')).toBe('')
     expect(inlineVar('--mp-c-primary')).toBe('')
-    expect(inlineVar('--mp-glass-bg')).toBe('rgba(12,24,21,0.63)')
+    expect(inlineVar('--mp-glass-bg')).toBe('rgba(10,22,20,0.63)')
     expect(inlineVar('--mp-aurora-base')).toBe('') // 极光永不走 CSS 令牌(组件直渲染)
   })
 
@@ -209,7 +209,7 @@ describe('AuroraLayer(真 DOM 模糊色块 + 噪点)', () => {
     expect(root.attributes('style')).toContain('background-image: linear-gradient(168deg')
     const blobs = wrapper.findAll('.mp-aurora-blob')
     expect(blobs).toHaveLength(4)
-    expect(blobs[0]!.attributes('style')).toContain('rgba(141, 234, 196, 0.5)')
+    expect(blobs[0]!.attributes('style')).toContain('rgba(125, 216, 203, 0.5)')
     expect(blobs[0]!.attributes('style')).toContain('120%')
     expect(wrapper.find('.mp-aurora-grain').exists()).toBe(true)
   })

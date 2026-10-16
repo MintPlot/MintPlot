@@ -18,12 +18,16 @@ const inlineVar = (key: string): string =>
   document.documentElement.style.getPropertyValue(key).trim()
 
 describe('色系目录(Edge 式一排色点,每系明暗两套)', () => {
-  it('八系齐全、id 唯一、薄荷默认在首位', () => {
-    expect(COLOR_FAMILIES).toHaveLength(8)
+  it('六系齐全、id 唯一、薄荷默认在首位(2026-10-16 裁撤后)', () => {
+    expect(COLOR_FAMILIES).toHaveLength(6)
     const ids = COLOR_FAMILIES.map((family) => family.id)
-    expect(new Set(ids).size).toBe(8)
+    expect(new Set(ids).size).toBe(6)
     expect(ids[0]).toBe(DEFAULT_FAMILY_ID)
+    expect(findFamily('mint')?.label).toBe('薄荷')
     expect(findFamily('ocean')?.label).toBe('海蓝')
+    // retired ids must stay retired
+    expect(findFamily('cyan')).toBeUndefined()
+    expect(findFamily('forest')).toBeUndefined()
     expect(findFamily('nope')).toBeUndefined()
   })
 
@@ -139,6 +143,17 @@ describe('明暗联动与持久化', () => {
     expect(familyId.value).toBe('violet')
   })
 
+  it('init 把已下架色系(cyan/forest)的存量键归位为解析结果', () => {
+    localStorage.setItem('mp_color_family', 'cyan')
+    initMpColorFamily()
+    expect(useMpColorFamily().familyId.value).toBe(DEFAULT_FAMILY_ID)
+    expect(localStorage.getItem('mp_color_family')).toBe(DEFAULT_FAMILY_ID)
+
+    localStorage.setItem('mp_color_family', 'forest')
+    initMpColorFamily()
+    expect(localStorage.getItem('mp_color_family')).toBe(DEFAULT_FAMILY_ID)
+  })
+
   it('init 清理 v1 旧键 mp_chat_palette', () => {
     localStorage.setItem('mp_chat_palette', '{"bg":"#123456"}')
     initMpColorFamily()
@@ -153,10 +168,10 @@ describe('AppearanceSection(主题分区)', () => {
     localStorage.removeItem('mp_theme_pref')
   })
 
-  it('渲染 8 个半明半暗色点;说明小字与自定义通道不再存在', () => {
+  it('渲染 6 个半明半暗色点;说明小字与自定义通道不再存在', () => {
     const wrapper = mount(AppearanceSection)
     const dots = wrapper.findAll('button[aria-label]')
-    expect(dots).toHaveLength(8)
+    expect(dots).toHaveLength(6)
     expect(wrapper.text()).not.toContain('自定义')
     expect(wrapper.text()).not.toContain('背景即主题底色')
     expect(wrapper.text()).not.toContain('配色主题联动全局界面')

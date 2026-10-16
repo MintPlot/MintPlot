@@ -1,6 +1,7 @@
 /*
- * MintPlot 设计 token(M0-c · 薄荷出生)
- * 唯一依据:documents/design/mintplot-design-language-v1.html —— 不自创色值。
+ * MintPlot 设计 token(M0-c · 薄荷出生;2026-10-16 起默认色系 = 原青碧升档)
+ * 材质/色系真源 = design/acrylic.ts + color-families.ts(AGENTS §3 正名);
+ * 本文件的色系/材质段是「薄荷默认」的无 JS 回退镜像,一致性由对拍 spec 钉死。
  * 纪律:壳内零硬编码色值;色值以 RGB 三元组存放,供 Tailwind <alpha-value> 透明度调制。
  */
 
@@ -18,31 +19,31 @@
   --mp-teal-700: 27 111 112;  /* #1B6F70 明主题文本强调 */
   --mp-cyan-500: 31 178 207;  /* #1FB2CF 渐变端点 */
 
-  /* ── 表面 / 墨色 · 明主题 ── */
-  --mp-c-bg: 250 250 247;     /* #FAFAF7 */
+  /* ── 表面 / 墨色 · 明主题(新薄荷 = 原青碧)── */
+  --mp-c-bg: 234 245 244;     /* #EAF5F4 */
   --mp-c-card: 255 255 255;
-  --mp-c-ink: 23 35 31;       /* Ink 900 #17231F 暖墨绿黑,不用纯黑 */
-  --mp-c-ink-2: 76 91 85;     /* #4C5B55 */
-  --mp-c-ink-3: 138 151 143;  /* #8A978F */
+  --mp-c-ink: 20 33 31;       /* Ink 900 #14211F 青墨黑,不用纯黑 */
+  --mp-c-ink-2: 58 80 77;     /* #3A504D */
+  --mp-c-ink-3: 106 129 125;  /* #6A817D */
 
   /* ── 语义映射 ── */
-  --mp-c-primary: 43 179 155;         /* Mint 500 */
-  --mp-c-primary-pressed: 31 143 134; /* Mint 600 */
-  --mp-c-accent: 27 111 112;          /* 明主题文本强调 = teal-700 */
+  --mp-c-primary: 14 148 136;         /* #0E9488 */
+  --mp-c-primary-pressed: 12 127 117; /* #0E9488 −14% */
+  --mp-c-accent: 10 110 101;          /* 明主题文本强调 #0A6E65 */
   --mp-c-on-primary: 255 255 255;     /* 主按钮上的文字,双主题恒白(白线语言) */
 
   /* ── 聊天配色通道(another · 配色需求):气泡与强调色默认与主题同源,
        用户选色后经 <html> 内联变量覆盖;背景即主题色,直接写 --mp-c-bg,不设独立令牌 ── */
-  --mp-c-bubble-user: 43 179 155;   /* 用户气泡 = Mint 500 */
+  --mp-c-bubble-user: 14 148 136;   /* 用户气泡 = #0E9488 */
   --mp-c-on-bubble-user: 255 255 255;
-  --mp-c-bubble-ai: 255 255 255;    /* AI 气泡 = card */
-  --mp-c-on-bubble-ai: 23 35 31;    /* Ink 900 */
-  --mp-c-chat-accent: 27 111 112;   /* 角色名字 / 提示 = teal-700 */
+  --mp-c-bubble-ai: 223 239 237;    /* AI 气泡 = #DFEFED */
+  --mp-c-on-bubble-ai: 20 33 31;    /* Ink 900 */
+  --mp-c-chat-accent: 10 110 101;   /* 角色名字 / 提示 = #0A6E65 */
 
   /* ── 复合 token(hairline / 洗色 / 玻璃,§03 §05)── */
-  --mp-line: rgba(23, 35, 31, 0.1);        /* 默认边 1px @10% ink */
-  --mp-line-strong: rgba(23, 35, 31, 0.18);
-  --mp-accent-wash: rgba(43, 179, 155, 0.09);
+  --mp-line: rgba(20, 33, 31, 0.1);        /* 默认边 1px @10% ink */
+  --mp-line-strong: rgba(20, 33, 31, 0.18);
+  --mp-accent-wash: rgba(14, 148, 136, 0.09);
   --mp-danger: #c4443a;                    /* §06 危险 = 降饱和红,永远不做实心大块 */
   --mp-danger-wash: #fff1f0;
 
@@ -52,11 +53,11 @@
   --mp-glass-bg: rgba(255, 255, 255, 0.78);       /* 玻璃 chrome 填充(无 backdrop,加实补偿) */
   --mp-glass-border: rgba(255, 255, 255, 0.7);    /* 发丝边(参考件 hairline) */
   --mp-glass-edge: rgba(255, 255, 255, 0.85);     /* 内顶高光(参考件 edge-light) */
-  --mp-glass-shadow: rgba(16, 40, 34, 0.18);      /* 参考件 surf-shadow */
-    --mp-accent-shadow: rgba(43, 179, 155, 0.35);   /* 参考件 accent-shadow */
+  --mp-glass-shadow: rgba(10, 40, 36, 0.18);      /* 参考件 surf-shadow */
+    --mp-accent-shadow: rgba(14, 148, 136, 0.35);   /* 参考件 accent-shadow */
   --mp-card-fill-alpha: 0.72;                     /* 半透卡面 alpha(透明度滑杆驱动) */
   --mp-surface-ai-bubble: rgba(255, 255, 255, 0.62); /* AI 楼层气泡(平涂半透,无 backdrop) */
-  --mp-c-primary-hi: 70 199 172;                  /* 强调渐变亮端(参考件 accent-hi #46C7AC) */
+  --mp-c-primary-hi: 43 191 175;                  /* 强调渐变亮端(参考件 accent-hi #2BBFAF) */
 
   /* ── 形状(§03 圆角尺度:像猫一样圆)── */
   --mp-radius-input: 10px;                  /* 输入框 / 小按钮 */
@@ -71,37 +72,37 @@
   --mp-font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
 }
 
-/* ── 夜航墨绿(§06:底色走墨绿黑 #101D1A,不用纯黑灰;白线语言在深色下更出味)── */
+/* ── 夜航(新薄荷深色:青墨底 #0B1514,白线语言在深色下更出味)── */
 .dark {
   color-scheme: dark;
 
-  --mp-c-bg: 16 29 26;        /* #101D1A */
-  --mp-c-card: 16 29 26;      /* 深色卡片与底同色,分层靠白线 hairline(白线语言) */
-  --mp-c-ink: 220 231 226;    /* #DCE7E2 */
-  --mp-c-ink-2: 159 179 171;  /* #9FB3AB */
-  --mp-c-ink-3: 111 133 122;  /* #6F857A(规格文档夜航 chrome 同源) */
+  --mp-c-bg: 11 21 20;        /* #0B1514 */
+  --mp-c-card: 18 32 30;      /* #12201E */
+  --mp-c-ink: 223 240 236;    /* #DFF0EC */
+  --mp-c-ink-2: 157 184 179;  /* #9DB8B3 */
+  --mp-c-ink-3: 100 125 120;  /* #647D78 */
 
-  --mp-c-accent: 92 221 180;  /* 深色文本强调 = Mint 400,保持可见 */
+  --mp-c-accent: 45 212 191;  /* 深色文本强调 = #2DD4BF,保持可见 */
 
   /* 聊天配色通道默认(夜航同源;选色后由内联变量接管;背景即主题色无独立令牌) */
-  --mp-c-bubble-user: 43 179 155;   /* Mint 500 */
+  --mp-c-bubble-user: 11 110 100;   /* #0B6E64 */
   --mp-c-on-bubble-user: 255 255 255;
-  --mp-c-bubble-ai: 16 29 26;       /* 深色卡片与底同色 */
-  --mp-c-on-bubble-ai: 220 231 226; /* #DCE7E2 */
-  --mp-c-chat-accent: 92 221 180;   /* Mint 400 */
+  --mp-c-bubble-ai: 23 40 37;       /* #172825 */
+  --mp-c-on-bubble-ai: 223 240 236; /* #DFF0EC */
+  --mp-c-chat-accent: 45 212 191;   /* #2DD4BF */
 
-  --mp-line: rgba(220, 231, 226, 0.1);   /* 深底上用白线:亮墨 @10% */
-  --mp-line-strong: rgba(220, 231, 226, 0.18);
-  --mp-accent-wash: rgba(92, 221, 180, 0.12);
+  --mp-line: rgba(223, 240, 236, 0.1);   /* 深底上用白线:亮墨 @10% */
+  --mp-line-strong: rgba(223, 240, 236, 0.18);
+  --mp-accent-wash: rgba(11, 110, 100, 0.12);
   --mp-danger-wash: rgba(196, 68, 58, 0.14);
 
   /* 夜航亚克力(主题 v3 复刻):极光由 AuroraLayer 渲染(基底 + 色块),值同 acrylic.ts 构建器 */
-  --mp-glass-bg: rgba(12, 24, 21, 0.78);
-  --mp-glass-border: rgba(200, 235, 220, 0.14);
-  --mp-glass-edge: rgba(140, 240, 200, 0.08);
+  --mp-glass-bg: rgba(10, 22, 20, 0.78);
+  --mp-glass-border: rgba(200, 235, 230, 0.14);
+  --mp-glass-edge: rgba(140, 235, 225, 0.08);
   --mp-glass-shadow: rgba(0, 0, 0, 0.45);
-    --mp-accent-shadow: rgba(43, 179, 155, 0.4);
+    --mp-accent-shadow: rgba(11, 110, 100, 0.4);
   --mp-card-fill-alpha: 0.74;
-  --mp-surface-ai-bubble: rgba(16, 32, 28, 0.5);
-  --mp-c-primary-hi: 53 196 168;   /* #35C4A8 */
+  --mp-surface-ai-bubble: rgba(14, 30, 28, 0.5);
+  --mp-c-primary-hi: 45 212 191;   /* #2DD4BF */
 }

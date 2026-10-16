@@ -3,16 +3,16 @@ import type { MpTheme } from './theme'
 import type { MpColorFamilyId } from './color-families'
 
 /**
- * Theme v3 material recipes (replica route): the values below are extracted
- * verbatim from the approved mockup (mp-mint-v2-reference.html / the original
- * five-variant carousel). The aurora is REAL blurred DOM blobs — never a
- * gradient approximation. (History: the bake interlude translated the blobs
- * into a single-element gradient stack and read flat — inflated radii +
- * 75% solid platforms merged the four cores into one soup; reverted per
- * theme-v3-material-audit.md §3/§6-A.)
+ * Theme v3 material recipes (replica route): the aurora is REAL blurred DOM
+ * blobs — never a gradient approximation. (History: the bake interlude
+ * translated the blobs into a single-element gradient stack and read flat —
+ * inflated radii + 75% solid platforms merged the four cores into one soup;
+ * reverted per theme-v3-material-audit.md §3/§6-A.)
  *
- * Families without a mockup variant (cyan/forest/vermilion/rose) follow the
- * same structure derived from their color-families hues (noted in the plan).
+ * The default family (mint) is the former 青碧 recipe promoted 2026-10-16
+ * (user decision — the mockup-verbatim mint and the forest family were
+ * retired). Families without a mockup variant (ocean/amber/vermilion/rose/
+ * violet) follow the same structure derived from their color-families hues.
  */
 
 export interface AuroraBlob {
@@ -75,14 +75,14 @@ export const AURORA_BLOB_GEOMETRY = [
 
 export const MATERIAL_RECIPES: Record<MpColorFamilyId, MaterialRecipe> = {
   mint: recipe(
-    mode('linear-gradient(168deg, #EDF6F1 0%, #F6FBF8 46%, #EBF4EF 100%)',
-      [b('#8DEAC4', 0.5), b('#2BB39B', 0.24), b('#7BD8E8', 0.3), b('#8DEAC4', 0.18)],
+    mode('linear-gradient(168deg, #E0F0EE 0%, #EDF7F5 46%, #DCEEEB 100%)',
+      [b('#7DD8CB', 0.5), b('#0E9488', 0.24), b('#7BC8E8', 0.3), b('#A8E8CE', 0.18)],
       'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
-      'rgba(16,40,34,0.18)', 'rgba(255,255,255,0.62)', '#46C7AC', 'rgba(43,179,155,0.35)'),
-    mode('linear-gradient(170deg, #071310 0%, #0A1815 44%, #060F0D 100%)',
-      [b('#146E5F', 0.55), b('#1B6F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
-      'rgba(12,24,21,0.55)', 'rgba(200,235,220,0.14)', 'rgba(140,240,200,0.08)',
-      'rgba(0,0,0,0.45)', 'rgba(16,32,28,0.5)', '#35C4A8', 'rgba(43,179,155,0.4)'),
+      'rgba(10,40,36,0.18)', 'rgba(255,255,255,0.62)', '#2BBFAF', 'rgba(14,148,136,0.35)'),
+    mode('linear-gradient(170deg, #061110 0%, #0A1817 44%, #050D0B 100%)',
+      [b('#0B6E64', 0.55), b('#116F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
+      'rgba(10,22,20,0.55)', 'rgba(200,235,230,0.14)', 'rgba(140,235,225,0.08)',
+      'rgba(0,0,0,0.45)', 'rgba(14,30,28,0.5)', '#2DD4BF', 'rgba(11,110,100,0.4)'),
   ),
   ocean: recipe(
     mode('linear-gradient(160deg, #D8E8F6 0%, #E9F1F8 48%, #DFE9F3 100%)',
@@ -93,26 +93,6 @@ export const MATERIAL_RECIPES: Record<MpColorFamilyId, MaterialRecipe> = {
       [b('#1E5FA8', 0.5), b('#0FA3C6', 0.26), b('#2D6EB8', 0.34), b('#7A5A28', 0.16)],
       'rgba(13,22,40,0.52)', 'rgba(255,255,255,0.12)', 'rgba(160,200,255,0.1)',
       'rgba(0,0,0,0.45)', 'rgba(18,30,52,0.55)', '#4E97DA', 'rgba(61,127,196,0.45)'),
-  ),
-  cyan: recipe(
-    mode('linear-gradient(168deg, #E0F0EE 0%, #EDF7F5 46%, #DCEEEB 100%)',
-      [b('#7DD8CB', 0.5), b('#0E9488', 0.24), b('#7BC8E8', 0.3), b('#A8E8CE', 0.18)],
-      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
-      'rgba(10,40,36,0.18)', 'rgba(255,255,255,0.62)', '#2BBFAF', 'rgba(14,148,136,0.35)'),
-    mode('linear-gradient(170deg, #061110 0%, #0A1817 44%, #050D0B 100%)',
-      [b('#0B6E64', 0.55), b('#116F70', 0.38), b('#2BB39B', 0.14), b('#0F8A9E', 0.16)],
-      'rgba(10,22,20,0.55)', 'rgba(200,235,230,0.14)', 'rgba(140,235,225,0.08)',
-      'rgba(0,0,0,0.45)', 'rgba(14,30,28,0.5)', '#2DD4BF', 'rgba(11,110,100,0.4)'),
-  ),
-  forest: recipe(
-    mode('linear-gradient(168deg, #E9F1E4 0%, #F3F8EF 46%, #E4EFE0 100%)',
-      [b('#94C88A', 0.5), b('#43875F', 0.24), b('#B4D896', 0.3), b('#96D8BE', 0.18)],
-      'rgba(255,255,255,0.55)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.85)',
-      'rgba(20,40,24,0.18)', 'rgba(255,255,255,0.62)', '#55A374', 'rgba(67,135,95,0.35)'),
-    mode('linear-gradient(170deg, #0A120C 0%, #0F1A12 44%, #080F0A 100%)',
-      [b('#356B4C', 0.55), b('#4C8A5E', 0.38), b('#7CC08B', 0.14), b('#6E8A4A', 0.16)],
-      'rgba(14,22,16,0.55)', 'rgba(220,240,225,0.14)', 'rgba(180,235,190,0.08)',
-      'rgba(0,0,0,0.45)', 'rgba(20,30,23,0.5)', '#7CC08B', 'rgba(53,107,76,0.4)'),
   ),
   amber: recipe(
     mode('linear-gradient(162deg, #F4ECD9 0%, #FAF4E7 46%, #F1E8D4 100%)',
