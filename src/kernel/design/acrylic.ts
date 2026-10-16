@@ -6,7 +6,10 @@ import type { MpColorFamilyId } from './color-families'
  * Theme v3 material recipes (replica route): the values below are extracted
  * verbatim from the approved mockup (mp-mint-v2-reference.html / the original
  * five-variant carousel). The aurora is REAL blurred DOM blobs — never a
- * gradient approximation; the feel dies in that translation.
+ * gradient approximation. (History: the bake interlude translated the blobs
+ * into a single-element gradient stack and read flat — inflated radii +
+ * 75% solid platforms merged the four cores into one soup; reverted per
+ * theme-v3-material-audit.md §3/§6-A.)
  *
  * Families without a mockup variant (cyan/forest/vermilion/rose) follow the
  * same structure derived from their color-families hues (noted in the plan).
@@ -22,12 +25,17 @@ export interface MaterialMode {
    *  angle AND mid-stop: mint light 46% vs dark 44%, ocean light 48%). */
   readonly base: string
   readonly blobs: readonly [AuroraBlob, AuroraBlob, AuroraBlob, AuroraBlob]
-  /** Frosted chrome fill, full rgba() as in the mockup. */
+  /** Frosted chrome fill, full rgba() as in the mockup. Only the RGB part is
+   *  consumed: the runtime fill alpha derives from the transparency slider
+   *  (chromeAlphaOf — opaque-compensated since backdrop-filter was dropped
+   *  for leaking), so the authored alpha is mockup record only. */
   readonly surf: string
   readonly hairline: string
   readonly edge: string
   readonly surfShadow: string
-  /** AI floor bubble fill (translucent, blurred via .mp-bubble). */
+  /** AI floor bubble fill (flat translucent — no backdrop blur, same
+   *  leak-proof decision as the chrome glass; it only floats over the
+   *  static aurora, where a blur had nothing to show anyway). */
   readonly aiBubble: string
   /** Accent gradient bright end (user bubble / send button). */
   readonly accentHi: string
@@ -51,16 +59,18 @@ const mode = (
 
 const b = (hex: string, alpha: number): AuroraBlob => ({ hex, alpha })
 
-/** Blob geometry — viewport-relative centers/radii translated from the
- *  mockup's pixel blobs. Radii carry a fade margin (the mockup's blur(55px)
- *  spread) so the gradient can die out smoothly instead of showing a shape
- *  edge: a visible blob boundary is exactly the "floating panel" artifact
- *  that killed the DOM-blob variant. */
-const AURORA_BLOB_GEOMETRY = [
-  { cx: '36.7%', cy: '9.7%', rx: '150%', ry: '60.5%' },
-  { cx: '90%', cy: '46.8%', rx: '133.4%', ry: '72.6%' },
-  { cx: '38.3%', cy: '89.6%', rx: '137.5%', ry: '54.4%' },
-  { cx: '78.4%', cy: '60.5%', rx: '95.9%', ry: '46.4%' },
+/** Blob geometry — viewport-relative translation of the mockup's pixel blobs
+ *  (300px-wide screen): 120%/48% top-left, 107%/58% right, 110%/43.5%
+ *  bottom-left, 77%/37% bottom-right; blur stays a fixed 55px. DO NOT
+ *  inflate these to chase "softer edges": the bake variant did (radii ×2.5
+ *  with 75% solid platforms) and the four cores swallowed the screen into
+ *  one flat field (audit §3.2). blur(55px) owns the softness; the geometry
+ *  owns the color regions — that tension is the design. */
+export const AURORA_BLOB_GEOMETRY = [
+  { width: '120%', height: '48.4%', left: '-23.3%', top: '-14.5%' },
+  { width: '106.7%', height: '58.1%', right: '-43.3%', top: '17.7%' },
+  { width: '110%', height: '43.5%', left: '-16.7%', bottom: '-11.3%' },
+  { width: '76.7%', height: '37.1%', right: '-16.7%', bottom: '21%' },
 ] as const
 
 export const MATERIAL_RECIPES: Record<MpColorFamilyId, MaterialRecipe> = {
@@ -258,11 +268,12 @@ const chromeAlphaOf = (transparencyPercent: number): number =>
 const glassRatioOf = (transparencyPercent: number): number =>
   clamp((1 - transparencyPercent / 100) / (1 - GLASS_T_DEFAULT / 100), 0.5, 1.73)
 
-/** CSS variables for the frosted surfaces (consumed by base.css classes). */
+/** CSS variables for the frosted surfaces (consumed by base.css classes).
+ *  The aurora itself is NOT a var: AuroraLayer paints the base gradient
+ *  inline and mounts the blob divs directly from the recipes. */
 export function buildMaterialVars(
   familyId: MpColorFamilyId,
   mode: MpTheme,
-  glowPercent: number = GLOW_DEFAULT,
   transparencyPercent: number = GLASS_T_DEFAULT,
 ): Record<string, string> {
   const material = MATERIAL_RECIPES[familyId][mode]
@@ -271,7 +282,6 @@ export function buildMaterialVars(
   const surfAlpha = chromeAlphaOf(transparencyPercent)
   const ai = rgbaParts(material.aiBubble)
   return {
-    '--mp-aurora-base': buildAuroraImage(familyId, mode, glowPercent),
     '--mp-glass-bg': rgbaOf(surf.rgb, surfAlpha),
     '--mp-glass-border': material.hairline,
     '--mp-glass-edge': material.edge,
@@ -285,7 +295,6 @@ export function buildMaterialVars(
 
 /** Every inline material variable a family application may own. */
 export const MATERIAL_VARS = [
-  '--mp-aurora-base',
   '--mp-glass-bg',
   '--mp-glass-border',
   '--mp-glass-edge',
@@ -296,29 +305,16 @@ export const MATERIAL_VARS = [
   '--mp-card-fill-alpha',
 ] as const
 
-/** The full aurora paint: base gradient + one gaussian-falloff radial
- *  gradient per blob, all on a single element. Glow scales each blob's
- *  alpha; at glow 0 only the base gradient remains. No DOM blobs, no shape
- *  edges, nothing for a compositor to leak or a user to read as a panel. */
-export function buildAuroraImage(
+/** Blob fills for AuroraLayer — glow scales each blob's alpha; at glow 0 the
+ *  blobs go fully transparent and only the base gradient remains. */
+export function auroraBlobStyles(
   familyId: MpColorFamilyId,
   mode: MpTheme,
   glowPercent: number = GLOW_DEFAULT,
-): string {
-  const material = MATERIAL_RECIPES[familyId][mode]
+): string[] {
   const glow = clamp(glowPercent, GLOW_MIN, GLOW_MAX) / 100
-  // CSS background layers paint FIRST-ON-TOP: blobs go first, the opaque
-  // base gradient LAST, or it covers the entire glow (v3 third-technique bug).
-  const layers: string[] = []
-  material.blobs.forEach((blob, index) => {
+  return MATERIAL_RECIPES[familyId][mode].blobs.map((blob) => {
     const alpha = Math.round(blob.alpha * glow * 100) / 100
-    if (alpha < 0.01) return
-    const g = AURORA_BLOB_GEOMETRY[index]!
-    const c = (k: number): string => rgbaOf(rgbOf(blob.hex), Math.round(alpha * k * 100) / 100)
-    layers.push(
-      `radial-gradient(${g.rx} ${g.ry} at ${g.cx} ${g.cy}, ${c(1)} 0%, ${c(1)} 75%, ${c(0.75)} 88%, ${c(0.4)} 96%, ${c(0)} 100%)`,
-    )
+    return alpha < 0.01 ? 'transparent' : rgbaOf(rgbOf(blob.hex), alpha)
   })
-  layers.push(material.base)
-  return layers.join(', ')
 }

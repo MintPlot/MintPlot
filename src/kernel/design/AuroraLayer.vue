@@ -1,26 +1,35 @@
 <script setup lang="ts">
-// Theme v3 aurora backdrop: the glow is BAKED into one background-image stack
-// (base gradient + gaussian-falloff radial gradients from design/acrylic.ts)
-// — no DOM blob shapes, so no visible layer boundary and nothing for a
-// compositor to leak. Fully static; the parent positions the root and owns
-// its stacking context. Reactive: family/mode/glow rebuild the paint.
+// Theme v3 aurora backdrop (replica route, restored): four real blurred
+// blob divs + the grain overlay — the exact technique of the approved
+// mockup. The bake interlude (single-element gradient stack) read flat and
+// was reverted (theme-v3-material-audit.md §3/§6-A). Fully static: the blur
+// rasterizes once per blob and each blob sits on its own composited layer,
+// so scroll perf is unaffected. The parent positions the root and owns its
+// stacking context. Reactive: family/mode/glow rebuild the fills.
 import { computed } from 'vue'
 import { useMpTheme } from './theme'
 import { useMpColorFamily } from './color-families'
-import { acrylicGlow, buildAuroraImage } from './acrylic'
+import { AURORA_BLOB_GEOMETRY, MATERIAL_RECIPES, acrylicGlow, auroraBlobStyles } from './acrylic'
 
 const { theme } = useMpTheme()
 const { familyId } = useMpColorFamily()
 
-const auroraImage = computed(() => buildAuroraImage(familyId.value, theme.value, acrylicGlow.value))
+const blobStyles = computed(() => auroraBlobStyles(familyId.value, theme.value, acrylicGlow.value))
+const baseImage = computed(() => MATERIAL_RECIPES[familyId.value][theme.value].base)
 </script>
 
 <template>
   <div
     class="mp-aurora"
-    :style="{ backgroundImage: auroraImage }"
+    :style="{ backgroundImage: baseImage }"
     aria-hidden="true"
   >
+    <div
+      v-for="(fill, index) in blobStyles"
+      :key="index"
+      class="mp-aurora-blob"
+      :style="{ ...AURORA_BLOB_GEOMETRY[index], background: fill }"
+    />
     <div class="mp-aurora-grain" />
   </div>
 </template>
@@ -30,6 +39,12 @@ const auroraImage = computed(() => buildAuroraImage(familyId.value, theme.value,
   overflow: hidden;
   pointer-events: none;
   background-color: rgb(var(--mp-c-bg));
+}
+
+.mp-aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(55px);
 }
 
 /* Grain tile at the mockup's 4.5% overlay — a full-strength blend flattens
