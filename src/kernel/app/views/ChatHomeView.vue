@@ -67,6 +67,16 @@ const swipeOffsetOf = (id: string): number => {
   return Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx))
 }
 
+/** Reveal pair visibility: ONLY for gestures that qualified as a drag
+ *  (|dx| > DRAG_START_THRESHOLD). Keying on the bare press state flashed
+ *  both colored actions through the translucent row on every plain tap —
+ *  the rows have no background fill, so the blocks shone through for the
+ *  whole press. */
+const isRevealing = (id: string): boolean => {
+  const drag = swipeDrag.value
+  return drag !== null && drag.id === id && drag.moved
+}
+
 const onRowPointerDown = (id: string, event: PointerEvent): void => {
   swipeDrag.value = { id, startX: event.clientX, dx: 0, moved: false }
   // Track the gesture outside the row's bounds; jsdom has no capture API.
@@ -179,7 +189,7 @@ const timeLabel = (updatedAt: number): string => {
                while its row is actually being swiped (rest state would bleed
                them through the row). -->
           <div
-            v-show="swipeDrag?.id === conversation.id"
+            v-show="isRevealing(conversation.id)"
             class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary"
             aria-hidden="true"
           >
@@ -199,7 +209,7 @@ const timeLabel = (updatedAt: number): string => {
             <span class="text-[11px]">{{ conversation.pinned ? '取消置顶' : '置顶' }}</span>
           </div>
           <div
-            v-show="swipeDrag?.id === conversation.id"
+            v-show="isRevealing(conversation.id)"
             class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary"
             aria-hidden="true"
           >

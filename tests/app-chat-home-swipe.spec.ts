@@ -145,4 +145,26 @@ describe('ChatHomeView swipe-to-delete', () => {
     expect((await chatboxStore.list())[0]!.pinned).toBeFalsy()
     toastSpy.mockRestore()
   })
+
+  it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才露出', async () => {
+    const wrapper = await mountView()
+    const row = rowOf(wrapper, '第一个对话')
+    const revealBlocks = () =>
+      (row.element.closest('li')!).querySelectorAll<HTMLDivElement>(':scope > div')
+
+    // Press and hold without movement: both blocks stay display:none — a
+    // bare press keying them on flashed both actions through the row.
+    firePointer(row.element, 'pointerdown', 300)
+    await nextTick()
+    expect([...revealBlocks()].every((block) => block.style.display === 'none')).toBe(true)
+
+    // Move past the drag-start threshold: both reveal.
+    firePointer(row.element, 'pointermove', 300 - 12)
+    await nextTick()
+    expect([...revealBlocks()].every((block) => block.style.display !== 'none')).toBe(true)
+
+    firePointer(row.element, 'pointerup', 300 - 12)
+    await nextTick()
+    await flushPromises()
+  })
 })
