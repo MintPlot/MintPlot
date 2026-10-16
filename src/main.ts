@@ -4,6 +4,7 @@ import './main.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
 import { initMpColorFamily } from '@/kernel/design/color-families'
+import { initMpStatusBar } from '@/kernel/design/status-bar'
 import { createKernel } from '@/kernel/bootstrap'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createDefaultEngine } from '@/kernel/store/idb-engine'
@@ -55,6 +56,7 @@ import CotPlugin from '@/plugins/cot'
 
 initMpTheme()
 initMpColorFamily()
+initMpStatusBar()
 
 // Error hub first (M3-err1): the journal is the last thing allowed to die,
 // so its nets and seam go up before anything else can throw. Persistence

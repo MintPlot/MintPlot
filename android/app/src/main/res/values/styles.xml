@@ -13,6 +13,10 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- Theme v3: initial bar matches the mint gradient top; JS refines
+             per theme/family via @capacitor/status-bar. -->
+        <item name="android:statusBarColor">#EDF6F1</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
 
