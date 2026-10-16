@@ -95,7 +95,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
 <template>
   <!-- Theme v3: body carries the solid base; the aurora is a real-DOM layer
        (blurred blobs + grain) pinned behind the shell content. -->
-  <div class="flex h-dvh flex-col text-ink">
+  <div class="flex h-dvh flex-col pt-[env(safe-area-inset-top)] text-ink">
     <AuroraLayer class="fixed inset-0 z-0" />
     <div class="relative z-10 min-h-0 flex-1">
       <component

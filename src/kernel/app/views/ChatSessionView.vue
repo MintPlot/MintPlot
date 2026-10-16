@@ -599,12 +599,12 @@ const restartSession = async (): Promise<void> => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 flex flex-col">
+  <div class="fixed inset-0 z-40 flex flex-col pt-[env(safe-area-inset-top)]">
     <!-- Theme v3: the page is a fixed overlay — its own aurora instance gives
          the opaque base (gradient) plus the real blob field, hiding the list
          behind. Sits at -z-20 so the card cover (-z-10) stays above it. -->
     <AuroraLayer
-      class="absolute inset-0 -z-20"
+      class="absolute inset-x-0 -top-[env(safe-area-inset-top)] bottom-0 -z-20"
     />
     <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
          and dimmed behind the whole page. Tuning rides the card session
@@ -612,7 +612,7 @@ const restartSession = async (): Promise<void> => {
          Negative z keeps every in-flow sibling above it. -->
     <div
       v-if="isCardDomain && cardCover && effectiveBackdrop.enabled"
-      class="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      class="pointer-events-none absolute inset-x-0 -top-[env(safe-area-inset-top)] bottom-0 -z-10 overflow-hidden"
       aria-hidden="true"
     >
       <img
