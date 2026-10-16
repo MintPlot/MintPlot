@@ -602,17 +602,24 @@ const restartSession = async (): Promise<void> => {
   <div class="fixed inset-0 z-40 flex flex-col pt-[env(safe-area-inset-top)]">
     <!-- Theme v3: the page is a fixed overlay — its own aurora instance gives
          the opaque base (gradient) plus the real blob field, hiding the list
-         behind. Sits at -z-20 so the card cover (-z-10) stays above it. -->
+         behind. Layering is all-positive z (aurora z-0 < cover z-[1] < stream
+         z-[2] < chrome z-10): negative z children of a fixed context are
+         composited below the sibling tab pages on some chromium compositors.
+         inset-0 covers the FULL screen including under the status bar — abspos
+         children ignore the root's padding, and Tailwind v4 silently skips
+         negative-arbitrary top candidates with env() inside (the missing rule
+         collapsed this layer to height 0 once — see base.css note; guarded by
+         the chat-overlay-zorder spec). -->
     <AuroraLayer
-      class="absolute inset-x-0 -top-[env(safe-area-inset-top)] bottom-0 -z-20"
+      class="absolute inset-0 z-0"
     />
     <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
          and dimmed behind the whole page. Tuning rides the card session
          envelope (SessionSettingsSheet); absent = enabled/40px/45%.
-         Negative z keeps every in-flow sibling above it. -->
+         z-[1] sits above the aurora, below the floor stream (z-[2]). -->
     <div
       v-if="isCardDomain && cardCover && effectiveBackdrop.enabled"
-      class="pointer-events-none absolute inset-x-0 -top-[env(safe-area-inset-top)] bottom-0 -z-10 overflow-hidden"
+      class="pointer-events-none absolute inset-0 z-[1] overflow-hidden"
       aria-hidden="true"
     >
       <img
@@ -626,7 +633,11 @@ const restartSession = async (): Promise<void> => {
         :style="backdropDimStyle"
       />
     </div>
-    <header class="mp-glass absolute inset-x-3 top-3 z-10 flex items-center gap-2 rounded-panel px-1.5 py-1">
+    <!-- mp-overlay-header-top: safe-area-aware top (base.css real class — the
+         overlay is a fixed child of the app root, so the root's pt-[env] does
+         NOT push this abspos header; a bare top-3 tucks it under the status
+         bar on edge-to-edge devices). -->
+    <header class="mp-glass mp-overlay-header-top absolute inset-x-3 z-10 flex items-center gap-2 rounded-panel px-1.5 py-1">
       <button
         type="button"
         class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"
@@ -764,7 +775,7 @@ const restartSession = async (): Promise<void> => {
 
     <div
       v-if="loadError"
-      class="flex flex-1 items-center justify-center text-sm text-ink-3"
+      class="relative z-[2] flex flex-1 items-center justify-center text-sm text-ink-3"
     >
       {{ loadError }}
     </div>
@@ -772,7 +783,7 @@ const restartSession = async (): Promise<void> => {
     <template v-else-if="conversation || cardSession">
       <div
         ref="messagesEl"
-        class="absolute inset-0 overflow-y-auto px-4 pt-24 pb-[calc(112px+env(safe-area-inset-bottom))]"
+        class="mp-overlay-flow-top absolute inset-0 z-[2] overflow-y-auto px-4 pb-[calc(112px+env(safe-area-inset-bottom))]"
       >
         <div class="mx-auto flex max-w-xl flex-col gap-3">
           <ChatFloorList

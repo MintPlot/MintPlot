@@ -95,4 +95,17 @@
     box-shadow: 0 12px 26px -10px var(--mp-accent-shadow);
   }
 
+  /* 全屏聊天覆盖层的安全区补偿(ChatSessionView)。覆盖层是 app 根的 fixed
+     子元素,根上的 pt-[env(safe-area-inset-top)] 推不动它的绝对定位子层——
+     这些补偿必须由子层自带。用真 CSS 类而非 Tailwind 任意值:v4 对负前缀
+     任意值(如 -top-[env(...)])会静默不生成规则,缺规则曾把覆盖层极光
+     塌缩成 height 0、整页变透明(列表/网格从底下透出)——勿回改。 */
+  .mp-overlay-header-top {
+    top: calc(env(safe-area-inset-top) + 0.75rem);
+  }
+
+  .mp-overlay-flow-top {
+    padding-top: calc(env(safe-area-inset-top) + 6rem);
+  }
+
 }
