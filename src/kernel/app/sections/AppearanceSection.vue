@@ -174,65 +174,65 @@ const themeLabel = computed(() =>
             </label>
           </div>
         </div>
-      </div>
 
-      <!-- 卡图背景全局默认(1.0.x):未单独调过的卡跟随此处;单独调过的卡
-         以会话设置里的随卡值为准(可「恢复跟随全局」退回)。 -->
-      <div class="m-3 mt-0 rounded-card border border-line">
-        <div class="px-3 py-2.5 text-sm text-ink">
-          卡图背景
-        </div>
-        <div class="rounded-b-card border-t border-line px-3 pb-4 pt-4">
-          <div class="relative h-28 overflow-hidden rounded-input border border-line">
-            <img
-              v-if="previewCover"
-              :src="previewCover"
-              alt=""
-              class="h-full w-full object-cover"
-              :style="previewImgStyle"
-            >
-            <div
-              v-else
-              class="flex h-full w-full items-center justify-center"
-            >
-              <MintCat class="h-10 w-10 text-ink-3" />
-            </div>
-            <div
-              class="absolute inset-0"
-              :style="previewDimStyle"
-            />
-            <!-- Mock floors: two small bubbles so the box reads as the chat
-               canvas the settings will style, not just a photo widget. -->
-            <div class="absolute bottom-2 left-2 h-4 w-16 rounded-bubble-ai bg-card/90" />
-            <div class="absolute bottom-7 right-2 h-4 w-12 rounded-bubble-user bg-primary/80" />
+        <!-- 卡图背景全局默认(1.0.x):未单独调过的卡跟随此处;单独调过的卡
+             以会话设置里的随卡值为准(可「恢复跟随全局」退回)。 -->
+        <div class="m-3 mt-0 rounded-card border border-line">
+          <div class="px-3 py-2.5 text-sm text-ink">
+            卡图背景
           </div>
-          <label class="mt-3 flex items-center gap-2">
-            <span class="w-8 flex-shrink-0 text-xs text-ink-2">模糊</span>
-            <input
-              v-model.number="cardBackdropDefault.blur"
-              type="range"
-              min="0"
-              max="40"
-              step="2"
-              class="min-w-0 flex-1 accent-primary"
-            >
-            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ cardBackdropDefault.blur }}px</span>
-          </label>
-          <label class="mt-2 flex items-center gap-2">
-            <span class="w-8 flex-shrink-0 text-xs text-ink-2">压暗</span>
-            <input
-              v-model.number="cardBackdropDefault.dim"
-              type="range"
-              min="0"
-              max="80"
-              step="5"
-              class="min-w-0 flex-1 accent-primary"
-            >
-            <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ cardBackdropDefault.dim }}%</span>
-          </label>
-          <p class="mt-2 text-[10px] text-ink-3">
-            未单独调整背景的卡跟随此处默认。
-          </p>
+          <div class="rounded-b-card border-t border-line px-3 pb-4 pt-4">
+            <div class="relative h-28 overflow-hidden rounded-input border border-line">
+              <img
+                v-if="previewCover"
+                :src="previewCover"
+                alt=""
+                class="h-full w-full object-cover"
+                :style="previewImgStyle"
+              >
+              <div
+                v-else
+                class="flex h-full w-full items-center justify-center"
+              >
+                <MintCat class="h-10 w-10 text-ink-3" />
+              </div>
+              <div
+                class="absolute inset-0"
+                :style="previewDimStyle"
+              />
+              <!-- Mock floors: two small bubbles so the box reads as the chat
+               canvas the settings will style, not just a photo widget. -->
+              <div class="absolute bottom-2 left-2 h-4 w-16 rounded-bubble-ai bg-card/90" />
+              <div class="absolute bottom-7 right-2 h-4 w-12 rounded-bubble-user bg-primary/80" />
+            </div>
+            <label class="mt-3 flex items-center gap-2">
+              <span class="w-8 flex-shrink-0 text-xs text-ink-2">模糊</span>
+              <input
+                v-model.number="cardBackdropDefault.blur"
+                type="range"
+                min="0"
+                max="40"
+                step="2"
+                class="min-w-0 flex-1 accent-primary"
+              >
+              <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ cardBackdropDefault.blur }}px</span>
+            </label>
+            <label class="mt-2 flex items-center gap-2">
+              <span class="w-8 flex-shrink-0 text-xs text-ink-2">压暗</span>
+              <input
+                v-model.number="cardBackdropDefault.dim"
+                type="range"
+                min="0"
+                max="80"
+                step="5"
+                class="min-w-0 flex-1 accent-primary"
+              >
+              <span class="w-10 flex-shrink-0 text-right font-mono text-[10px] text-ink-3">{{ cardBackdropDefault.dim }}%</span>
+            </label>
+            <p class="mt-2 text-[10px] text-ink-3">
+              未单独调整背景的卡跟随此处默认。
+            </p>
+          </div>
         </div>
       </div>
     </div>
