@@ -12,7 +12,7 @@ defineEmits<{ close: [] }>()
     <img
       :src="src"
       alt="图片查看"
-      class="max-h-full max-w-full object-contain"
+      class="mp-mo-center-card max-h-full max-w-full object-contain"
     >
   </div>
 </template>

@@ -9,7 +9,7 @@ const fatal = useFatalError()
 </script>
 
 <template>
-  <Transition name="fatal-fade">
+  <Transition name="mp-mo-center">
     <div
       v-if="fatal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6"
@@ -17,7 +17,7 @@ const fatal = useFatalError()
       aria-modal="true"
       aria-label="严重错误"
     >
-      <div class="mp-glass w-full max-w-sm rounded-bubble-ai p-5">
+      <div class="mp-mo-center-card mp-glass w-full max-w-sm rounded-bubble-ai p-5">
         <div class="mb-2 flex items-center gap-2">
           <svg
             class="h-5 w-5 text-danger"
@@ -60,14 +60,3 @@ const fatal = useFatalError()
     </div>
   </Transition>
 </template>
-
-<style scoped>
-.fatal-fade-enter-active,
-.fatal-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.fatal-fade-enter-from,
-.fatal-fade-leave-to {
-  opacity: 0;
-}
-</style>

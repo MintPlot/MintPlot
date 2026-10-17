@@ -97,7 +97,10 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
        (blurred blobs + grain) pinned behind the shell content. -->
   <div class="flex h-dvh flex-col pt-[env(safe-area-inset-top)] text-ink">
     <AuroraLayer class="fixed inset-0 z-0" />
-    <div class="relative z-10 min-h-0 flex-1">
+    <div
+      class="relative z-10 min-h-0 flex-1 mp-mo-stage"
+      :class="{ 'mp-mo-stage-under': chatOverlay }"
+    >
       <component
         :is="activeTab.component"
         v-bind="activeTab.props"
@@ -130,12 +133,14 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       </div>
     </nav>
 
-    <ChatSessionView
-      v-if="chatOverlay"
-      :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
-      :domain="chatOverlay.kind"
-      :conversation-id="chatOverlay.conversationId"
-    />
+    <Transition name="mp-mo-push">
+      <ChatSessionView
+        v-if="chatOverlay"
+        :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
+        :domain="chatOverlay.kind"
+        :conversation-id="chatOverlay.conversationId"
+      />
+    </Transition>
 
     <ToastHost />
     <ConfirmDialogHost />

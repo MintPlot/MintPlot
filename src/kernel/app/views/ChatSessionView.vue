@@ -852,69 +852,83 @@ const restartSession = async (): Promise<void> => {
       </div>
     </template>
 
-    <ImageViewer
-      v-if="viewerImage"
-      :src="viewerImage"
-      @close="viewerImage = ''"
-    />
+    <Transition name="mp-mo-center">
+      <ImageViewer
+        v-if="viewerImage"
+        :src="viewerImage"
+        @close="viewerImage = ''"
+      />
+    </Transition>
 
-    <VariablesSheet
-      v-if="isCardDomain && showVariables && card"
-      :card-id="card.id"
-      :templates="activeTemplates"
-      :analysis-status="analysisStatus"
-      :live="liveVariableSnapshot"
-      @changed="onVariablesChanged"
-      @close="showVariables = false"
-      @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
-    />
+    <Transition name="mp-mo-sheet">
+      <VariablesSheet
+        v-if="isCardDomain && showVariables && card"
+        :card-id="card.id"
+        :templates="activeTemplates"
+        :analysis-status="analysisStatus"
+        :live="liveVariableSnapshot"
+        @changed="onVariablesChanged"
+        @close="showVariables = false"
+        @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
+      />
+    </Transition>
 
-    <WorldbookSheet
-      v-if="isCardDomain && showWorldbook"
-      :entries="worldbookEntries"
-      :disabled-uids="worldbookDisabledUids"
-      :report="worldbookReport"
-      @toggle="toggleWorldbookEntry"
-      @close="showWorldbook = false"
-    />
+    <Transition name="mp-mo-sheet">
+      <WorldbookSheet
+        v-if="isCardDomain && showWorldbook"
+        :entries="worldbookEntries"
+        :disabled-uids="worldbookDisabledUids"
+        :report="worldbookReport"
+        @toggle="toggleWorldbookEntry"
+        @close="showWorldbook = false"
+      />
+    </Transition>
 
-    <RegexSheet
-      v-if="isCardDomain && showRegex"
-      :scripts="cardRegexScripts"
-      :disabled-uids="regexDisabledUids"
-      @toggle="toggleRegexScript"
-      @close="showRegex = false"
-    />
+    <Transition name="mp-mo-sheet">
+      <RegexSheet
+        v-if="isCardDomain && showRegex"
+        :scripts="cardRegexScripts"
+        :disabled-uids="regexDisabledUids"
+        @toggle="toggleRegexScript"
+        @close="showRegex = false"
+      />
+    </Transition>
 
-    <SessionSettingsSheet
-      v-if="showSessionSettings"
-      :domain="props.domain"
-      :conversation="conversation"
-      :card-session="cardSession"
-      :settings-state="settingsState"
-      :card-cover="cardCover"
-      @close="closeSessionSettings"
-      @saved="onSheetSaved"
-      @preview="backdropPreview = $event"
-      @reset-bg="onBackdropReset"
-    />
-    <StyleSheet
-      v-if="isCardDomain && showStyle && cardSession"
-      :selection="cardStyle"
-      :snapshot="presetSnapshot"
-      @save="onStyleSaved"
-      @close="showStyle = false"
-    />
-    <MemorySheet
-      v-if="isCardDomain && showMemory && card"
-      :state="memoryState"
-      :status="memoryStatus"
-      :busy="memoryBusy"
-      :floor-count="messages.length"
-      @close="showMemory = false"
-      @summarize="maybeRunMemoryPipeline(true)"
-      @rebuild="rebuildMemory"
-    />
+    <Transition name="mp-mo-sheet">
+      <SessionSettingsSheet
+        v-if="showSessionSettings"
+        :domain="props.domain"
+        :conversation="conversation"
+        :card-session="cardSession"
+        :settings-state="settingsState"
+        :card-cover="cardCover"
+        @close="closeSessionSettings"
+        @saved="onSheetSaved"
+        @preview="backdropPreview = $event"
+        @reset-bg="onBackdropReset"
+      />
+    </Transition>
+    <Transition name="mp-mo-sheet">
+      <StyleSheet
+        v-if="isCardDomain && showStyle && cardSession"
+        :selection="cardStyle"
+        :snapshot="presetSnapshot"
+        @save="onStyleSaved"
+        @close="showStyle = false"
+      />
+    </Transition>
+    <Transition name="mp-mo-sheet">
+      <MemorySheet
+        v-if="isCardDomain && showMemory && card"
+        :state="memoryState"
+        :status="memoryStatus"
+        :busy="memoryBusy"
+        :floor-count="messages.length"
+        @close="showMemory = false"
+        @summarize="maybeRunMemoryPipeline(true)"
+        @rebuild="rebuildMemory"
+      />
+    </Transition>
   </div>
 </template>
 

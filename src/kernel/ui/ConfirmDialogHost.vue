@@ -9,7 +9,7 @@ const current = computed(() => queue.value[0] ?? null)
 </script>
 
 <template>
-  <Transition name="confirm-fade">
+  <Transition name="mp-mo-center">
     <div
       v-if="current"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6"
@@ -17,7 +17,7 @@ const current = computed(() => queue.value[0] ?? null)
       aria-modal="true"
       :aria-label="current.title"
     >
-      <div class="mp-glass w-full max-w-sm rounded-bubble-ai p-5">
+      <div class="mp-mo-center-card mp-glass w-full max-w-sm rounded-bubble-ai p-5">
         <h2 class="text-base font-bold text-ink">
           {{ current.title }}
         </h2>
@@ -47,14 +47,3 @@ const current = computed(() => queue.value[0] ?? null)
     </div>
   </Transition>
 </template>
-
-<style scoped>
-.confirm-fade-enter-active,
-.confirm-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.confirm-fade-enter-from,
-.confirm-fade-leave-to {
-  opacity: 0;
-}
-</style>

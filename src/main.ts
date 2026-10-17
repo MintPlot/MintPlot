@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import './main.css'
+import '@/kernel/design/motion.css'
 import App from './App.vue'
 import { initMpTheme } from '@/kernel/design/theme'
 import { initMpColorFamily } from '@/kernel/design/color-families'

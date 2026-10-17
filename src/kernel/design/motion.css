@@ -1,0 +1,103 @@
+/*
+ * Motion batch (documents/planning/motion-batch-plan.md): large-surface
+ * transitions as pure CSS — transform/opacity only, compositor-thread safe.
+ * Red lines, guarded by tests/kernel/motion-css.spec.ts:
+ * - animated properties are restricted to transform and opacity (nothing
+ *   from the backdrop-sampling family anywhere in this file — vivo
+ *   compositor leak history);
+ * - every duration rides the --mp-mo-t variable so the reduced-motion block
+ *   zeroes the whole sheet in one place (descendant rules inherit it);
+ * - every class lives under the mp-mo- namespace.
+ */
+
+/* Push stack — the full-screen chat page slides over the tab stage.
+ * Enter 300ms, leave 260ms. */
+.mp-mo-push-enter-active {
+  --mp-mo-t: 300ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+}
+.mp-mo-push-leave-active {
+  --mp-mo-t: 260ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+}
+.mp-mo-push-enter-from,
+.mp-mo-push-leave-to {
+  transform: translateX(100%);
+}
+
+/* Stage = the tab-page container under the chat overlay. While the overlay
+ * is mounted it parks at -16% (parallax); the duration matches the push
+ * leave so BACK reveals the list already gliding to rest. */
+.mp-mo-stage {
+  --mp-mo-t: 260ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+}
+.mp-mo-stage-under {
+  transform: translateX(-16%);
+}
+
+/* Bottom sheets — root opacity serves the scrim fade (the scrim is the root
+ * background); the panel child rises 24px. Enter 240ms, leave 160ms.
+ * (The planning sketch split scrim 220ms / panel 240ms; the durations are
+ * unified per phase so one variable covers the reduced-motion gate.) */
+.mp-mo-sheet-enter-active {
+  --mp-mo-t: 240ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-enter-active .mp-mo-sheet-panel {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-enter-from,
+.mp-mo-sheet-leave-to {
+  opacity: 0;
+}
+.mp-mo-sheet-enter-from .mp-mo-sheet-panel,
+.mp-mo-sheet-leave-to .mp-mo-sheet-panel {
+  transform: translateY(24px);
+}
+.mp-mo-sheet-leave-active {
+  --mp-mo-t: 160ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-leave-active .mp-mo-sheet-panel {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Centered modals (confirm / fatal / image viewer) — root fades, the card
+ * child scales 0.96 → 1. Enter 200ms, leave 150ms. */
+.mp-mo-center-enter-active {
+  --mp-mo-t: 200ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-enter-active .mp-mo-center-card {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-enter-from,
+.mp-mo-center-leave-to {
+  opacity: 0;
+}
+.mp-mo-center-enter-from .mp-mo-center-card,
+.mp-mo-center-leave-to .mp-mo-center-card {
+  transform: scale(0.96);
+}
+.mp-mo-center-leave-active {
+  --mp-mo-t: 150ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-leave-active .mp-mo-center-card {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Reduced-motion master gate: zero every duration in one block. The var is
+ * set on the phase roots; descendant rules inherit it. */
+@media (prefers-reduced-motion: reduce) {
+  .mp-mo-push-enter-active,
+  .mp-mo-push-leave-active,
+  .mp-mo-stage,
+  .mp-mo-sheet-enter-active,
+  .mp-mo-sheet-leave-active,
+  .mp-mo-center-enter-active,
+  .mp-mo-center-leave-active {
+    --mp-mo-t: 0.01ms;
+  }
+}
