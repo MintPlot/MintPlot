@@ -88,6 +88,33 @@
   transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* Tab switch (quiet A, shared-axis): out 120ms pure fade; in 180ms fade plus
+ * a 16px slide whose side follows the registry order. Two names = direction. */
+.mp-mo-tab-next-enter-active,
+.mp-mo-tab-back-enter-active {
+  --mp-mo-t: 180ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-tab-next-leave-active,
+.mp-mo-tab-back-leave-active {
+  --mp-mo-t: 120ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-tab-next-enter-from,
+.mp-mo-tab-back-enter-from,
+.mp-mo-tab-next-leave-to,
+.mp-mo-tab-back-leave-to {
+  opacity: 0;
+}
+.mp-mo-tab-next-enter-from {
+  transform: translateX(16px);
+}
+.mp-mo-tab-back-enter-from {
+  transform: translateX(-16px);
+}
+
 /* Reduced-motion master gate: zero every duration in one block. The var is
  * set on the phase roots; descendant rules inherit it. */
 @media (prefers-reduced-motion: reduce) {
@@ -97,7 +124,11 @@
   .mp-mo-sheet-enter-active,
   .mp-mo-sheet-leave-active,
   .mp-mo-center-enter-active,
-  .mp-mo-center-leave-active {
+  .mp-mo-center-leave-active,
+  .mp-mo-tab-next-enter-active,
+  .mp-mo-tab-back-enter-active,
+  .mp-mo-tab-next-leave-active,
+  .mp-mo-tab-back-leave-active {
     --mp-mo-t: 0.01ms;
   }
 }

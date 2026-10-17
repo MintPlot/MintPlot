@@ -111,6 +111,15 @@ describe('动效挂点接线守卫', () => {
     expect(app).toContain("'mp-mo-stage-under': chatOverlay")
   })
 
+  it('App.vue:tab 切换 out-in 方向感知双类在位', () => {
+    const app = readSrc('App.vue')
+    expect(app).toContain('mode="out-in"')
+    expect(app).toContain(':name="tabDirection"')
+    expect(app).toContain("ref('mp-mo-tab-next')")
+    expect(app).toContain("'mp-mo-tab-next'")
+    expect(app).toContain("'mp-mo-tab-back'")
+  })
+
   it('六个底部面板挂面板标记类,ChatSessionView 七处 Transition(六面板+图片查看器)', () => {
     const sheets: Array<[string, string]> = [
       ['variables', 'VariablesSheet.vue'],

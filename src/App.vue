@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import IconChat from '@/kernel/app/assets/tab-icons/IconChat.vue'
 import IconBars from '@/kernel/app/assets/tab-icons/IconBars.vue'
 import IconUser from '@/kernel/app/assets/tab-icons/IconUser.vue'
@@ -85,6 +85,14 @@ const tabs = useTabProjection()
 const activeId = ref(tabs.value[0]?.id ?? '')
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? tabs.value[0])
 
+// Motion batch 2: shared-axis tab switch — the incoming page slides from the
+// side matching the registry order (higher order enters from the right).
+const tabDirection = ref('mp-mo-tab-next')
+watch(activeId, (next, prev) => {
+  const orderOf = (id: string) => tabs.value.find((tab) => tab.id === id)?.order ?? 0
+  tabDirection.value = orderOf(next) >= orderOf(prev) ? 'mp-mo-tab-next' : 'mp-mo-tab-back'
+})
+
 // Full-screen chat page: the tab bar hides while a conversation is open.
 // M3-i: the route kind picks the domain — one session-page skeleton serves
 // chatbox and card conversations alike.
@@ -101,10 +109,16 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       class="relative z-10 min-h-0 flex-1 mp-mo-stage"
       :class="{ 'mp-mo-stage-under': chatOverlay }"
     >
-      <component
-        :is="activeTab.component"
-        v-bind="activeTab.props"
-      />
+      <Transition
+        mode="out-in"
+        :name="tabDirection"
+      >
+        <component
+          :is="activeTab.component"
+          :key="activeTab.id"
+          v-bind="activeTab.props"
+        />
+      </Transition>
     </div>
 
     <!-- Theme v3 floating chrome: the tab bar is an inset glass pill
