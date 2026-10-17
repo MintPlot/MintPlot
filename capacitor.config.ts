@@ -12,6 +12,13 @@ const config: CapacitorConfig = {
   android: {
     adjustMarginsForEdgeToEdge: 'auto',
   },
+  // 软键盘避让(2026-10-17 真机反馈:输入法盖住输入坞):原生 ime-inset
+  // 驱动 WebView resize,不受 edge-to-edge 下 adjustResize 失效影响。
+  plugins: {
+    Keyboard: {
+      resize: 'native',
+    },
+  },
 }
 
 export default config
