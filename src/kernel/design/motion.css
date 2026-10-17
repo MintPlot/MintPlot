@@ -17,9 +17,11 @@
  * rasterizes four 55px blob blurs and lays out its floors at frame zero —
  * the flight stuttered. Two counters: the enter transition starts 60ms
  * late (mount cost is paid while the page still sits off-screen at
- * translateX(100%)), and the aurora blobs stay invisible during the enter
- * flight (invisible layers skip raster; they bloom once, at rest — cached
- * textures from then on, so the leave flight keeps them). */
+ * translateX(100%)), and the aurora blobs bloom THROUGH the flight (an
+ * opacity animation starting at the slide) instead of popping in at rest —
+ * round 2's visibility-hidden version read as a white flash before the
+ * color arrived (device report round 3). The leave flight keeps them
+ * (cached textures move cheap). */
 .mp-mo-push-enter-active {
   --mp-mo-t: 300ms;
   --mp-mo-d: 60ms;
@@ -27,7 +29,16 @@
   transition-delay: var(--mp-mo-d, 0ms);
 }
 .mp-mo-push-enter-active .mp-aurora-blob {
-  visibility: hidden;
+  animation: mp-mo-blob-in var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1) var(--mp-mo-d, 0ms) both;
+}
+
+@keyframes mp-mo-blob-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .mp-mo-push-leave-active {
   --mp-mo-t: 260ms;
@@ -220,5 +231,8 @@
   }
   .mp-mo-push-enter-active {
     --mp-mo-d: 0.01ms;
+  }
+  .mp-mo-push-enter-active .mp-aurora-blob {
+    animation: none;
   }
 }

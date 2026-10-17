@@ -32,8 +32,9 @@ describe('ChatHomeView swipe-to-delete', () => {
   }
 
   // Reveal zones are always-mounted siblings behind the row (inside the same
-  // li); their inline style carries the live opacity (round-2 redesign:
-  // proportional, side-specific reveal). Scoped to the dragged row's li —
+  // li); their inline style carries the live translate (round-3 redesign:
+  // glued to the row edges, sliding OUT with the drag). Parked = clipped
+  // outside the li (+72 delete / -72 pin). Scoped to the dragged row's li —
   // the list sorts by updatedAt, so global findAll could pick another row.
   const revealZonesOf = (row: ReturnType<typeof rowOf>) => {
     const zones = [...(row.element.closest('li')!.querySelectorAll('[aria-hidden="true"]'))]
@@ -41,12 +42,12 @@ describe('ChatHomeView swipe-to-delete', () => {
       .map((el) => ({
         pin: el.textContent?.includes('置顶') ?? false,
         delete: el.textContent?.includes('删除') ?? false,
-        opacity: Number(el.getAttribute('style')?.match(/opacity:\s*([\d.]+)/)?.[1] ?? 0),
+        x: Number(el.getAttribute('style')?.match(/translateX\((-?[\d.]+)px\)/)?.[1] ?? NaN),
       }))
     expect(zones.length).toBeGreaterThan(0)
     return {
-      pin: zones.find((zone) => zone.pin) ?? { opacity: 0 },
-      delete: zones.find((zone) => zone.delete) ?? { opacity: 0 },
+      pin: zones.find((zone) => zone.pin) ?? { x: NaN },
+      delete: zones.find((zone) => zone.delete) ?? { x: NaN },
     }
   }
 
@@ -127,8 +128,8 @@ describe('ChatHomeView swipe-to-delete', () => {
     await nextTick()
 
     const zones = revealZonesOf(row)
-    expect(zones.delete.opacity).toBe(0)
-    expect(zones.pin.opacity).toBe(0)
+    expect(zones.delete.x).toBe(72)
+    expect(zones.pin.x).toBe(-72)
     // Row stays parked — the drift never becomes a drag offset.
     expect(row.attributes('style')).toContain('translateX(0px)')
 
@@ -138,28 +139,29 @@ describe('ChatHomeView swipe-to-delete', () => {
     expect(useChatRoute().value.view).toBe('list')
   })
 
-  it('滑动时按钮随行滑出:左滑只亮删除侧,右滑只亮置顶侧(2026-10-17 round-2)', async () => {
+  it('滑动时按钮跟行滑出:左滑删除区跟进、右滑置顶区跟进(2026-10-17 round-3)', async () => {
     const wrapper = await mountView()
     const row = rowOf(wrapper, '第一个对话')
 
-    // Left swipe 40px: the row slides, ONLY the delete zone fades in
-    // proportionally; the pin side stays dark.
+    // Left swipe 40px: the row slides to -40 and the delete zone rides its
+    // edge (-40 + 72 = 32 — inside the revealed gap); the pin side is
+    // pushed further out (-40 - 72 = -112).
     firePointer(row.element, 'pointerdown', 300, 400)
     firePointer(row.element, 'pointermove', 260, 402)
     await nextTick()
     const left = revealZonesOf(row)
     expect(row.attributes('style')).toContain('translateX(-40px)')
-    expect(left.delete.opacity).toBeGreaterThan(0)
-    expect(left.pin.opacity).toBe(0)
+    expect(left.delete.x).toBe(32)
+    expect(left.pin.x).toBe(-112)
     firePointer(row.element, 'pointercancel', 260, 402)
 
-    // Right swipe: mirror — only the pin zone.
+    // Right swipe 40px: mirror — the pin zone rides into the gap.
     firePointer(row.element, 'pointerdown', 300, 400)
     firePointer(row.element, 'pointermove', 340, 402)
     await nextTick()
     const right = revealZonesOf(row)
-    expect(right.pin.opacity).toBeGreaterThan(0)
-    expect(right.delete.opacity).toBe(0)
+    expect(right.pin.x).toBe(-32)
+    expect(right.delete.x).toBe(112)
     firePointer(row.element, 'pointercancel', 340, 402)
   })
 
@@ -212,25 +214,25 @@ describe('ChatHomeView swipe-to-delete', () => {
     toastSpy.mockRestore()
   })
 
-  it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才按侧露出', async () => {
+  it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才跟行滑出', async () => {
     const wrapper = await mountView()
     const row = rowOf(wrapper, '第一个对话')
 
-    // Press and hold without movement: a bare press keys nothing on (its
-    // reveal opacity stays 0 — press-and-hold is reserved for other uses).
+    // Press and hold without movement: both zones stay parked outside the
+    // li (clipped) — press-and-hold is reserved for other uses.
     firePointer(row.element, 'pointerdown', 300)
     await nextTick()
     const pressed = revealZonesOf(row)
-    expect(pressed.pin.opacity).toBe(0)
-    expect(pressed.delete.opacity).toBe(0)
+    expect(pressed.pin.x).toBe(-72)
+    expect(pressed.delete.x).toBe(72)
 
-    // Move past the drag-start threshold (leftward): only the delete side
-    // wakes, proportional to the slide.
+    // Move past the drag-start threshold (leftward): the delete zone rides
+    // the row's edge into the gap.
     firePointer(row.element, 'pointermove', 300 - 12)
     await nextTick()
     const dragged = revealZonesOf(row)
-    expect(dragged.delete.opacity).toBeGreaterThan(0)
-    expect(dragged.pin.opacity).toBe(0)
+    expect(dragged.delete.x).toBe(60)
+    expect(dragged.pin.x).toBe(-84)
 
     firePointer(row.element, 'pointerup', 300 - 12)
     await nextTick()

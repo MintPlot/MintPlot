@@ -146,7 +146,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
             </button>
             <div
               v-if="showOneShotPanel"
-              class="mp-glass absolute left-0 top-10 z-40 w-64 rounded-bubble-ai p-2"
+              class="mp-glass-strong absolute left-0 top-10 z-40 w-64 rounded-card p-2"
             >
               <p class="mb-1 text-xs font-bold text-ink">
                 单次指令

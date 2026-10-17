@@ -51,6 +51,7 @@
        对拍 spec 钉一致 —— 双真源漂移由 tests/kernel/acrylic-tokens-parity.spec 拦截;
        极光不落令牌:AuroraLayer 直接用配方渲染基底渐变 + 真 DOM 模糊色块)── */
   --mp-glass-bg: rgba(255, 255, 255, 0.78);       /* 玻璃 chrome 填充(无 backdrop,加实补偿) */
+  --mp-glass-strong-bg: rgba(255, 255, 255, 0.96); /* 强玻璃:盖忙碌内容的面(面板/弹窗/Toast) */
   --mp-glass-border: rgba(255, 255, 255, 0.7);    /* 发丝边(参考件 hairline) */
   --mp-glass-edge: rgba(255, 255, 255, 0.85);     /* 内顶高光(参考件 edge-light) */
   --mp-glass-shadow: rgba(10, 40, 36, 0.18);      /* 参考件 surf-shadow */
@@ -98,6 +99,7 @@
 
   /* 夜航亚克力(主题 v3 复刻):极光由 AuroraLayer 渲染(基底 + 色块),值同 acrylic.ts 构建器 */
   --mp-glass-bg: rgba(10, 22, 20, 0.78);
+  --mp-glass-strong-bg: rgba(10, 22, 20, 0.96);
   --mp-glass-border: rgba(200, 235, 230, 0.14);
   --mp-glass-edge: rgba(140, 235, 225, 0.08);
   --mp-glass-shadow: rgba(0, 0, 0, 0.45);

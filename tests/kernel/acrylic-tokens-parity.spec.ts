@@ -26,6 +26,7 @@ const norm = (value: string): string => value.replace(/\s+/g, '')
 
 const MATERIAL_KEYS = [
   '--mp-glass-bg',
+  '--mp-glass-strong-bg',
   '--mp-glass-border',
   '--mp-glass-edge',
   '--mp-glass-shadow',

@@ -16,7 +16,7 @@ const toasts = useToasts()
         :key="toast.id"
         class="pointer-events-auto max-w-md rounded-card px-4 py-2.5 text-sm shadow-md"
         :class="{
-          'mp-glass text-ink': toast.tone === 'info',
+          'mp-glass-strong text-ink': toast.tone === 'info',
           'bg-primary text-on-primary': toast.tone === 'success',
           'bg-danger text-on-primary': toast.tone === 'error',
         }"

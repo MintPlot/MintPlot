@@ -187,9 +187,25 @@ describe('动效挂点接线守卫', () => {
     expect(readSrc('kernel', 'variables', 'VariablesSheet.vue')).toContain('mp-mo-collapse-open')
   })
 
-  it('滑动 reveal 语义(round-2):按钮区常驻+按侧渐显,零 v-show 瞬现', () => {
+  it('滑动 reveal 语义(round-3):按钮区贴行边跟行平移,零 v-show/零渐显', () => {
     const home = readSrc('kernel', 'app', 'views', 'ChatHomeView.vue')
-    expect(home).toContain('zoneOpacity')
+    expect(home).toContain('zoneTranslate')
     expect(home).not.toContain('v-show="isRevealing')
+    expect(home).not.toContain('zoneOpacity')
+  })
+
+  it('强玻璃材质(round-3):弹窗/Toast/弹层盖忙碌内容,零气泡圆角混用', () => {
+    const base = readSrc('kernel', 'design', 'base.css')
+    expect(base).toContain('.mp-glass-strong')
+    expect(base).toContain('var(--mp-glass-strong-bg)')
+    for (const file of ['ConfirmDialogHost.vue', 'FatalErrorHost.vue', 'ToastHost.vue']) {
+      const host = readSrc('kernel', 'ui', file)
+      expect(host, file).toContain('mp-glass-strong')
+      expect(host, file).not.toContain('rounded-bubble-ai')
+    }
+    expect(readSrc('kernel', 'app', 'chat', 'ChatComposer.vue')).toContain('mp-glass-strong')
+    // sheets ride the strong tier through mp-glass-bar (base.css swap)
+    const bar = base.slice(base.indexOf('.mp-glass-bar'), base.indexOf('.mp-glass-bar') + 200)
+    expect(bar).toContain('var(--mp-glass-strong-bg)')
   })
 })

@@ -112,7 +112,7 @@ const save = (): void => {
     class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
     @click.self="emit('close')"
   >
-    <div class="mp-mo-sheet-panel max-h-[80vh] overflow-y-auto rounded-t-2xl bg-card px-4 pb-6 pt-3">
+    <div class="mp-mo-sheet-panel mp-glass-bar max-h-[80vh] overflow-y-auto rounded-t-2xl px-4 pb-6 pt-3">
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-sm font-bold text-ink">
           会话设置
