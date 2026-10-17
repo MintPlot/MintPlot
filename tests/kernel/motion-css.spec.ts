@@ -107,10 +107,11 @@ describe('动效挂点接线守卫', () => {
     expect(readSrc('main.ts')).toContain('@/kernel/design/motion.css')
   })
 
-  it('App.vue:聊天页推栈 Transition 在位(视差已随 2026-10-17 去卡顿批撤除)', () => {
+  it('App.vue:聊天页推栈 Transition 在位 + tab stage 裁剪(右入 16px 悬出曾触发横向滚动条=不对称卡顿)', () => {
     const app = readSrc('App.vue')
     expect(app).toContain('<Transition name="mp-mo-push">')
     expect(app).not.toContain('mp-mo-stage')
+    expect(app).toContain('min-h-0 flex-1 overflow-hidden')
   })
 
   it('App.vue:tab 切换 out-in 方向感知双类 + KeepAlive 在位', () => {
@@ -168,12 +169,27 @@ describe('动效挂点接线守卫', () => {
     expect(toast).toContain('0.15s')
   })
 
-  it('手风琴折叠接线:设置页分区 + 工具页两区都是 collapse 组', () => {
+  it('手风琴折叠接线:全部折叠点(不止一级)都走 collapse 组', () => {
     const settings = readSrc('kernel', 'app', 'views', 'SettingsView.vue')
     expect(settings).not.toContain('v-show="isExpanded')
     expect((settings.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(1)
     const tools = readSrc('kernel', 'app', 'views', 'ToolsView.vue')
     expect((tools.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(2)
     expect(tools).not.toContain('v-if="areaOpen')
+    // round 2: every remaining disclosure joins the same pattern —
+    // appearance theme, plugin groups + entries, thinking card, capsule
+    // detail, variables records (device report: "只应用了第一级")
+    expect(readSrc('kernel', 'app', 'sections', 'AppearanceSection.vue')).toContain('mp-mo-collapse-open')
+    const pluginArea = readSrc('kernel', 'app', 'sections', 'PluginArea.vue')
+    expect((pluginArea.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(readSrc('kernel', 'app', 'chat', 'FloorThinkingCard.vue')).toContain('mp-mo-collapse-open')
+    expect(readSrc('kernel', 'app', 'chat', 'ChatFloorList.vue')).toContain('mp-mo-collapse-open')
+    expect(readSrc('kernel', 'variables', 'VariablesSheet.vue')).toContain('mp-mo-collapse-open')
+  })
+
+  it('滑动 reveal 语义(round-2):按钮区常驻+按侧渐显,零 v-show 瞬现', () => {
+    const home = readSrc('kernel', 'app', 'views', 'ChatHomeView.vue')
+    expect(home).toContain('zoneOpacity')
+    expect(home).not.toContain('v-show="isRevealing')
   })
 })

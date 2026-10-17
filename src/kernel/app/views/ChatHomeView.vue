@@ -81,9 +81,18 @@ const swipeOffsetOf = (id: string): number => {
  *  both colored actions through the translucent row on every plain tap —
  *  the rows have no background fill, so the blocks shone through for the
  *  whole press. */
-const isRevealing = (id: string): boolean => {
+/** Reveal-zone opacity follows the live drag (2026-10-17 round-2 redesign):
+ * proportional to how far the row has slid, on the swiped side only — the
+ * zones slide in UNDER the row (iOS-mailbox read) instead of popping in.
+ * At rest the offset is 0 (scrolls included — the direction lock pins it),
+ * so nothing can bleed through the translucent rows; press-and-hold is
+ * deliberately NOT a reveal trigger (reserved for future features). */
+const zoneOpacity = (id: string, side: 'pin' | 'delete'): number => {
   const drag = swipeDrag.value
-  return drag !== null && drag.id === id && drag.moved
+  if (!drag || drag.id !== id || !drag.moved) return 0
+  const ratio = Math.min(1, Math.abs(drag.dx) / REVEAL_WIDTH)
+  if (ratio === 0) return 0
+  return (side === 'pin') === (drag.dx > 0) ? ratio : 0
 }
 
 const onRowPointerDown = (id: string, event: PointerEvent): void => {
@@ -202,13 +211,13 @@ const timeLabel = (updatedAt: number): string => {
         >
           <!-- Reveal actions: purely visual during the drag — release past the
                threshold fires the action (confirm dialog for delete, instant
-               toggle for pin), so these are never tappable. Rows are
-               translucent over the aurora, so the reveal pair must exist only
-               while its row is actually being swiped (rest state would bleed
-               them through the row). -->
+               toggle for pin), so these are never tappable. Always mounted;
+               opacity follows the live offset (see zoneOpacity) so they slide
+               in under the row and fade out with the spring-back. -->
           <div
-            v-show="isRevealing(conversation.id)"
-            class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary"
+            class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary transition-opacity"
+            :class="swipeDrag?.id === conversation.id ? 'duration-0' : 'duration-150'"
+            :style="{ opacity: zoneOpacity(conversation.id, 'pin') }"
             aria-hidden="true"
           >
             <svg
@@ -227,8 +236,9 @@ const timeLabel = (updatedAt: number): string => {
             <span class="text-[11px]">{{ conversation.pinned ? '取消置顶' : '置顶' }}</span>
           </div>
           <div
-            v-show="isRevealing(conversation.id)"
-            class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary"
+            class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary transition-opacity"
+            :class="swipeDrag?.id === conversation.id ? 'duration-0' : 'duration-150'"
+            :style="{ opacity: zoneOpacity(conversation.id, 'delete') }"
             aria-hidden="true"
           >
             <svg

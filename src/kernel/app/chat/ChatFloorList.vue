@@ -148,20 +148,24 @@ const emit = defineEmits<{
           ⚙ 变量 ×{{ view.capsule.total }}
         </button>
         <div
-          v-if="view.capsuleOpen"
-          class="mt-1 rounded-input border border-line bg-bg/50 px-2 py-1 text-[10px] text-ink-2"
+          class="mp-mo-collapse mt-1 rounded-input"
+          :class="view.capsuleOpen ? 'mp-mo-collapse-open border border-line bg-bg/50' : ''"
         >
-          <div
-            v-for="update in view.capsule.flat"
-            :key="update.name"
-          >
-            {{ update.name }} → {{ update.value }}
-          </div>
-          <div
-            v-for="line in view.capsule.templateLines"
-            :key="line"
-          >
-            面板·{{ line }}
+          <div class="mp-mo-collapse-inner">
+            <div class="px-2 py-1 text-[10px] text-ink-2">
+              <div
+                v-for="update in view.capsule.flat"
+                :key="update.name"
+              >
+                {{ update.name }} → {{ update.value }}
+              </div>
+              <div
+                v-for="line in view.capsule.templateLines"
+                :key="line"
+              >
+                面板·{{ line }}
+              </div>
+            </div>
           </div>
         </div>
         <div

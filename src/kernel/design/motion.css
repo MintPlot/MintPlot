@@ -182,6 +182,7 @@
   --mp-mo-t: 240ms;
   display: grid;
   grid-template-rows: 0fr;
+  overflow: hidden;
   transition: grid-template-rows var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
 }
 .mp-mo-collapse-open {

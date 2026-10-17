@@ -105,7 +105,13 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
        (blurred blobs + grain) pinned behind the shell content. -->
   <div class="flex h-dvh flex-col pt-[env(safe-area-inset-top)] text-ink">
     <AuroraLayer class="fixed inset-0 z-0" />
-    <div class="relative z-10 min-h-0 flex-1">
+    <!-- overflow-hidden (2026-10-17 round 2): the shared-axis enter slides the
+         incoming page in from ±16px — without clipping, the right-entering
+         side overhangs the viewport, spawning a document scrollbar mid-flight
+         (visible in desktop browsers) and a full relayout = the asymmetric
+         tab-switch jank on device. Clip at the stage; both directions go
+         smooth and no scrollbar. -->
+    <div class="relative z-10 min-h-0 flex-1 overflow-hidden">
       <Transition
         mode="out-in"
         :name="tabDirection"
