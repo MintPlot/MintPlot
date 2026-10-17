@@ -33,10 +33,11 @@ describe('ChatHomeView swipe-to-delete', () => {
 
   // jsdom has no PointerEvent constructor and MouseEvent.clientX is
   // getter-only, so coordinates ride a plain Event via defineProperty — the
-  // component only reads clientX/pointerId/currentTarget.
-  const firePointer = (element: Element, type: string, clientX: number): void => {
+  // component only reads clientX/clientY/pointerId/currentTarget.
+  const firePointer = (element: Element, type: string, clientX: number, clientY?: number): void => {
     const event = new Event(type, { bubbles: true })
     Object.defineProperty(event, 'clientX', { value: clientX })
+    if (clientY !== undefined) Object.defineProperty(event, 'clientY', { value: clientY })
     Object.defineProperty(event, 'pointerId', { value: 1 })
     element.dispatchEvent(event)
   }
@@ -94,6 +95,31 @@ describe('ChatHomeView swipe-to-delete', () => {
 
     expect(confirmSpy).not.toHaveBeenCalled()
     expect(row.attributes('style')).toContain('translateX(0px)')
+    expect(useChatRoute().value.view).toBe('list')
+  })
+
+  it('垂直滚动的横向 slop 不闪出置顶/删除(方向锁,2026-10-17 真机回归)', async () => {
+    const wrapper = await mountView()
+    const row = rowOf(wrapper, '第一个对话')
+
+    // A vertical flick's opening slop: 12px horizontal drift, 40px down.
+    firePointer(row.element, 'pointerdown', 300, 400)
+    firePointer(row.element, 'pointermove', 288, 440)
+    await nextTick()
+
+    const reveals = wrapper
+      .findAll('[aria-hidden="true"]')
+      .filter((node) => node.text().includes('置顶') || node.text().includes('删除'))
+    expect(reveals.length).toBeGreaterThan(0)
+    for (const reveal of reveals) {
+      expect(reveal.attributes('style')).toContain('display: none')
+    }
+    // Row stays parked — the drift never becomes a drag offset.
+    expect(row.attributes('style')).toContain('translateX(0px)')
+
+    // The browser takes over the pan (pointercancel), never a tap-open.
+    firePointer(row.element, 'pointercancel', 288, 440)
+    await nextTick()
     expect(useChatRoute().value.view).toBe('list')
   })
 

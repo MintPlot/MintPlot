@@ -49,26 +49,29 @@ const transitionDeclarations = [...cssMain.matchAll(/transition:\s*([^;]+);/g)].
 )
 
 describe('motion.css 红线守卫(动效批)', () => {
-  it('动画只动 transform/opacity(vivo 合成器前科,白名单之外零目标)', () => {
+  it('动画只动 transform/opacity + 收编的 grid-template-rows(vivo 合成器前科;grid-rows 为规划 §2 明文允许的塌陷技巧,小 subtree 布局)', () => {
     expect(transitionDeclarations.length).toBeGreaterThanOrEqual(8)
+    const sanctioned = new Set(['transform', 'opacity', 'grid-template-rows'])
     const offenders = transitionDeclarations.flatMap((declaration) =>
-      transitionTargets(declaration).filter(
-        (target) => target !== 'transform' && target !== 'opacity',
-      ),
+      transitionTargets(declaration).filter((target) => !sanctioned.has(target)),
     )
     expect(offenders, `offending animated properties: ${offenders.join(', ')}`).toEqual([])
   })
 
-  it('全文件(含注释)零 blur/filter 族字样', () => {
-    const lowered = rawCss.toLowerCase()
-    expect(lowered).not.toContain('blur')
-    expect(lowered).not.toContain('filter')
+  it('transition/animation 声明零 blur/filter 族目标(注释与非动画声明不计——去卡顿用的 visibility 停用规则是合法的)', () => {
+    const animatedLines = [
+      ...css.matchAll(/(?:transition|animation):\s*([^;]+);/g),
+    ].map((match) => match[1] ?? '')
+    expect(animatedLines.length).toBeGreaterThanOrEqual(8)
+    const offenders = animatedLines.filter((line) => /blur|filter|backdrop/i.test(line))
+    expect(offenders, `blur/filter family in animated declarations: ${offenders.join(' | ')}`).toEqual([])
   })
 
-  it('所有类选择器收敛在 mp-mo- 前缀下', () => {
+  it('所有类选择器收敛在 mp-mo- 前缀下(跨域作用域选择器 .mp-aurora-blob 白名单)', () => {
     const classTokens = css.match(/\.[a-zA-Z][\w-]*/g) ?? []
     expect(classTokens.length).toBeGreaterThan(20)
-    const offenders = classTokens.filter((token) => !token.startsWith('.mp-mo-'))
+    const foreign = new Set(['.mp-aurora-blob'])
+    const offenders = classTokens.filter((token) => !token.startsWith('.mp-mo-') && !foreign.has(token))
     expect(offenders, `classes outside the mp-mo- namespace: ${offenders.join(', ')}`).toEqual([])
   })
 
@@ -104,20 +107,21 @@ describe('动效挂点接线守卫', () => {
     expect(readSrc('main.ts')).toContain('@/kernel/design/motion.css')
   })
 
-  it('App.vue:聊天页推栈 Transition + stage 视差类在位', () => {
+  it('App.vue:聊天页推栈 Transition 在位(视差已随 2026-10-17 去卡顿批撤除)', () => {
     const app = readSrc('App.vue')
     expect(app).toContain('<Transition name="mp-mo-push">')
-    expect(app).toContain('mp-mo-stage')
-    expect(app).toContain("'mp-mo-stage-under': chatOverlay")
+    expect(app).not.toContain('mp-mo-stage')
   })
 
-  it('App.vue:tab 切换 out-in 方向感知双类在位', () => {
+  it('App.vue:tab 切换 out-in 方向感知双类 + KeepAlive 在位', () => {
     const app = readSrc('App.vue')
     expect(app).toContain('mode="out-in"')
     expect(app).toContain(':name="tabDirection"')
     expect(app).toContain("ref('mp-mo-tab-next')")
     expect(app).toContain("'mp-mo-tab-next'")
     expect(app).toContain("'mp-mo-tab-back'")
+    // KeepAlive (device report 2026-10-17): cached tab pages, refresh via onActivated
+    expect(app).toContain('<KeepAlive>')
   })
 
   it('六个底部面板挂面板标记类,ChatSessionView 七处 Transition(六面板+图片查看器)', () => {
@@ -162,5 +166,14 @@ describe('动效挂点接线守卫', () => {
     const toast = readSrc('kernel', 'ui', 'ToastHost.vue')
     expect(toast).toContain('name="mp-toast"')
     expect(toast).toContain('0.15s')
+  })
+
+  it('手风琴折叠接线:设置页分区 + 工具页两区都是 collapse 组', () => {
+    const settings = readSrc('kernel', 'app', 'views', 'SettingsView.vue')
+    expect(settings).not.toContain('v-show="isExpanded')
+    expect((settings.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(1)
+    const tools = readSrc('kernel', 'app', 'views', 'ToolsView.vue')
+    expect((tools.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(tools).not.toContain('v-if="areaOpen')
   })
 })

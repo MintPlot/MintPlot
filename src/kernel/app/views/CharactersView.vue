@@ -4,7 +4,7 @@
 // 封面画,随导入存成 data URL(`character:cover:<id>`,JSON 卡无图走占位猫)。
 // 列表 = 双列封面网格,点卡直接进入该卡的对话(D2,RP 式:无详情页无会话
 // 列表,进卡即接续);删除连带清掉该卡会话与封面。
-import { inject, onMounted, ref } from 'vue'
+import { inject, onActivated, onMounted, ref } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
 import { CARD_SESSION_STORE_KEY, CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
 import { openConversation } from '@/kernel/app/chat-router'
@@ -39,6 +39,11 @@ const refresh = async (): Promise<void> => {
 onMounted(() => {
   if (!store) return
   loading.value = true
+  void refresh()
+})
+
+// KeepAlive revisit (App.vue caches tab pages): refresh like a remount did.
+onActivated(() => {
   void refresh()
 })
 

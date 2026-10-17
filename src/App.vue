@@ -105,19 +105,22 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
        (blurred blobs + grain) pinned behind the shell content. -->
   <div class="flex h-dvh flex-col pt-[env(safe-area-inset-top)] text-ink">
     <AuroraLayer class="fixed inset-0 z-0" />
-    <div
-      class="relative z-10 min-h-0 flex-1 mp-mo-stage"
-      :class="{ 'mp-mo-stage-under': chatOverlay }"
-    >
+    <div class="relative z-10 min-h-0 flex-1">
       <Transition
         mode="out-in"
         :name="tabDirection"
       >
-        <component
-          :is="activeTab.component"
-          :key="activeTab.id"
-          v-bind="activeTab.props"
-        />
+        <!-- KeepAlive (2026-10-17 device report): without it every tab switch
+             tore the page down and re-paid the idb loads + cover decodes
+             mid-transition — the device showed a visible load wait and janky
+             enters. Cached pages refresh through onActivated instead. -->
+        <KeepAlive>
+          <component
+            :is="activeTab.component"
+            :key="activeTab.id"
+            v-bind="activeTab.props"
+          />
+        </KeepAlive>
       </Transition>
     </div>
 

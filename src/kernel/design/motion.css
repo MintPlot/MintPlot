@@ -11,10 +11,23 @@
  */
 
 /* Push stack — the full-screen chat page slides over the tab stage.
- * Enter 300ms, leave 260ms. */
+ * Enter 300ms, leave 260ms.
+ *
+ * Device de-jank (2026-10-17 vivo report): the freshly mounted overlay
+ * rasterizes four 55px blob blurs and lays out its floors at frame zero —
+ * the flight stuttered. Two counters: the enter transition starts 60ms
+ * late (mount cost is paid while the page still sits off-screen at
+ * translateX(100%)), and the aurora blobs stay invisible during the enter
+ * flight (invisible layers skip raster; they bloom once, at rest — cached
+ * textures from then on, so the leave flight keeps them). */
 .mp-mo-push-enter-active {
   --mp-mo-t: 300ms;
+  --mp-mo-d: 60ms;
   transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+  transition-delay: var(--mp-mo-d, 0ms);
+}
+.mp-mo-push-enter-active .mp-aurora-blob {
+  visibility: hidden;
 }
 .mp-mo-push-leave-active {
   --mp-mo-t: 260ms;
@@ -23,17 +36,6 @@
 .mp-mo-push-enter-from,
 .mp-mo-push-leave-to {
   transform: translateX(100%);
-}
-
-/* Stage = the tab-page container under the chat overlay. While the overlay
- * is mounted it parks at -16% (parallax); the duration matches the push
- * leave so BACK reveals the list already gliding to rest. */
-.mp-mo-stage {
-  --mp-mo-t: 260ms;
-  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
-}
-.mp-mo-stage-under {
-  transform: translateX(-16%);
 }
 
 /* Bottom sheets — root opacity serves the scrim fade (the scrim is the root
@@ -149,7 +151,7 @@
   opacity: 0;
 }
 .mp-mo-row-leave-active {
-  --mp-mo-t: 220ms;
+  --mp-mo-t: 280ms;
   position: absolute;
   width: 100%;
   transition:
@@ -157,7 +159,7 @@
     transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
 }
 .mp-mo-cell-leave-active {
-  --mp-mo-t: 220ms;
+  --mp-mo-t: 320ms;
   transition:
     opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
     transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
@@ -171,12 +173,33 @@
   transform: scale(0.92);
 }
 
+/* Accordion collapse (settings sections, tools areas): the grid-rows
+ * 0fr→1fr trick — the ONE sanctioned non-transform/opacity animation (plan
+ * §2 explicitly allows a grid-rows collapse; it relayouts a small subtree
+ * only). The inner carries visibility so closed content leaves the tab
+ * order and the a11y tree, matching the old v-show semantics. */
+.mp-mo-collapse {
+  --mp-mo-t: 240ms;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-collapse-open {
+  grid-template-rows: 1fr;
+}
+.mp-mo-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
+  visibility: hidden;
+}
+
 /* Reduced-motion master gate: zero every duration in one block. The var is
  * set on the phase roots; descendant rules inherit it. */
 @media (prefers-reduced-motion: reduce) {
   .mp-mo-push-enter-active,
   .mp-mo-push-leave-active,
-  .mp-mo-stage,
   .mp-mo-sheet-enter-active,
   .mp-mo-sheet-leave-active,
   .mp-mo-center-enter-active,
@@ -190,7 +213,11 @@
   .mp-mo-row-enter-active,
   .mp-mo-row-leave-active,
   .mp-mo-cell-enter-active,
-  .mp-mo-cell-leave-active {
+  .mp-mo-cell-leave-active,
+  .mp-mo-collapse {
     --mp-mo-t: 0.01ms;
+  }
+  .mp-mo-push-enter-active {
+    --mp-mo-d: 0.01ms;
   }
 }

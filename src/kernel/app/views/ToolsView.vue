@@ -52,10 +52,15 @@ const areaViews = computed(() => views.value.map((view) => ({ key: `view:${view.
             <span class="flex-1 text-sm font-semibold text-ink">插件</span>
           </button>
           <div
-            v-if="areaOpen('plugins')"
-            class="border-t border-line"
+            class="mp-mo-collapse"
+            :class="areaOpen('plugins') ? 'mp-mo-collapse-open' : ''"
           >
-            <PluginArea />
+            <div
+              class="mp-mo-collapse-inner"
+              :class="areaOpen('plugins') ? 'border-t border-line' : ''"
+            >
+              <PluginArea />
+            </div>
           </div>
         </section>
 
@@ -87,10 +92,15 @@ const areaViews = computed(() => views.value.map((view) => ({ key: `view:${view.
             <span class="flex-1 text-sm font-semibold text-ink">{{ view.title }}</span>
           </button>
           <div
-            v-if="areaOpen(key)"
-            class="border-t border-line"
+            class="mp-mo-collapse"
+            :class="areaOpen(key) ? 'mp-mo-collapse-open' : ''"
           >
-            <component :is="view.component" />
+            <div
+              class="mp-mo-collapse-inner"
+              :class="areaOpen(key) ? 'border-t border-line' : ''"
+            >
+              <component :is="view.component" />
+            </div>
           </div>
         </section>
       </div>

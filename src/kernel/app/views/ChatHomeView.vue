@@ -5,7 +5,7 @@
 // 确认框,置顶就地切换 + toast,均先弹回);手势期间禁用 transform 过渡。
 // 删除/置顶钮纯视觉(不可点)。轻点开行的语义不变(拖动过的手势抑制其后的
 // click,键盘 Enter 走 click 原路保留)。
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
 import { CHATBOX_STORE_KEY } from '@/kernel/app/chat-keys'
 import { openConversation, useChatRoute } from '@/kernel/app/chat-router'
@@ -32,6 +32,13 @@ onMounted(() => {
   void refresh()
 })
 
+// KeepAlive revisit (App.vue caches tab pages): refresh like a remount did,
+// without the loading flash — the cached list stays visible until the read
+// lands. The route watch below still covers returning from the chat page.
+onActivated(() => {
+  void refresh()
+})
+
 // Returning from the chat page refreshes the list (title/preview/updatedAt).
 watch(() => route.value.view, (view, previous) => {
   if (view === 'list' && previous === 'chat') void refresh()
@@ -55,7 +62,7 @@ const REVEAL_WIDTH = 72
 const SWIPE_FIRE_THRESHOLD = 36
 const DRAG_START_THRESHOLD = 6
 
-const swipeDrag = ref<{ id: string; startX: number; dx: number; moved: boolean } | null>(null)
+const swipeDrag = ref<{ id: string; startX: number; startY: number; dx: number; moved: boolean } | null>(null)
 // pointerup always precedes the click synthesised from the same gesture; the
 // click handler must swallow exactly that one (keyboard Enter has no pointer
 // up and must still open via click).
@@ -64,7 +71,9 @@ let swallowNextClick = false
 const swipeOffsetOf = (id: string): number => {
   const drag = swipeDrag.value
   if (!drag || drag.id !== id) return 0
-  return Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx))
+  // Direction lock part 2: before horizontal intent locks in, the row does
+  // not track the slop at all — a vertical scroll never nudges it sideways.
+  return drag.moved ? Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx)) : 0
 }
 
 /** Reveal pair visibility: ONLY for gestures that qualified as a drag
@@ -78,7 +87,7 @@ const isRevealing = (id: string): boolean => {
 }
 
 const onRowPointerDown = (id: string, event: PointerEvent): void => {
-  swipeDrag.value = { id, startX: event.clientX, dx: 0, moved: false }
+  swipeDrag.value = { id, startX: event.clientX, startY: event.clientY, dx: 0, moved: false }
   // Track the gesture outside the row's bounds; jsdom has no capture API.
   ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
 }
@@ -87,7 +96,12 @@ const onRowPointerMove = (id: string, event: PointerEvent): void => {
   const drag = swipeDrag.value
   if (!drag || drag.id !== id) return
   drag.dx = event.clientX - drag.startX
-  if (Math.abs(drag.dx) > DRAG_START_THRESHOLD) drag.moved = true
+  // Direction lock (2026-10-17 device report): a vertical scroll's opening
+  // slop can drift past the horizontal threshold and flash the reveal pair
+  // through the translucent row — only horizontal-dominant motion counts.
+  // jsdom pointer events carry no clientY; treat that as zero drift.
+  const dy = Number.isFinite(event.clientY) ? Math.abs(event.clientY - drag.startY) : 0
+  drag.moved = Math.abs(drag.dx) > DRAG_START_THRESHOLD && Math.abs(drag.dx) > dy
 }
 
 const onRowPointerUp = (id: string): void => {
