@@ -146,4 +146,21 @@ describe('动效挂点接线守卫', () => {
       expect(host).not.toContain('fade')
     }
   })
+
+  it('批三挂点:楼层落楼组常驻(首楼也动画)+两列表移除组+Toast 离场对齐', () => {
+    const floors = readSrc('kernel', 'app', 'chat', 'ChatFloorList.vue')
+    expect(floors).toContain('name="mp-mo-floor"')
+    // the group must not sit behind v-else — a remounted group skips the
+    // seeded first floor's enter animation (plan: 开场白/首楼 also lands)
+    expect(floors).not.toMatch(/v-else[^>]*>\s*<\/TransitionGroup|<TransitionGroup[^>]*v-else/)
+    const home = readSrc('kernel', 'app', 'views', 'ChatHomeView.vue')
+    expect(home).toContain('tag="ul"')
+    expect(home).toContain('name="mp-mo-row"')
+    const chars = readSrc('kernel', 'app', 'views', 'CharactersView.vue')
+    expect(chars).toContain('tag="div"')
+    expect(chars).toContain('name="mp-mo-cell"')
+    const toast = readSrc('kernel', 'ui', 'ToastHost.vue')
+    expect(toast).toContain('name="mp-toast"')
+    expect(toast).toContain('0.15s')
+  })
 })

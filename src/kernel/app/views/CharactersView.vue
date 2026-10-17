@@ -123,7 +123,11 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
       v-else
       class="absolute inset-0 overflow-y-auto pt-[98px] pb-[calc(104px+env(safe-area-inset-bottom))]"
     >
-      <div class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4">
+      <TransitionGroup
+        tag="div"
+        name="mp-mo-cell"
+        class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4"
+      >
         <div
           v-for="card in cards"
           :key="card.id"
@@ -161,7 +165,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
             ✕
           </button>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
   </section>
 </template>

@@ -115,6 +115,62 @@
   transform: translateX(-16px);
 }
 
+/* Floor landing (batch 3, the single spring accent): enter only — streaming
+ * floors update in place without re-keying, so there are no leave rules.
+ * The spring read comes from the overshooting bezier, not extra keyframes. */
+.mp-mo-floor-enter-active {
+  --mp-mo-t: 320ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mp-mo-floor-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.92);
+}
+
+/* List removal (batch 3, quiet A). Chat rows: fade + slide left; the
+ * absolute trick during leave lets the rows below collapse through the FLIP
+ * move class (the ul carries the positioning context). Grid cells keep
+ * their slot while fading — the reflow snap after unmount is the accepted
+ * plan option (an absolute cell's width is not recoverable inside a 2-col
+ * grid in pure transform/opacity terms). */
+.mp-mo-row-move {
+  --mp-mo-t: 240ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-enter-active,
+.mp-mo-cell-enter-active {
+  --mp-mo-t: 180ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-enter-from,
+.mp-mo-cell-enter-from {
+  opacity: 0;
+}
+.mp-mo-row-leave-active {
+  --mp-mo-t: 220ms;
+  position: absolute;
+  width: 100%;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-cell-leave-active {
+  --mp-mo-t: 220ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-leave-to {
+  opacity: 0;
+  transform: translateX(-24px);
+}
+.mp-mo-cell-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
 /* Reduced-motion master gate: zero every duration in one block. The var is
  * set on the phase roots; descendant rules inherit it. */
 @media (prefers-reduced-motion: reduce) {
@@ -128,7 +184,13 @@
   .mp-mo-tab-next-enter-active,
   .mp-mo-tab-back-enter-active,
   .mp-mo-tab-next-leave-active,
-  .mp-mo-tab-back-leave-active {
+  .mp-mo-tab-back-leave-active,
+  .mp-mo-floor-enter-active,
+  .mp-mo-row-move,
+  .mp-mo-row-enter-active,
+  .mp-mo-row-leave-active,
+  .mp-mo-cell-enter-active,
+  .mp-mo-cell-leave-active {
     --mp-mo-t: 0.01ms;
   }
 }

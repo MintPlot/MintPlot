@@ -28,9 +28,11 @@ const toasts = useToasts()
 </template>
 
 <style scoped>
-.mp-toast-enter-active,
-.mp-toast-leave-active {
+.mp-toast-enter-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.mp-toast-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .mp-toast-enter-from,
 .mp-toast-leave-to {
