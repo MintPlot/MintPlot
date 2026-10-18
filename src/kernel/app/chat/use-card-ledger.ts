@@ -14,7 +14,9 @@ import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore, VariableSnapshot } from '@/kernel/variables/variable-store'
 import type { WorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import type { RegexStore } from '@/kernel/regex/regex-store'
-import { replayTemplateStateAtFloor, filterCandidateEvents } from '@/kernel/variables/variable-store'
+import { filterCandidateEvents } from '@/kernel/variables/variable-store'
+import { createTemplateFloorIndex } from '@/kernel/variables/template-floor-index'
+import { limits, LruCache, PANEL_HTML_CACHE_SIZE } from '@/kernel/runtime/runtime-policy'
 import {
   applyTemplateUpdates,
   matchTemplateUpdates,
@@ -83,11 +85,26 @@ export function useCardLedger(options: CardLedgerOptions) {
   // candidateIndex only count toward the floor's ACTIVE candidate — switching
   // swipes must not mix sibling candidates' variables. Untagged events
   // (legacy, manual, plain floors) always count.
+  // Only ids/array membership are dependencies here; live prose does not
+  // rebuild the index. Candidate reads below still track swipe changes.
+  const messageIndex = computed(() => new Map(messages().map((message, index) => [message.id, { message, index }])))
   const candidateIndexOf = (messageId: string): number | undefined => {
-    const floor = messages().find((message) => message.id === messageId)
+    const floor = messageIndex.value.get(messageId)?.message
     return floor?.candidates ? floor.activeIndex ?? 0 : undefined
   }
   const activeCandidateEvents = computed(() => filterCandidateEvents(variableEvents.value, candidateIndexOf))
+  const floorIndexOfMessage = (messageId: string): number => messageIndex.value.get(messageId)?.index ?? -1
+  const templateFloorIndex = computed(() => createTemplateFloorIndex(activeCandidateEvents.value, floorIndexOfMessage))
+  const eventsByMessage = computed(() => {
+    const groups = new Map<string, Array<VariableSnapshot['events'][number]>>()
+    for (const event of activeCandidateEvents.value) {
+      if (!event.messageId) continue
+      let group = groups.get(event.messageId)
+      if (!group) groups.set(event.messageId, group = [])
+      group.push(event)
+    }
+    return groups
+  })
   const absorbVariableSnapshot = (snapshot: VariableSnapshot): void => {
     variableEvents.value = snapshot.events
     variableState.value = replayVariableState(snapshot.seed, activeCandidateEvents.value)
@@ -99,6 +116,7 @@ export function useCardLedger(options: CardLedgerOptions) {
     variablesActive.value && isCardDomain()
       ? [...(card()?.uiTemplates ?? [])].filter((entry) => entry.enabled).sort((a, b) => b.order - a.order)
       : [])
+  const templateNames = computed(() => new Map(activeTemplates.value.map(entry => [entry.id, entry.name])))
 
   // M3-u worldbook: the projected entry view (verbatim card data → runtime
   // list); toggles ride worldbookDisabledUids, never the card record.
@@ -150,12 +168,10 @@ export function useCardLedger(options: CardLedgerOptions) {
     ]
   }
 
-  // M3-s 逐楼快照: panel frames render per floor from the ledger — RP stores an
-  // interpolated snapshot on each message, MP re-derives the state at render
-  // time (replayTemplateStateAtFloor) so storage stays duplicate-free. Frames
-  // ride the same sandboxed-iframe pipeline and ≤3-active-frame budget as M3-n
-  // card documents; the gu-class templates are ~78KB, so interpolation results
-  // cache by (template, state) and per-floor frames by a ledger/template stamp.
+  // Historical panels query a derived ledger index. The floor cache uses the
+  // existing view-window budget, preventing a visible multi-template pass
+  // from thrashing the smaller 32-entry HTML LRU. Neither cache grows with
+  // history. Actual template/state inputs invalidate equal-count changes.
   interface PanelFrame {
     id: string
     html: string
@@ -165,22 +181,24 @@ export function useCardLedger(options: CardLedgerOptions) {
     bottom: PanelFrame[]
   }
   const EMPTY_PANELS: FloorPanels = { top: [], bottom: [] }
-  const panelFramesCache = new Map<string, { stamp: string; panels: FloorPanels }>()
-  const panelHtmlCache = new Map<string, string>()
-
-  const floorIndexOfMessage = (messageId: string): number =>
-    messages().findIndex((message) => message.id === messageId)
+  const panelHtmlCache = new LruCache<string, string>(PANEL_HTML_CACHE_SIZE)
+  interface PanelInput {
+    id: string
+    placement: string
+    source: string
+    stateKey: string
+  }
+  const panelFramesCache = new LruCache<string, { inputs: PanelInput[]; panels: FloorPanels }>(limits.chatMaximum)
 
   const renderPanelHtml = (entry: CardUiTemplate, state: Record<string, unknown>): string => {
     const raw = stripTemplateCodeFence(entry.htmlTemplate)
     if (!raw || typeof document === 'undefined') return ''
-    const cacheKey = `${entry.id}|${JSON.stringify(state)}`
+    const cacheKey = JSON.stringify([entry.id, raw, state])
     const cached = panelHtmlCache.get(cacheKey)
     if (cached !== undefined) return cached
     const container = document.createElement('div')
     container.appendChild(createExecutableHtmlIframe(renderTemplateString(raw, state)))
     const html = container.innerHTML
-    if (panelHtmlCache.size >= 32) panelHtmlCache.clear()
     panelHtmlCache.set(cacheKey, html)
     return html
   }
@@ -189,32 +207,30 @@ export function useCardLedger(options: CardLedgerOptions) {
     if (!isCardDomain() || !variablesActive.value) return EMPTY_PANELS
     if (message.role !== 'assistant' || isStreamingFloor(message)) return EMPTY_PANELS
     if (activeTemplates.value.length === 0) return EMPTY_PANELS
-    // C12: one floor-lookup shape — by id, same as every other site.
     const targetFloor = floorIndexOfMessage(message.id)
     if (targetFloor < 0) return EMPTY_PANELS
-    // The reads below feed Vue's reactivity: ledger/template changes re-render.
-    const stamp = `${variableEvents.value.length}|${messages().length}|${activeTemplates.value.length}`
-    const cached = panelFramesCache.get(message.id)
-    if (cached && cached.stamp === stamp) return cached.panels
-    const panels: FloorPanels = { top: [], bottom: [] }
-    for (const entry of activeTemplates.value) {
-      const tree = replayTemplateStateAtFloor(
-        activeCandidateEvents.value,
-        entry.id,
-        entry.initialVariableState as VariableState['value'],
-        floorIndexOfMessage,
-        targetFloor,
-      )
+    const projections = activeTemplates.value.map(entry => {
+      const tree = templateFloorIndex.value.at(entry.id, targetFloor) ?? entry.initialVariableState
       const state = typeof tree === 'object' && tree !== null && !Array.isArray(tree)
         ? (tree as Record<string, unknown>)
         : entry.initialVariableState
+      const input: PanelInput = { id: entry.id, placement: entry.placement, source: entry.htmlTemplate, stateKey: JSON.stringify(state) }
+      return { entry, state, input }
+    })
+    const cached = panelFramesCache.get(message.id)
+    if (cached && cached.inputs.length === projections.length && projections.every(({ input }, i) => {
+      const prior = cached.inputs[i]!
+      return input.id === prior.id && input.placement === prior.placement && input.source === prior.source && input.stateKey === prior.stateKey
+    })) return cached.panels
+    const panels: FloorPanels = { top: [], bottom: [] }
+    for (const { entry, state } of projections) {
       const html = renderPanelHtml(entry, state)
       if (!html) continue
       const frame: PanelFrame = { id: entry.id, html }
       if (entry.placement === 'top') panels.top.push(frame)
       else panels.bottom.push(frame)
     }
-    panelFramesCache.set(message.id, { stamp, panels })
+    panelFramesCache.set(message.id, { inputs: projections.map(projection => projection.input), panels })
     return panels
   }
 
@@ -231,14 +247,11 @@ export function useCardLedger(options: CardLedgerOptions) {
     if (!isCardDomain() || !variablesActive.value || message.role !== 'assistant') {
       return { flat: [], templateLines: [], total: 0 }
     }
-    const templateIds = new Set(activeTemplates.value.map((entry) => entry.id))
-    const templateNames = new Map(activeTemplates.value.map((entry) => [entry.id, entry.name] as const))
     const flat: Array<{ name: string; value: string }> = []
     const templateLines: string[] = []
-    for (const event of activeCandidateEvents.value) {
-      if (event.messageId !== message.id) continue
-      if (templateIds.has(event.name)) {
-        templateLines.push(`${templateNames.get(event.name) ?? event.name} → 已更新`)
+    for (const event of eventsByMessage.value.get(message.id) ?? []) {
+      if (templateNames.value.has(event.name)) {
+        templateLines.push(`${templateNames.value.get(event.name) ?? event.name} → 已更新`)
       } else {
         // Not String() — its overload resolution explodes on the recursive
         // VariableValue union (TS2589, same as Array.find).

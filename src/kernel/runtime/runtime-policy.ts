@@ -35,6 +35,9 @@ export interface MpRuntimeLimits {
   readonly requestTimeoutMaxSeconds: number
 }
 
+/** Existing interpolation-cache capacity, shared by historical panel renders. */
+export const PANEL_HTML_CACHE_SIZE = 32
+
 /** Frozen limits = the APK performance contract (asserted by tests). */
 export const limits: MpRuntimeLimits = Object.freeze({
   chatInitial: 20,
