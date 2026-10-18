@@ -30,6 +30,8 @@ import { useChatTurn } from '@/kernel/app/chat/use-chat-turn'
 import ChatFloorList from '@/kernel/app/chat/ChatFloorList.vue'
 import type { FloorView } from '@/kernel/app/chat/ChatFloorList.vue'
 import ChatComposer from '@/kernel/app/chat/ChatComposer.vue'
+import CardToolsMenu from '@/kernel/app/chat/CardToolsMenu.vue'
+import type { CardToolId, CardToolItem } from '@/kernel/app/chat/CardToolsMenu.vue'
 import ImageViewer from '@/kernel/app/chat/ImageViewer.vue'
 import { closeConversation } from '@/kernel/app/chat-router'
 import type { CharacterCard } from '@/kernel/characters/character-card'
@@ -155,6 +157,20 @@ const cotActive = ref(true)
 const showSessionSettings = ref(false)
 const showVariables = ref(false)
 const showStyle = ref(false)
+const cardTools = computed<CardToolItem[]>(() => [
+  ...(variablesActive.value ? [{ id: 'variables' as const, label: '变量', description: '状态与模板' }] : []),
+  ...(worldbookActive.value ? [{ id: 'worldbook' as const, label: '世界书', description: '设定与触发条目' }] : []),
+  ...(regexActive.value ? [{ id: 'regex' as const, label: '正则', description: '显示与提示词规则' }] : []),
+  ...(memoryActive.value ? [{ id: 'memory' as const, label: '记忆', description: '摘要与人物档案' }] : []),
+  ...(presetsActive.value ? [{ id: 'presets' as const, label: '叙事预设', description: '本卡叙事搭配' }] : []),
+])
+const openCardTool = (id: CardToolId): void => {
+  if (id === 'variables') showVariables.value = true
+  else if (id === 'worldbook') showWorldbook.value = true
+  else if (id === 'regex') showRegex.value = true
+  else if (id === 'memory') showMemory.value = true
+  else showStyle.value = true
+}
 /** S3: per-card style override → the assembler's cardStyle dep. Absent =
  *  follow global (the resolver treats null as follow). */
 const cardStyle = computed<CardStyleSelection | null>(() => cardSession.value?.style ?? null)
@@ -640,7 +656,7 @@ const restartSession = async (): Promise<void> => {
     <header class="mp-glass mp-overlay-header-top absolute inset-x-3 z-10 flex items-center gap-2 rounded-panel px-1.5 py-1">
       <button
         type="button"
-        class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"
+        class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-input text-ink-2"
         aria-label="返回对话列表"
         @click="stopStreaming(); closeConversation()"
       >
@@ -673,46 +689,11 @@ const restartSession = async (): Promise<void> => {
       <h1 class="min-w-0 flex-1 truncate py-3 text-base">
         {{ title }}
       </h1>
-      <button
-        v-if="isCardDomain && variablesActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showVariables = true"
-      >
-        变量
-      </button>
-      <button
-        v-if="isCardDomain && worldbookActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showWorldbook = true"
-      >
-        世界书
-      </button>
-      <button
-        v-if="isCardDomain && regexActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showRegex = true"
-      >
-        正则
-      </button>
-      <button
-        v-if="isCardDomain && memoryActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showMemory = true"
-      >
-        记忆
-      </button>
-      <button
-        v-if="isCardDomain && presetsActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showStyle = true"
-      >
-        叙事
-      </button>
+      <CardToolsMenu
+        v-if="isCardDomain"
+        :items="cardTools"
+        @select="openCardTool"
+      />
       <button
         type="button"
         class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-primary"
