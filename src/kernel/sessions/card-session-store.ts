@@ -14,7 +14,8 @@
  */
 
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
-import { advanceBaseline, createBaseline, createChanges } from '@/kernel/store/chat-persistence'
+import { advanceBaseline, captureChatRows, createBaseline, createCapturedChanges, readCapturedChatRow } from '@/kernel/store/chat-persistence'
+import type { CapturedChatRow } from '@/kernel/store/chat-persistence'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
 import { createSessionTaskQueue } from '@/kernel/store/session-task-queue'
@@ -81,10 +82,7 @@ const scopeOf = (cardId: string): SessionScope => ({ kind: 'card', id: cardId })
 
 const serialize = (message: ChatboxMessage): ChatboxMessage => JSON.parse(JSON.stringify(message)) as ChatboxMessage
 
-const previewOf = (messages: ChatboxMessage[]): string => {
-  const last = messages[messages.length - 1]
-  return last ? last.content.slice(0, 60) : ''
-}
+type CardSaveSnapshot = Omit<CardSession, 'messages'> & { rows: readonly CapturedChatRow[]; preview: string }
 
 export function createCardSessionStore(repository: StorageRepository): CardSessionStore {
   const baselines = new Map<string, Map<string, string>>()
@@ -98,17 +96,23 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
   const newSession = (card: CardSessionSeed): CardSession => ({
     cardId: card.id, title: card.name, createdAt: Date.now(), updatedAt: Date.now(), messages: seedMessages(card),
   })
-  const saveSnapshot = async (session: CardSession): Promise<void> => {
+  const captureSession = (session: CardSession): CardSaveSnapshot => {
+    const { messages, ...meta } = session
+    const rows = captureChatRows(messages, baselines.get(session.cardId))
+    const last = rows[rows.length - 1]
+    return { ...cloneJson(meta), rows, preview: last ? readCapturedChatRow<ChatboxMessage>(last).content.slice(0, 60) : '' }
+  }
+  const saveSnapshot = async (session: CardSaveSnapshot): Promise<void> => {
     const previous = baselines.get(session.cardId)
     const baseline = previous ?? new Map<string, string>()
-    const changes = createChanges(session.messages, baseline, message => message)
+    const changes = createCapturedChanges<ChatboxMessage>(session.rows, baseline)
     // Preserve the legacy empty-chat shape on first save only.
-    if (!previous && session.messages.length === 0) await repository.replaceChat(scopeOf(session.cardId), [])
+    if (!previous && session.rows.length === 0) await repository.replaceChat(scopeOf(session.cardId), [])
     else await repository.applyChatChanges(scopeOf(session.cardId), changes.upserts, changes.deletes)
     baselines.set(session.cardId, advanceBaseline(baseline, changes))
     const meta: CardSessionMeta = {
       cardId: session.cardId, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt,
-      preview: previewOf(session.messages),
+      preview: session.preview,
       ...(session.model ? { model: session.model } : {}),
       ...(session.bg ? { bg: session.bg } : {}),
       ...(session.style ? { style: session.style } : {}),
@@ -152,8 +156,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
       session.updatedAt = Date.now()
       // Capture at invocation; compare against the last committed baseline
       // only when this task reaches the head of the session's queue.
-      const { messages, ...meta } = session
-      const snapshot = { ...cloneJson(meta), messages: messages.map(serialize) }
+      const snapshot = captureSession(session)
       await run(session.cardId, () => saveSnapshot(snapshot))
     },
 
@@ -165,7 +168,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
       const session = newSession(card)
       return run(card.id, async () => {
         await removeSession(card.id)
-        await saveSnapshot(session)
+        await saveSnapshot(captureSession(session))
         return session
       })
     },

@@ -11,7 +11,8 @@
  */
 
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
-import { advanceBaseline, createBaseline, createChanges, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
+import { advanceBaseline, captureChatRows, createBaseline, createCapturedChanges, readCapturedChatRow, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
+import type { CapturedChatRow } from '@/kernel/store/chat-persistence'
 import type { StoredMessage } from '@/kernel/store/chat-persistence'
 import { createSessionTaskQueue } from '@/kernel/store/session-task-queue'
 import { cloneJson } from '@/kernel/secrets/secret-channel'
@@ -91,25 +92,28 @@ const scopeOf = (id: string): SessionScope => ({ kind: 'chatbox', id })
 
 const serialize = <M extends ChatboxMessage>(message: M): M => JSON.parse(JSON.stringify(message)) as M
 
-const previewOf = (conversation: ChatboxConversation): string => {
-  const last = conversation.messages[conversation.messages.length - 1]
-  return last ? last.content.slice(0, 60) : ''
-}
+type ChatboxSaveSnapshot = Omit<ChatboxConversation, 'messages'> & { rows: readonly CapturedChatRow[]; preview: string }
 
 export function createChatboxStore(repository: StorageRepository): ChatboxStore {
   const baselines = new Map<string, Map<string, string>>()
   const run = createSessionTaskQueue()
 
-  const saveSnapshot = async (conversation: ChatboxConversation): Promise<void> => {
+  const captureConversation = (conversation: ChatboxConversation): ChatboxSaveSnapshot => {
+    const { messages, ...meta } = conversation
+    const rows = captureChatRows(messages, baselines.get(conversation.id))
+    const last = rows[rows.length - 1]
+    return { ...cloneJson(meta), rows, preview: last ? readCapturedChatRow<ChatboxMessage>(last).content.slice(0, 60) : '' }
+  }
+  const saveSnapshot = async (conversation: ChatboxSaveSnapshot): Promise<void> => {
     const previous = baselines.get(conversation.id)
     const baseline = previous ?? new Map<string, string>()
-    const changes = createChanges(conversation.messages, baseline, message => message)
-    if (!previous && conversation.messages.length === 0) await repository.replaceChat(scopeOf(conversation.id), [])
+    const changes = createCapturedChanges<ChatboxMessage>(conversation.rows, baseline)
+    if (!previous && conversation.rows.length === 0) await repository.replaceChat(scopeOf(conversation.id), [])
     else await repository.applyChatChanges(scopeOf(conversation.id), changes.upserts, changes.deletes)
     baselines.set(conversation.id, advanceBaseline(baseline, changes))
     const meta: ConversationMeta = {
       id: conversation.id, title: conversation.title, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
-      systemPrompt: conversation.systemPrompt, model: conversation.model, preview: previewOf(conversation), pinned: conversation.pinned,
+      systemPrompt: conversation.systemPrompt, model: conversation.model, preview: conversation.preview, pinned: conversation.pinned,
     }
     await repository.set(metaKeyOf(conversation.id), meta)
     const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
@@ -175,8 +179,7 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
 
     async save(conversation) {
       conversation.updatedAt = Date.now()
-      const { messages, ...meta } = conversation
-      const snapshot = { ...cloneJson(meta), messages: messages.map(serialize) }
+      const snapshot = captureConversation(conversation)
       await run(conversation.id, () => saveSnapshot(snapshot))
     },
 

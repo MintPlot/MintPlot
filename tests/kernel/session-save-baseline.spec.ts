@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
+
+afterEach(() => vi.restoreAllMocks())
 
 describe.each(['card', 'chatbox'] as const)('%s save baseline', (kind) => {
   async function setup() {
@@ -136,5 +138,17 @@ describe.each(['card', 'chatbox'] as const)('%s save baseline', (kind) => {
     async function repositoryMeta() {
       return JSON.parse((await engine.get(`chatmeta:${scope.kind}:${scope.id}`))!) as unknown
     }
+  })
+
+  it('does not parse unchanged historical rows just to save metadata', async () => {
+    const { session, save } = await setup()
+    session.messages = Array.from({ length: 101 }, (_, i) => ({ id: `stable-${i}`, role: 'assistant', content: `Synthetic ${i}`, ts: i }))
+    await save()
+    const parse = vi.spyOn(JSON, 'parse')
+    session.title = 'Metadata only'
+    await save()
+    const parsedHistory = parse.mock.calls.filter(([value]) => String(value).startsWith('{"id":"stable-'))
+    // Only the final row is needed to normalize the envelope preview.
+    expect(parsedHistory.length).toBeLessThanOrEqual(1)
   })
 })
