@@ -76,6 +76,39 @@ describe('kernel/render · html-frame-lifecycle (M3-n red line)', () => {
     expect(srcdocOf(frame)).toBe(SUSPENDED_SRCDOC)
   })
 
+  it('keeps newly observed offscreen documents suspended until they enter the viewport', async () => {
+    const { observer, executableFrameLifecycle } = await freshModule()
+    const frame = makeFrame('offscreen-original')
+    executableFrameLifecycle.rescan()
+    observer.emit(frame, false)
+
+    expect(executableFrameLifecycle.getActiveCount()).toBe(0)
+    expect(srcdocOf(frame)).toBe(SUSPENDED_SRCDOC)
+    expect(frame.classList.contains('html-frame-suspended')).toBe(true)
+
+    executableFrameLifecycle.rescan()
+    observer.emit(frame, true)
+    expect(srcdocOf(frame)).toContain('offscreen-original')
+    expect(executableFrameLifecycle.getActiveCount()).toBe(1)
+  })
+
+  it('does not run newly added documents outside the tracked frame budget', async () => {
+    const { observer, executableFrameLifecycle } = await freshModule()
+    const visibleFrames = ['visible-1', 'visible-2', 'visible-3'].map(makeFrame)
+    executableFrameLifecycle.rescan()
+    for (const frame of visibleFrames) observer.emit(frame, true)
+
+    const offscreenFrames = ['offscreen-1', 'offscreen-2', 'offscreen-3'].map(makeFrame)
+    executableFrameLifecycle.rescan()
+    for (const frame of offscreenFrames) observer.emit(frame, false)
+
+    const loadedFrames = [...visibleFrames, ...offscreenFrames].filter(
+      (frame) => srcdocOf(frame) !== SUSPENDED_SRCDOC,
+    )
+    expect(loadedFrames).toHaveLength(executableFrameLifecycle.maxActiveFrames)
+    expect(loadedFrames).toEqual(visibleFrames)
+  })
+
   it('holds the active-frames red line at capacity', async () => {
     const { observer, executableFrameLifecycle } = await freshModule()
     const frames = ['f1', 'f2', 'f3', 'f4', 'f5'].map(makeFrame)

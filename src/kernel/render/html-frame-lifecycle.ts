@@ -14,6 +14,7 @@ import { limits } from '@/kernel/runtime/runtime-policy'
 const sources = new WeakMap<HTMLIFrameElement, string>()
 const visible = new WeakMap<HTMLIFrameElement, boolean>()
 const activeFrames = new Set<HTMLIFrameElement>()
+const suspendedDocument = '<!doctype html><html><body></body></html>'
 // Frames force-suspended while STILL intersecting (slot pressure): suspension
 // freezes their height, so the IntersectionObserver never re-fires for them
 // and they would stay blank forever. They queue here and re-activate as soon
@@ -49,7 +50,7 @@ const suspend = (frame: HTMLIFrameElement | undefined, forced = false): void => 
   const height = Math.max(80, Math.round(frame.getBoundingClientRect().height || 0))
   frame.style.height = `${height}px`
   frame.classList.add('html-frame-suspended')
-  frame.srcdoc = '<!doctype html><html><body></body></html>'
+  frame.srcdoc = suspendedDocument
   activeFrames.delete(frame)
   if (forced) pendingVisible.add(frame)
   else pendingVisible.delete(frame)
@@ -92,6 +93,11 @@ const observeFrame = (frame: Element): void => {
   if (!source) return
   sources.set(frame, source)
   frame.setAttribute('loading', 'lazy')
+  // Newly mounted documents must also enter through activate(). Otherwise
+  // initially offscreen frames run their source without joining activeFrames,
+  // and suspend() cannot stop them because they never claimed a budget slot.
+  frame.classList.add('html-frame-suspended')
+  frame.srcdoc = suspendedDocument
   observer?.observe(frame)
 }
 
