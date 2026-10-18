@@ -12,6 +12,7 @@
 import { limits } from '@/kernel/runtime/runtime-policy'
 
 const sources = new WeakMap<HTMLIFrameElement, string>()
+const observed = new WeakSet<HTMLIFrameElement>()
 const visible = new WeakMap<HTMLIFrameElement, boolean>()
 const activeFrames = new Set<HTMLIFrameElement>()
 const suspendedDocument = '<!doctype html><html><body></body></html>'
@@ -62,7 +63,9 @@ const freeSlot = (preferredFrame: HTMLIFrameElement): void => {
   // frame (an inverted guard here would blank visible frames on every scroll).
   if (activeFrames.size < limits.activeIframes) return
   const all = [...activeFrames]
-  const victim = all.find((frame) => frame !== preferredFrame && !visible.get(frame))
+  const focused = document.activeElement
+  const victim = all.find((frame) => frame !== preferredFrame && frame !== focused && !visible.get(frame))
+    ?? all.find((frame) => frame !== preferredFrame && frame !== focused)
     ?? all.find((frame) => frame !== preferredFrame)
   // forced = the victim was still intersecting: it must re-activate when a
   // slot frees, otherwise it stays a blank frozen frame while on screen.
@@ -88,9 +91,10 @@ const activate = (frame: HTMLIFrameElement): void => {
 }
 
 const observeFrame = (frame: Element): void => {
-  if (!(frame instanceof HTMLIFrameElement) || sources.has(frame)) return
-  const source = frame.srcdoc || frame.getAttribute('srcdoc') || ''
+  if (!(frame instanceof HTMLIFrameElement) || observed.has(frame)) return
+  const source = sources.get(frame) ?? (frame.srcdoc || frame.getAttribute('srcdoc') || '')
   if (!source) return
+  observed.add(frame)
   sources.set(frame, source)
   frame.setAttribute('loading', 'lazy')
   // Newly mounted documents must also enter through activate(). Otherwise
@@ -119,6 +123,9 @@ const init = (): void => {
   observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       const frame = entry.target as HTMLIFrameElement
+      // Entries already queued before unobserve may arrive after a virtual
+      // row is detached. Such entries cannot reclaim a running slot.
+      if (!frame.isConnected || !observed.has(frame)) return
       visible.set(frame, entry.isIntersecting)
       if (entry.isIntersecting) activate(frame)
       else suspend(frame)
@@ -128,9 +135,21 @@ const init = (): void => {
   // The observation registration itself keeps the MutationObserver alive
   // while document.body lives — no module-level reference required.
   new MutationObserver((records) => {
-    records.forEach((record) => record.addedNodes.forEach((node) => {
-      if (node instanceof Element) scan(node)
-    }))
+    for (const record of records) {
+      for (const node of record.removedNodes) {
+        if (!(node instanceof Element)) continue
+        const frames = node instanceof HTMLIFrameElement ? [node] : [...node.querySelectorAll('iframe.executable-html-frame')]
+        for (const frame of frames) {
+          if (!(frame instanceof HTMLIFrameElement) || frame.isConnected) continue
+          observer?.unobserve(frame)
+          observed.delete(frame)
+          activeFrames.delete(frame)
+          pendingVisible.delete(frame)
+        }
+      }
+      for (const node of record.addedNodes) if (node instanceof Element) scan(node)
+    }
+    retryPendingActivation()
   }).observe(document.body, { childList: true, subtree: true })
   scan(document.body)
 }

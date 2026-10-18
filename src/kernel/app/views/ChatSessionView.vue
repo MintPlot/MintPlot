@@ -1,10 +1,6 @@
 <script setup lang="ts">
-// 全屏聊天页(M3):顶栏(返回/标题) + 消息流 + 输入坞,chatbox 与 card 两域共用
-// 同一骨架(M3-i),域由 props.domain 决定 —— chatbox 走会话仓自带 system prompt;
-// card 走角色卡库,每次发送现组装提示词(card-prompt,RP 最小式:名字+性格(+对话
-// 示例)+末尾 [User Info]),开场白种为首楼、顶栏「清空重开」为卡域专属。发送 =
-// 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
-// (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
+// Full-screen chat shared by card and chatbox sessions. Display projections
+// remain independent from the complete request and persistence history.
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import {
   CARD_SESSION_STORE_KEY,
@@ -28,7 +24,7 @@ import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
 import { pluginActive, useFloorActions } from '@/kernel/app/chat/use-floor-actions'
 import { useChatTurn } from '@/kernel/app/chat/use-chat-turn'
 import ChatFloorList from '@/kernel/app/chat/ChatFloorList.vue'
-import type { FloorView } from '@/kernel/app/chat/ChatFloorList.vue'
+import type { FloorView } from '@/kernel/app/chat/floor-view'
 import ChatComposer from '@/kernel/app/chat/ChatComposer.vue'
 import CardToolsMenu from '@/kernel/app/chat/CardToolsMenu.vue'
 import type { CardToolId, CardToolItem } from '@/kernel/app/chat/CardToolsMenu.vue'
@@ -138,6 +134,7 @@ const loadError = ref('')
 // transient error bar above the composer and vanish on remount/retry/success.
 const sendError = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+const floorList = ref<InstanceType<typeof ChatFloorList> | null>(null)
 // Card artifact layers (variables ledger / worldbook / regex states, the
 // per-floor panel pipeline, floor capsule and template analysis) live in
 // use-card-ledger (2026-10 cleanup); onMounted writes the plugin gates onto
@@ -225,9 +222,44 @@ const {
 })
 
 const scrollToBottom = async (): Promise<void> => {
+  readerInterrupted = false
+  readerLeftEnd = false
+  followingOutput.value = true
   await nextTick()
+  const handled = await floorList.value?.scrollToEnd()
   // Optional call: environments without element scrolling (jsdom) stay safe.
-  messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
+  if (!handled) messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
+}
+const followingOutput = ref(true)
+let readerInterrupted = false
+let readerLeftEnd = false
+const onMessageScroll = (): void => {
+  const element = messagesEl.value
+  if (element) {
+    const atEnd = element.scrollHeight - element.clientHeight - element.scrollTop <= 80
+    if (!atEnd) readerLeftEnd = true
+    // A queued programmatic scroll may arrive between a wheel/touch intent
+    // and its native scrolling. It must not immediately re-enable following.
+    if (!atEnd) followingOutput.value = false
+    else if (!readerInterrupted || readerLeftEnd) {
+      followingOutput.value = true
+      readerInterrupted = false
+    }
+    if (!followingOutput.value) floorList.value?.cancelScroll()
+  }
+}
+const interruptFollow = (): void => {
+  readerInterrupted = true
+  if (followingOutput.value) readerLeftEnd = false
+  followingOutput.value = false
+  floorList.value?.cancelScroll()
+}
+const followOutput = async (): Promise<void> => {
+  await nextTick()
+  if (followingOutput.value) {
+    const handled = await floorList.value?.scrollToEnd()
+    if (!handled && followingOutput.value) messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
+  }
 }
 
 onMounted(async () => {
@@ -518,6 +550,9 @@ const {
   syncCotPresetsIfActive,
   persistSession,
   scrollToBottom,
+  // The virtual list follows append/height changes itself. Await only the
+  // DOM publication here; do not issue another scroll command per flush.
+  followOutput: async () => { await nextTick() },
   maybeRunMemoryPipeline,
   domain: () => props.domain,
 })
@@ -559,11 +594,9 @@ const {
   domain: () => props.domain,
 })
 
-// C1: the per-floor view model — every derived value is computed ONCE per
-// render pass (the old template re-invoked these functions 3-6 times per
-// floor; floorVariableSummary alone re-scanned the whole event list ×4).
-const floorViews = computed<FloorView[]>(() =>
-  messages.value.map((message, index) => {
+// Each child owns its computed projection; streaming content never causes
+// a parent-wide render pass over stable historical prose.
+const projectFloor = (message: ChatboxMessage, index: number): FloorView => {
     const thinking = floorThinkingSections(message).map((section) => ({ ...section, html: renderThinkingText(section.text) }))
     const panels = floorPanels(message)
     const isHtmlFrame = floorUsesHtmlFrame(message)
@@ -582,7 +615,7 @@ const floorViews = computed<FloorView[]>(() =>
       isStreaming: isStreamingFloor(message),
       isLastAssistant: isLastAssistantFloor(message),
     }
-  }))
+}
 
 const restartSession = async (): Promise<void> => {
   if (!isCardDomain.value || !card.value || !cardSessions) return
@@ -765,10 +798,26 @@ const restartSession = async (): Promise<void> => {
       <div
         ref="messagesEl"
         class="mp-overlay-flow-top absolute inset-0 z-[2] overflow-y-auto px-4 pb-[calc(112px+env(safe-area-inset-bottom))]"
+        @scroll.passive="onMessageScroll"
+        @pointerdown.passive="interruptFollow"
+        @touchstart.passive="interruptFollow"
+        @wheel.passive="interruptFollow"
       >
+        <button
+          v-if="!followingOutput"
+          type="button"
+          class="fixed bottom-36 right-5 z-10 rounded-full border border-line bg-card px-3 py-2 text-xs text-ink shadow-lg"
+          @click="scrollToBottom"
+        >
+          回到最新
+        </button>
         <div class="mx-auto flex max-w-xl flex-col gap-3">
           <ChatFloorList
-            :views="floorViews"
+            ref="floorList"
+            :messages="messages"
+            :scroll-element="messagesEl"
+            :following-output="followingOutput"
+            :project="projectFloor"
             :editing-floor-id="editingFloorId"
             :edit-draft="editDraft"
             :streaming="streaming"
@@ -785,6 +834,7 @@ const restartSession = async (): Promise<void> => {
             @copy="copyFloor"
             @speak="toggleSpeakFloor"
             @remove="deleteFloorFrom"
+            @viewport-resize="followOutput"
           />
         </div>
       </div>

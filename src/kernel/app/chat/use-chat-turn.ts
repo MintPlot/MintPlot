@@ -6,7 +6,8 @@
  * (2026-10 cleanup) — pure move; newFloorId names the floor-id literal once
  * (C6, the two in-view occurrences).
  */
-import { type Ref } from 'vue'
+import { getCurrentScope, onScopeDispose, type Ref } from 'vue'
+import { createStreamPublication } from './stream-publication'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore, VariableSnapshot } from '@/kernel/variables/variable-store'
 import {
@@ -56,6 +57,7 @@ export interface ChatTurnOptions {
   syncCotPresetsIfActive: () => Promise<void>
   persistSession: () => Promise<void>
   scrollToBottom: () => Promise<void>
+  followOutput?: () => Promise<void>
   maybeRunMemoryPipeline: () => Promise<void>
   domain: () => 'chatbox' | 'card'
 }
@@ -73,13 +75,20 @@ export function useChatTurn(options: ChatTurnOptions) {
   const newFloorId = (): string => `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   let abortController: AbortController | null = null
+  let publication: ReturnType<typeof createStreamPublication> | null = null
+  let disposed = false
   // The persisted user floor text behind the D3 error-bar retry.
   let lastUserText = ''
 
   const stopStreaming = (): void => {
+    publication?.finish()
     abortController?.abort()
     abortController = null
   }
+  if (getCurrentScope()) onScopeDispose(() => {
+    stopStreaming()
+    disposed = true
+  })
 
   /** The streaming half of a turn, shared by fresh sends and M4-c floor
    *  regeneration: streams into an existing floor object, attributes usage and
@@ -91,13 +100,25 @@ export function useChatTurn(options: ChatTurnOptions) {
     turnOptions: { candidateIndex?: number; isNewFloor?: boolean } = {},
   ): Promise<boolean> => {
     const provider = resolveProvider()
-    if (!provider) return false
+    if (!provider || disposed) return false
     const candidateIndex = turnOptions.candidateIndex
     streaming.value = true
     // Local alias: stopStreaming() may null the module ref while the stream's
     // rejection is still in flight — the catch must read the live signal.
     const controller = new AbortController()
     abortController = controller
+    // Resolve the array entry once: callers may retain the raw object that
+    // was pushed into a reactive array. Publishing through that raw reference
+    // bypassed Vue's setters and left new replies invisible until completion.
+    const target = messages().find((message) => message.id === floor.id) ?? floor
+    const output = createStreamPublication((text) => {
+      target.content = text.content
+      target.reasoning = text.reasoning
+      void (options.followOutput ?? scrollToBottom)()
+    })
+    publication = output
+    const onVisibilityChange = (): void => { if (document.hidden) output.flush() }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     let succeeded = false
     try {
       const result = await provider.stream(requestMessages, {
@@ -105,14 +126,13 @@ export function useChatTurn(options: ChatTurnOptions) {
         // M4-g3 session-level model override (both domains; empty = global).
         model: (isCardDomain() ? cardSession()?.model : conversation()?.model) || undefined,
         onDelta: (delta) => {
-          floor.content += delta
-          void scrollToBottom()
+          if (!controller.signal.aborted) output.append('content', delta)
         },
         // M4-f: native reasoning streams into its own floor field — the wire
         // capture runs regardless of the plugin toggle (data is not recoverable
         // later); the display card is what the toggle gates.
         onReasoningDelta: (delta) => {
-          floor.reasoning = (floor.reasoning ?? '') + delta
+          if (!controller.signal.aborted) output.append('reasoning', delta)
         },
       })
       // A stream that settles cleanly with zero content (thinking-only local
@@ -127,9 +147,7 @@ export function useChatTurn(options: ChatTurnOptions) {
           'MP-CHAT-003',
         )
       }
-      floor.content = result.content
-      floor.reasoning = result.reasoning ?? ''
-      succeeded = true
+      output.finish({ content: result.content, reasoning: result.reasoning ?? '' })
       if (result.usage) {
         // Attribution: the record must say which session it came from — the
         // card domain types itself 'card' (labeled 角色卡 in the ledger) and
@@ -142,6 +160,10 @@ export function useChatTurn(options: ChatTurnOptions) {
             : { detail: conversation()?.title ?? '' }),
         })
       }
+      // Reported usage remains real even for a cancelled request. A stop is
+      // not a completed candidate, however, and must not apply AI-side state.
+      if (controller.signal.aborted || disposed) return false
+      succeeded = true
       if (isCardDomain() && card() && variablesActive() && floor.content) {
         // M3-q/M3-r: the reply's variable blocks become ledger events
         // (source=ai, floor-attributed) — flat setvars/StatData entries and
@@ -201,6 +223,9 @@ export function useChatTurn(options: ChatTurnOptions) {
         })
       }
     } finally {
+      output.finish()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      if (publication === output) publication = null
       streaming.value = false
       if (abortController === controller) abortController = null
       if (turnOptions.isNewFloor && floor.content === '') {
@@ -210,7 +235,7 @@ export function useChatTurn(options: ChatTurnOptions) {
         if (index >= 0) messages().splice(index, 1)
       }
       await persistSession()
-      await scrollToBottom()
+      if (!disposed) await (options.followOutput ?? scrollToBottom)()
     }
     return succeeded
   }

@@ -152,12 +152,10 @@ describe('动效挂点接线守卫', () => {
     }
   })
 
-  it('批三挂点:楼层落楼组常驻(首楼也动画)+两列表移除组+Toast 离场对齐', () => {
+  it('keeps list-removal transitions but does not animate virtual floor mounts', () => {
     const floors = readSrc('kernel', 'app', 'chat', 'ChatFloorList.vue')
-    expect(floors).toContain('name="mp-mo-floor"')
-    // the group must not sit behind v-else — a remounted group skips the
-    // seeded first floor's enter animation (plan: 开场白/首楼 also lands)
-    expect(floors).not.toMatch(/v-else[^>]*>\s*<\/TransitionGroup|<TransitionGroup[^>]*v-else/)
+    expect(floors).not.toContain('<TransitionGroup')
+    expect(floors).toContain('data-message-id')
     const home = readSrc('kernel', 'app', 'views', 'ChatHomeView.vue')
     expect(home).toContain('tag="ul"')
     expect(home).toContain('name="mp-mo-row"')
@@ -183,7 +181,7 @@ describe('动效挂点接线守卫', () => {
     const pluginArea = readSrc('kernel', 'app', 'sections', 'PluginArea.vue')
     expect((pluginArea.match(/mp-mo-collapse-open/g) ?? []).length).toBeGreaterThanOrEqual(2)
     expect(readSrc('kernel', 'app', 'chat', 'FloorThinkingCard.vue')).toContain('mp-mo-collapse-open')
-    expect(readSrc('kernel', 'app', 'chat', 'ChatFloorList.vue')).toContain('mp-mo-collapse-open')
+    expect(readSrc('kernel', 'app', 'chat', 'ChatFloor.vue')).toContain('mp-mo-collapse-open')
     expect(readSrc('kernel', 'variables', 'VariablesSheet.vue')).toContain('mp-mo-collapse-open')
   })
 
