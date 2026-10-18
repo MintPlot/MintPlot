@@ -4,7 +4,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/vue-virtual'
-import { limits } from '@/kernel/runtime/runtime-policy'
+import { CHAT_SCROLL_END_THRESHOLD, limits } from '@/kernel/runtime/runtime-policy'
 import ChatFloor from './ChatFloor.vue'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { FloorView } from './floor-view'
@@ -62,7 +62,7 @@ const virtualizer = useVirtualizer(computed(() => {
     // Append and measured growth share one owner. Per-delta imperative
     // scrollToEnd commands would compete with resize compensation.
     followOnAppend: props.followingOutput,
-    scrollEndThreshold: 80,
+    scrollEndThreshold: CHAT_SCROLL_END_THRESHOLD,
     rangeExtractor: (range: Parameters<typeof defaultRangeExtractor>[0]) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
     useAnimationFrameWithResizeObserver: true,
   }
@@ -83,7 +83,17 @@ const rows = computed(() => {
   }))
 })
 const totalSize = computed(() => virtualizer.value.getTotalSize())
+let cleanupQueued = false
 const measure = (element: Element | ComponentPublicInstance | null): void => {
+  if (element === null && !cleanupQueued) {
+    // Vue clears refs before removing DOM. Coalesce cleanup after the patch,
+    // when TanStack can actually see disconnected nodes and unobserve them.
+    cleanupQueued = true
+    void nextTick(() => {
+      cleanupQueued = false
+      virtualizer.value.measureElement(null)
+    })
+  }
   if (element instanceof HTMLElement && viewportHeight.value > 0) virtualizer.value.measureElement(element)
 }
 const updateViewport = (): void => {
@@ -128,6 +138,7 @@ onBeforeUnmount(() => {
 })
 const scrollToEnd = async (): Promise<boolean> => {
   await nextTick()
+  if (!props.followingOutput) return true
   updateViewport()
   if (viewportHeight.value <= 0) return false
   virtualizer.value.scrollToEnd()

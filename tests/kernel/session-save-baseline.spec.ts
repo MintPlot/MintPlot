@@ -18,8 +18,80 @@ describe.each(['card', 'chatbox'] as const)('%s save baseline', (kind) => {
     const scope = { kind, id }
     session.messages.push({ id: 'm', role: 'assistant', content: 'first', ts: 1 })
     await save()
-    return { engine, repository, session, save, scope }
+    const remove = () => kind === 'card' ? cardStore.remove(id) : chatboxStore.remove(id)
+    const reload = () => kind === 'card' ? cardStore.get(id) : chatboxStore.get(id)
+    return { engine, repository, session, save, scope, remove, reload }
   }
+
+  it('does not let a pending save resurrect a removed session', async () => {
+    const { engine, session, save, remove, reload, scope } = await setup()
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const write = engine.set.bind(engine)
+    vi.spyOn(engine, 'set').mockImplementationOnce(async (key, value) => { entered(); await gate; await write(key, value) })
+    session.messages[0]!.content = 'pending'
+    const saving = save()
+    await started
+    const removing = remove()
+    release()
+    await Promise.all([saving, removing])
+    expect(await reload()).toBeNull()
+    expect(await engine.get(`chat:${scope.kind}:${scope.id}`)).toBeNull()
+  })
+
+  it('continues after a failed task and captures queued snapshots at invocation', async () => {
+    const { repository, session, save, scope } = await setup()
+    vi.spyOn(repository, 'applyChatChanges').mockRejectedValueOnce(new Error('write failed'))
+    session.messages[0]!.content = 'first'
+    const first = save()
+    session.messages[0]!.content = 'second'
+    const second = save()
+    session.messages[0]!.content = 'unsaved third'
+    await expect(first).rejects.toThrow('write failed')
+    await second
+    expect(await repository.loadChat(scope)).toMatchObject([{ content: 'second' }])
+    await save()
+    expect(await repository.loadChat(scope)).toEqual(session.messages)
+  })
+
+  it('keeps the newest requested snapshot when two saves overlap', async () => {
+    const { engine, repository, session, save, scope } = await setup()
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const write = engine.set.bind(engine)
+    vi.spyOn(engine, 'set').mockImplementationOnce(async (key, value) => {
+      entered()
+      await gate
+      await write(key, value)
+    })
+    session.messages[0]!.content = 'older snapshot'
+    const first = save()
+    await started
+    session.messages[0]!.content = 'newest snapshot'
+    session.messages[0]!.storageStatus = 'final'
+    const second = save()
+    // Let the unprotected second save finish first in the old implementation.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    release()
+    await Promise.all([first, second])
+    expect(await repository.loadChat(scope)).toEqual(session.messages)
+  })
+
+  it('submits only the changed row after a successful save', async () => {
+    const { repository, session, save } = await setup()
+    const patch = vi.spyOn(repository, 'applyChatChanges')
+    session.messages[0]!.content = 'edited'
+    session.messages.push({ id: 'b', role: 'user', content: 'new', ts: 2 })
+    await save()
+    patch.mockClear()
+    session.messages[1]!.content = 'edited again'
+    await save()
+    expect(patch.mock.calls[0]![1].map(row => ({ id: (row.message as { id: string }).id, position: row.position }))).toEqual([{ id: 'b', position: 1 }])
+    expect(patch.mock.calls[0]![2]).toEqual([])
+  })
 
   it('retains edits made while the previous snapshot is being persisted', async () => {
     const { repository, session, save, scope } = await setup()

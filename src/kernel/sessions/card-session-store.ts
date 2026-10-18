@@ -17,6 +17,8 @@ import type { SessionScope, StorageRepository } from '@/kernel/store/storage-rep
 import { advanceBaseline, createBaseline, createChanges } from '@/kernel/store/chat-persistence'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
+import { createSessionTaskQueue } from '@/kernel/store/session-task-queue'
+import { cloneJson } from '@/kernel/secrets/secret-channel'
 
 /** The card fields a session needs at creation (from the character store). */
 export interface CardSessionSeed {
@@ -86,78 +88,86 @@ const previewOf = (messages: ChatboxMessage[]): string => {
 
 export function createCardSessionStore(repository: StorageRepository): CardSessionStore {
   const baselines = new Map<string, Map<string, string>>()
+  const run = createSessionTaskQueue()
 
   const seedMessages = (card: CardSessionSeed): ChatboxMessage[] =>
     card.firstMes
       ? [{ id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, role: 'assistant', content: card.firstMes, ts: Date.now() }]
       : []
 
+  const newSession = (card: CardSessionSeed): CardSession => ({
+    cardId: card.id, title: card.name, createdAt: Date.now(), updatedAt: Date.now(), messages: seedMessages(card),
+  })
+  const saveSnapshot = async (session: CardSession): Promise<void> => {
+    const previous = baselines.get(session.cardId)
+    const baseline = previous ?? new Map<string, string>()
+    const changes = createChanges(session.messages, baseline, message => message)
+    // Preserve the legacy empty-chat shape on first save only.
+    if (!previous && session.messages.length === 0) await repository.replaceChat(scopeOf(session.cardId), [])
+    else await repository.applyChatChanges(scopeOf(session.cardId), changes.upserts, changes.deletes)
+    baselines.set(session.cardId, advanceBaseline(baseline, changes))
+    const meta: CardSessionMeta = {
+      cardId: session.cardId, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt,
+      preview: previewOf(session.messages),
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.bg ? { bg: session.bg } : {}),
+      ...(session.style ? { style: session.style } : {}),
+    }
+    await repository.set(metaKeyOf(session.cardId), meta)
+  }
+  const removeSession = async (cardId: string): Promise<void> => {
+    await repository.deleteChat(scopeOf(cardId))
+    baselines.delete(cardId)
+    await repository.remove(metaKeyOf(cardId))
+    await repository.deleteMemoryFragments(scopeOf(cardId))
+  }
+
   return {
     async get(cardId) {
-      const meta = await repository.get<CardSessionMeta>(metaKeyOf(cardId))
-      if (!meta) return null
-      const messages = await repository.loadChat<ChatboxMessage>(scopeOf(cardId))
-      baselines.set(cardId, createBaseline(messages, serialize))
-      return {
-        cardId: meta.cardId,
-        title: meta.title,
-        createdAt: meta.createdAt,
-        updatedAt: meta.updatedAt,
-        messages,
-        ...(meta.model ? { model: meta.model } : {}),
-        ...(meta.bg ? { bg: meta.bg } : {}),
-        ...(meta.style ? { style: meta.style } : {}),
-      }
+      return run(cardId, async () => {
+        const meta = await repository.get<CardSessionMeta>(metaKeyOf(cardId))
+        if (!meta) return null
+        const messages = await repository.loadChat<ChatboxMessage>(scopeOf(cardId))
+        baselines.set(cardId, createBaseline(messages, serialize))
+        return {
+          cardId: meta.cardId,
+          title: meta.title,
+          createdAt: meta.createdAt,
+          updatedAt: meta.updatedAt,
+          messages,
+          ...(meta.model ? { model: meta.model } : {}),
+          ...(meta.bg ? { bg: meta.bg } : {}),
+          ...(meta.style ? { style: meta.style } : {}),
+        }
+      })
     },
 
     async create(card) {
-      const now = Date.now()
-      const session: CardSession = {
-        cardId: card.id,
-        title: card.name,
-        createdAt: now,
-        updatedAt: now,
-        messages: seedMessages(card),
-      }
+      const session = newSession(card)
       await this.save(session)
       return session
     },
 
     async save(session) {
       session.updatedAt = Date.now()
-      // Message rows: incremental per-row writes (ported organ semantics).
-      const baseline = baselines.get(session.cardId) ?? createBaseline([], serialize)
-      const changes = createChanges(session.messages, baseline, serialize)
-      await repository.applyChatChanges(scopeOf(session.cardId), changes.upserts, changes.deletes)
-      baselines.set(session.cardId, advanceBaseline(baseline, changes))
-
-      // Envelope: meta write (no index — the card library is the list).
-      const meta: CardSessionMeta = {
-        cardId: session.cardId,
-        title: session.title,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-        preview: previewOf(session.messages),
-        ...(session.model ? { model: session.model } : {}),
-        ...(session.bg ? { bg: session.bg } : {}),
-        ...(session.style ? { style: session.style } : {}),
-      }
-      await repository.set(metaKeyOf(session.cardId), meta)
+      // Capture at invocation; compare against the last committed baseline
+      // only when this task reaches the head of the session's queue.
+      const { messages, ...meta } = session
+      const snapshot = { ...cloneJson(meta), messages: messages.map(serialize) }
+      await run(session.cardId, () => saveSnapshot(snapshot))
     },
 
     async remove(cardId) {
-      await repository.deleteChat(scopeOf(cardId))
-      await repository.remove(metaKeyOf(cardId))
-      // M4-e: the card's memory ledger is session-scoped data — it dies with
-      // the session (card removal and 清空重开 alike; idempotent there, the
-      // view resets memory through the same repository contract).
-      await repository.deleteMemoryFragments(scopeOf(cardId))
-      baselines.delete(cardId)
+      await run(cardId, () => removeSession(cardId))
     },
 
     async reset(card) {
-      await this.remove(card.id)
-      return this.create(card)
+      const session = newSession(card)
+      return run(card.id, async () => {
+        await removeSession(card.id)
+        await saveSnapshot(session)
+        return session
+      })
     },
   }
 }

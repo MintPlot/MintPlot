@@ -37,6 +37,9 @@ export interface MpRuntimeLimits {
 
 /** Existing interpolation-cache capacity, shared by historical panel renders. */
 export const PANEL_HTML_CACHE_SIZE = 32
+/** Shared existing end threshold; drag slop distinguishes taps from pans. */
+export const CHAT_SCROLL_END_THRESHOLD = 80
+export const CHAT_READER_DRAG_THRESHOLD = 6
 
 /** Frozen limits = the APK performance contract (asserted by tests). */
 export const limits: MpRuntimeLimits = Object.freeze({

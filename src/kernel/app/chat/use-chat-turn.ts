@@ -293,7 +293,7 @@ export function useChatTurn(options: ChatTurnOptions) {
 
   /** Retry re-streams a reply for the persisted user floor (D3 error bar). */
   const retryLastSend = async (): Promise<void> => {
-    if (streaming.value || !lastUserText) return
+    if (!sessionLoaded() || streaming.value || !lastUserText) return
     sendError.value = ''
     await runAssistantTurn()
   }

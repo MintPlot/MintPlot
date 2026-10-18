@@ -94,7 +94,14 @@ export function createStorageRepository(engine: KvEngine, secretChannel: SecretC
       let storedValue: unknown = value
       if (isSecretBearingKey(key)) {
         // Extraction already snapshots JSON before separating secrets.
-        const extracted = extractSecrets(value)
+        let extracted: ReturnType<typeof extractSecrets>
+        try {
+          extracted = extractSecrets(value)
+        } catch {
+          // Do not reserialize secrets merely to validate them, or expose
+          // input fragments from JSON parsing errors in diagnostics.
+          throw new Error(`[mp-storage] set("${key}") rejected: value is not JSON serializable`)
+        }
         storedValue = extracted.publicValue
         await secretChannel.setSecret(`config:${key}`, JSON.stringify(extracted.secrets))
       }

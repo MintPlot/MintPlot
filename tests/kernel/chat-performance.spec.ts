@@ -3,13 +3,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import DOMPurify from 'dompurify'
 import ChatSessionView from '@/kernel/app/views/ChatSessionView.vue'
-import { CHATBOX_STORE_KEY, SEAM_REGISTRY_KEY, SETTINGS_STATE_KEY, USAGE_RECORDER_KEY } from '@/kernel/app/chat-keys'
+import { CARD_SESSION_STORE_KEY, CHARACTER_STORE_KEY, CHATBOX_STORE_KEY, SEAM_REGISTRY_KEY, SETTINGS_STATE_KEY, USAGE_RECORDER_KEY } from '@/kernel/app/chat-keys'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import { createSeamRegistry } from '@/kernel/runtime/seam-registry'
 import { createChatboxStore } from '@/kernel/sessions/chatbox-store'
 import { createSettingsState } from '@/kernel/settings/settings-state'
 import { createStorageRepository } from '@/kernel/store/storage-repository'
 import { createMemoryEngine } from '@/kernel/store/kv-store'
+import { createCardSessionStore } from '@/kernel/sessions/card-session-store'
+import { uiService } from '@/kernel/ui/toasts'
 
 async function fixture(count = 20) {
   const store = createChatboxStore(createStorageRepository(createMemoryEngine()))
@@ -54,6 +56,76 @@ async function fixture(count = 20) {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('chat update boundaries', () => {
+  it('does not persist an aborted old turn over a reset that is awaiting storage', async () => {
+    const repository = createStorageRepository(createMemoryEngine())
+    const store = createCardSessionStore(repository)
+    await store.create({ id: 'reset-race', name: 'Synthetic', firstMes: 'old greeting' })
+    const seams = createSeamRegistry(() => undefined)
+    let callbacks!: Parameters<LlmProvider['stream']>[1]
+    let reject!: (error: Error) => void
+    seams.register('test', 'llm.provider', {
+      configured: () => true,
+      stream: (_messages: unknown, options: Parameters<LlmProvider['stream']>[1]) => {
+        callbacks = options
+        return new Promise((_resolve, no) => {
+          reject = no
+          options.signal?.addEventListener('abort', () => no(new Error('aborted')), { once: true })
+        })
+      },
+    })
+    const wrapper = mount(ChatSessionView, { props: { conversationId: 'reset-race', domain: 'card' }, global: { provide: {
+      [CARD_SESSION_STORE_KEY as symbol]: store,
+      [CHARACTER_STORE_KEY as symbol]: { get: async () => ({ id: 'reset-race', name: 'Synthetic', firstMes: 'fresh greeting' }), getCover: async () => null },
+      [SEAM_REGISTRY_KEY as symbol]: seams,
+    } } })
+    await flushPromises()
+    await wrapper.get('textarea').setValue('Synthetic reset request')
+    await wrapper.get('button[aria-label="发送"]').trigger('click')
+    await flushPromises()
+    callbacks.onDelta?.('partial old reply')
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(r => { release = r }), started = new Promise<void>(r => { entered = r })
+    const remove = repository.deleteChat.bind(repository)
+    vi.spyOn(repository, 'deleteChat').mockImplementationOnce(async scope => { entered(); await gate; await remove(scope) })
+    vi.spyOn(uiService, 'confirm').mockResolvedValueOnce(true)
+    await wrapper.get('button[aria-label="清空重开"]').trigger('click')
+    await started
+    await flushPromises()
+    release()
+    await flushPromises()
+    expect(wrapper.findAll('.markdown-body').at(-1)!.text()).toBe('fresh greeting')
+    expect((await store.get('reset-race'))!.messages.map(m => m.content)).toEqual(['fresh greeting'])
+    wrapper.unmount()
+    void reject
+  })
+  it('keeps following on a floor tap and resumes following for explicit regeneration', async () => {
+    const f = await fixture()
+    const stream = f.wrapper.get('.mp-overlay-flow-top')
+    const pointer = async (type: string, y: number) => {
+      const event = new Event(type, { bubbles: true })
+      for (const [key, value] of Object.entries({ clientX: 10, clientY: y, pointerId: 1 })) Object.defineProperty(event, key, { value })
+      stream.element.dispatchEvent(event)
+      await nextTick()
+    }
+    await pointer('pointerdown', 10)
+    await pointer('pointerup', 10)
+    expect(f.wrapper.text()).not.toContain('回到最新')
+    await pointer('pointerdown', 200)
+    await pointer('pointermove', 100)
+    expect(f.wrapper.text()).toContain('回到最新')
+    await pointer('pointerup', 100)
+    await f.wrapper.get('button[aria-label="重新生成(追加候选)"]').trigger('click')
+    await flushPromises()
+    expect(f.wrapper.text()).not.toContain('回到最新')
+    f.callbacks().onDelta?.('regenerated text')
+    await nextTick()
+    expect(f.wrapper.findAll('.markdown-body').at(-1)!.text()).toBe('regenerated text')
+    await stream.trigger('wheel')
+    expect(f.wrapper.text()).toContain('回到最新')
+    f.finish()({ content: 'done', usage: null })
+    await flushPromises()
+    f.wrapper.unmount()
+  })
   it('does not let an already queued end-scroll override a new reading gesture', async () => {
     const f = await fixture()
     const element = f.wrapper.get('.mp-overlay-flow-top')

@@ -122,6 +122,19 @@ describe('mp-storage · secret extraction (ported)', () => {
     expect(value.nested.apiKey).toBe('synthetic-two')
   })
 
+  it('rejects invalid secret-bearing values before either persistence channel changes', async () => {
+    const { repository, kv, secrets } = makeHarness()
+    for (const key of ['mp_settings', 'mp_active_tools']) {
+      await repository.set(key, { model: 'synthetic', apiKey: 'synthetic-value' })
+      const beforeKv = new Map(kv), beforeSecrets = new Map(secrets)
+      for (const value of [() => {}, Symbol('synthetic'), { toJSON: () => undefined }]) {
+        await expect(repository.set(key, value)).rejects.toThrow(`set("${key}") rejected: value is not JSON serializable`)
+        expect(kv).toEqual(beforeKv)
+        expect(secrets).toEqual(beforeSecrets)
+      }
+    }
+  })
+
   it('corrupt JSON degrades loudly instead of silently wiping (ported lesson)', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const corruptRead = createStorageRepository({

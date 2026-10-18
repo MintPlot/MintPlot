@@ -52,6 +52,7 @@ export interface FloorActionsOptions {
   persistSession: () => Promise<void>
   stripCotText: (text: string) => string
   domain: () => 'chatbox' | 'card'
+  scrollToBottom?: () => Promise<void>
 }
 
 export function useFloorActions(options: FloorActionsOptions) {
@@ -85,6 +86,7 @@ export function useFloorActions(options: FloorActionsOptions) {
     if (isStreaming() || !isLastAssistantFloor(floor)) return
     const provider = resolveProvider()
     if (!provider || !sessionLoaded()) return
+    await options.scrollToBottom?.()
     await syncCotPresetsIfActive()
     if (isCardDomain() && card() && variablesActive()) {
       await variableStore?.retagUntaggedEvents(card()!.id, floor.id, floor.activeIndex ?? 0)

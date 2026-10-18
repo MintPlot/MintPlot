@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createBaseline,
+  advanceBaseline,
   createChanges,
   recoverInterruptedDraft,
 } from '@/kernel/store/chat-persistence'
@@ -12,6 +13,21 @@ type TestMessage = { id: string; content: string; storageStatus?: string }
 const serialize = (message: TestMessage): TestMessage => JSON.parse(JSON.stringify(message))
 
 describe('mp-chat-persistence · baseline and change computation (ported)', () => {
+  it('advances submitted signatures and deletions without reading later live edits', () => {
+    const messages = [{ id: 'a', content: 'A' }, { id: 'b', content: 'B' }]
+    const baseline = createBaseline(messages, serialize)
+    const next = [{ id: 'b', content: 'edited' }, { id: 'c', content: 'new' }]
+    const changes = createChanges(next, baseline, serialize)
+    const expected = createBaseline(next, serialize)
+    next[0]!.content = 'not saved yet'
+    const advanced = advanceBaseline(baseline, changes)
+    expect(advanced).toEqual(expected)
+    expect(baseline).toEqual(createBaseline(messages, serialize))
+    expect(createChanges(next, advanced, serialize).upserts.map(row => row.message.id)).toEqual(['b'])
+    const unchanged = advanceBaseline(advanced, { upserts: [], deletes: [] })
+    expect(unchanged).toEqual(advanced)
+    expect(unchanged).not.toBe(advanced)
+  })
   it('deleting a middle message updates shifted row positions', () => {
     const original = [
       { id: 'a', content: 'A' },

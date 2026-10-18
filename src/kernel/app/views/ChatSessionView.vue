@@ -23,6 +23,7 @@ import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
 import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
 import { pluginActive, useFloorActions } from '@/kernel/app/chat/use-floor-actions'
 import { useChatTurn } from '@/kernel/app/chat/use-chat-turn'
+import { useChatScroll } from '@/kernel/app/chat/use-chat-scroll'
 import ChatFloorList from '@/kernel/app/chat/ChatFloorList.vue'
 import type { FloorView } from '@/kernel/app/chat/floor-view'
 import ChatComposer from '@/kernel/app/chat/ChatComposer.vue'
@@ -130,6 +131,7 @@ const onBackdropReset = (): void => {
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
+const resettingSession = ref(false)
 // D3: request failures never write a message floor — they surface as a
 // transient error bar above the composer and vanish on remount/retry/success.
 const sendError = ref('')
@@ -195,7 +197,7 @@ const messages = computed<ChatboxMessage[]>(() =>
   (isCardDomain.value ? cardSession.value?.messages : conversation.value?.messages) ?? [])
 const title = computed(() =>
   (isCardDomain.value ? card.value?.name : conversation.value?.title) ?? (isCardDomain.value ? '角色' : '对话'))
-const sessionLoaded = computed(() => (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
+const sessionLoaded = computed(() => !resettingSession.value && (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
 
 // Prose projection shared by the memory/ledger pipelines — delegates to the
 // assembler's proseOf (C9: the strip chain is defined once, in one place).
@@ -221,46 +223,10 @@ const {
   userName: () => readUserInfo().name,
 })
 
-const scrollToBottom = async (): Promise<void> => {
-  readerInterrupted = false
-  readerLeftEnd = false
-  followingOutput.value = true
-  await nextTick()
-  const handled = await floorList.value?.scrollToEnd()
-  // Optional call: environments without element scrolling (jsdom) stay safe.
-  if (!handled) messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
-}
-const followingOutput = ref(true)
-let readerInterrupted = false
-let readerLeftEnd = false
-const onMessageScroll = (): void => {
-  const element = messagesEl.value
-  if (element) {
-    const atEnd = element.scrollHeight - element.clientHeight - element.scrollTop <= 80
-    if (!atEnd) readerLeftEnd = true
-    // A queued programmatic scroll may arrive between a wheel/touch intent
-    // and its native scrolling. It must not immediately re-enable following.
-    if (!atEnd) followingOutput.value = false
-    else if (!readerInterrupted || readerLeftEnd) {
-      followingOutput.value = true
-      readerInterrupted = false
-    }
-    if (!followingOutput.value) floorList.value?.cancelScroll()
-  }
-}
-const interruptFollow = (): void => {
-  readerInterrupted = true
-  if (followingOutput.value) readerLeftEnd = false
-  followingOutput.value = false
-  floorList.value?.cancelScroll()
-}
-const followOutput = async (): Promise<void> => {
-  await nextTick()
-  if (followingOutput.value) {
-    const handled = await floorList.value?.scrollToEnd()
-    if (!handled && followingOutput.value) messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
-  }
-}
+const {
+  followingOutput, scrollToBottom, followOutput, onMessageScroll, interruptFollow,
+  onReaderPointerDown, onReaderPointerMove, clearReaderPointer,
+} = useChatScroll(() => messagesEl.value, () => floorList.value)
 
 onMounted(async () => {
   // Card-reported frame heights arrive via postMessage (idempotent install);
@@ -427,6 +393,9 @@ const renderThinkingText = (text: string): string => renderMessageHtml(text, mac
 const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
 
 const persistSession = async (): Promise<void> => {
+  // An aborted turn can settle while reset is awaiting I/O, before the view
+  // replaces its old session reference. Its final save must not queue after reset.
+  if (resettingSession.value) return
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
   else if (conversation.value) await store?.save(conversation.value)
 }
@@ -591,6 +560,7 @@ const {
   syncCotPresetsIfActive,
   persistSession,
   stripCotText,
+  scrollToBottom,
   domain: () => props.domain,
 })
 
@@ -618,32 +588,34 @@ const projectFloor = (message: ChatboxMessage, index: number): FloorView => {
 }
 
 const restartSession = async (): Promise<void> => {
-  if (!isCardDomain.value || !card.value || !cardSessions) return
+  if (!isCardDomain.value || !card.value || !cardSessions || resettingSession.value) return
   const confirmed = await uiService.confirm('shell', {
     title: '清空重开',
     message: `清空与「${card.value.name}」的全部楼层,重新开始这段对话?`,
     confirmLabel: '清空重开',
   })
-  if (!confirmed) return
-  stopStreaming()
-  cardSession.value = await cardSessions.reset(card.value)
-  // M3-q/M3-s: 清空重开 resets the ledger to a fresh full seed — flat card
-  // defaults AND the template trees (previously only the flat rows were
-  // re-seeded and template panels fell back to card initial state).
-  // C3: absorb the WHOLE snapshot (events included) — writing state only left
-  // the pre-reset events visible in the sheet and feeding panel replay.
-  if (variablesActive.value) {
-    const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
-    if (variableSnapshot) absorbVariableSnapshot(variableSnapshot)
+  if (!confirmed || resettingSession.value) return
+  resettingSession.value = true
+  try {
+    stopStreaming()
+    cardSession.value = await cardSessions.reset(card.value)
+    // M3-q/M3-s: reset both flat variables and template trees, then absorb
+    // the complete snapshot so pre-reset events cannot feed panel replay.
+    if (variablesActive.value) {
+      const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
+      if (variableSnapshot) absorbVariableSnapshot(variableSnapshot)
+    }
+    // The memory summary describes the cleared story and must reset too.
+    if (memoryActive.value) {
+      await memoryStore?.reset({ kind: 'card', id: card.value.id })
+      memoryState.value = createEmptyMemoryState()
+      memoryStatus.value = ''
+    }
+    sendError.value = ''
+    await scrollToBottom()
+  } finally {
+    resettingSession.value = false
   }
-  // M4-e: clear-and-restart clears the memory ledger with everything else
-  // - the summary describes the CLEARED story, keeping it would be wrong.
-  if (memoryActive.value) {
-    await memoryStore?.reset({ kind: 'card', id: card.value.id })
-    memoryState.value = createEmptyMemoryState()
-    memoryStatus.value = ''
-  }
-  await scrollToBottom()
 }
 </script>
 
@@ -799,8 +771,10 @@ const restartSession = async (): Promise<void> => {
         ref="messagesEl"
         class="mp-overlay-flow-top absolute inset-0 z-[2] overflow-y-auto px-4 pb-[calc(112px+env(safe-area-inset-bottom))]"
         @scroll.passive="onMessageScroll"
-        @pointerdown.passive="interruptFollow"
-        @touchstart.passive="interruptFollow"
+        @pointerdown.passive="onReaderPointerDown"
+        @pointermove.passive="onReaderPointerMove"
+        @pointerup.passive="clearReaderPointer"
+        @pointercancel.passive="clearReaderPointer"
         @wheel.passive="interruptFollow"
       >
         <button
@@ -872,7 +846,7 @@ const restartSession = async (): Promise<void> => {
           :draft="draft"
           :streaming="streaming"
           :one-shot-instruction="oneShotInstruction"
-          :send-disabled="!draft.trim() || pendingImagesNotReady"
+          :send-disabled="resettingSession || !draft.trim() || pendingImagesNotReady"
           @update:draft="draft = $event"
           @update:one-shot-instruction="oneShotInstruction = $event"
           @send="send()"
