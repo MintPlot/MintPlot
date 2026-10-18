@@ -11,7 +11,7 @@
  */
 
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
-import { createBaseline, createChanges, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
+import { advanceBaseline, createBaseline, createChanges, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
 import type { StoredMessage } from '@/kernel/store/chat-persistence'
 
 export const INDEX_KEY = 'chatbox:index'
@@ -155,7 +155,7 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
       const baseline = baselines.get(conversation.id) ?? createBaseline([], serialize)
       const changes = createChanges(conversation.messages, baseline, serialize)
       await repository.applyChatChanges(scopeOf(conversation.id), changes.upserts, changes.deletes)
-      baselines.set(conversation.id, createBaseline(conversation.messages, serialize))
+      baselines.set(conversation.id, advanceBaseline(baseline, changes))
 
       // Envelope: meta write + index upsert.
       const meta: ConversationMeta = {

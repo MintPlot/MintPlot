@@ -65,6 +65,17 @@ export function createChanges<M extends SerializedMessage>(messages: M[], baseli
   return { upserts, deletes }
 }
 
+/** Advance only after a successful write, using the exact serialized snapshot
+ * that was submitted. Live messages may change while storage is awaiting I/O. */
+export function advanceBaseline<M extends SerializedMessage>(baseline: Map<string, string>, changes: ChatChanges<M>): Map<string, string> {
+  const next = new Map(baseline)
+  for (const id of changes.deletes) next.delete(id)
+  for (const { message, signature } of changes.upserts) {
+    next.set(message.id, signature)
+  }
+  return next
+}
+
 /**
  * Marks an interrupted draft final: trims trailing whitespace and makes sure
  * the streaming marker appears exactly once. Returns whether the message was

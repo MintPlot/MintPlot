@@ -14,7 +14,7 @@
  */
 
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
-import { createBaseline, createChanges } from '@/kernel/store/chat-persistence'
+import { advanceBaseline, createBaseline, createChanges } from '@/kernel/store/chat-persistence'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
 
@@ -129,7 +129,7 @@ export function createCardSessionStore(repository: StorageRepository): CardSessi
       const baseline = baselines.get(session.cardId) ?? createBaseline([], serialize)
       const changes = createChanges(session.messages, baseline, serialize)
       await repository.applyChatChanges(scopeOf(session.cardId), changes.upserts, changes.deletes)
-      baselines.set(session.cardId, createBaseline(session.messages, serialize))
+      baselines.set(session.cardId, advanceBaseline(baseline, changes))
 
       // Envelope: meta write (no index — the card library is the list).
       const meta: CardSessionMeta = {
