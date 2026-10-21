@@ -1,17 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme. -->
-    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
-        <!-- Customize your theme here. -->
+    <!-- Base application theme. NoActionBar everywhere: HarmonyOS-class ROMs
+         resolve the application theme by name in some decor paths, so even an
+         unreferenced DarkActionBar base style is a liability. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <!-- AppCompat namespace steers AppCompat's own sub-decor; the android:
+             namespace steers the PLATFORM decor path. HarmonyOS rebuilds the
+             decor from the platform attrs when it flags the window compat
+             (ActivityRecord compat={...dpi}), so both must be set. -->
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
         <item name="android:background">@null</item>
         <!-- Theme v3: the app draws behind a transparent status bar (the
              aurora shows through); icon style syncs from JS via
@@ -23,5 +34,15 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- Without installSplashScreen() the window stays on THIS theme for
+             its whole life; Theme.SplashScreen's base arms a platform title,
+             which the HarmonyOS compat decor path materializes as a "MintPlot"
+             action bar. Kill it in the platform namespace too. -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <!-- HarmonyOS decor fallback: once the splash window hands over, the
+             activity theme is pinned to the NoActionBar variant so no ROM
+             code path can materialize a title bar. -->
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
