@@ -31,12 +31,34 @@ const toasts = useToasts()
 .mp-toast-enter-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
+/* Leaving toasts leave the flex flow (the host is fixed = a positioning
+ * context) so the siblings below can FLIP up through the move class instead
+ * of jumping when the element unmounts. The 50% translate keeps the natural
+ * width centered while absolute. */
 .mp-toast-leave-active {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
-.mp-toast-enter-from,
-.mp-toast-leave-to {
+.mp-toast-move {
+  transition: transform 0.15s ease;
+}
+.mp-toast-enter-from {
   opacity: 0;
   transform: translateY(8px);
+}
+.mp-toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+/* Reduced-motion parity (motion.css master gate covers mp-mo-* only; this
+ * is the one transition family that lives outside it). */
+@media (prefers-reduced-motion: reduce) {
+  .mp-toast-enter-active,
+  .mp-toast-leave-active,
+  .mp-toast-move {
+    transition: none;
+  }
 }
 </style>

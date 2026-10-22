@@ -6,6 +6,7 @@
 // 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
 // (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { Keyboard } from '@capacitor/keyboard'
 import {
   CARD_SESSION_STORE_KEY,
   CHATBOX_STORE_KEY,
@@ -213,6 +214,31 @@ const scrollToBottom = async (): Promise<void> => {
   // Optional call: environments without element scrolling (jsdom) stay safe.
   messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
 }
+
+// Keyboard follow (motion-batch followup): the WebView resizes on ime insets
+// but the browser keeps scrollTop — the newest floors fall below the fold
+// while typing. Follow the keyboard only when the reader already sits near
+// the bottom; history readers keep their anchor.
+const nearBottom = (): boolean => {
+  const el = messagesEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 160
+}
+let keyboardFollow: { remove: () => void } | undefined
+onMounted(() => {
+  Keyboard.addListener('keyboardDidShow', () => {
+    if (nearBottom()) void scrollToBottom()
+  })
+    .then((handle) => {
+      keyboardFollow = handle
+    })
+    .catch(() => {
+      // Environments without the keyboard bridge (web/jsdom) stay quiet.
+    })
+})
+onUnmounted(() => {
+  keyboardFollow?.remove()
+})
 
 onMounted(async () => {
   // Card-reported frame heights arrive via postMessage (idempotent install);

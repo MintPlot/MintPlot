@@ -80,10 +80,19 @@ describe('kernel/app · PluginArea (M3-h)', () => {
     expect(wrapper.text()).toContain('tts 的一句话简介')
     expect(wrapper.text()).toContain('名·usage-stats')
     expect(wrapper.text()).not.toContain('名·future-ext')
-    expect(wrapper.text()).toContain('外部插件(M4+)安装后出现在这里')
+    // Empty-state hint is a true empty state (bugfix semantics): with an
+    // extension plugin present the group is NOT empty — the old v-else-if
+    // kept the hint in the DOM beside a real plugin.
+    expect(wrapper.text()).not.toContain('外部插件(M4+)安装后出现在这里')
 
     // Rows never show raw ids (id lives in the expanded meta line).
     expect(wrapper.text()).not.toContain('usage-stats v1.0.0')
+  })
+
+  it('empty extension group shows the install hint when opened (bugfix pin)', async () => {
+    const { wrapper } = mountArea([makePlugin('tts', 'system', 'active')])
+    await wrapper.findAll('button').find((button) => button.text().includes('扩展插件'))!.trigger('click')
+    expect(wrapper.text()).toContain('外部插件(M4+)安装后出现在这里')
   })
 
   it('config expand affordance exists only for plugins with plugin-placement sections', async () => {

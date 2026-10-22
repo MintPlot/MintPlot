@@ -98,6 +98,12 @@ watch(activeId, (next, prev) => {
 // chatbox and card conversations alike.
 const chatRoute = useChatRoute()
 const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.value : null))
+
+// Push choreography (bugfix): the tab bar must stay visible UNDER the
+// sliding chat page until the push covers it — v-show on chatOverlay alone
+// hid it at frame 0, exposing a barless bottom strip beside the entering
+// page's left edge for the whole 300ms flight.
+const pushSettled = ref(true)
 </script>
 
 <template>
@@ -133,7 +139,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
     <!-- Theme v3 floating chrome: the tab bar is an inset glass pill
          (mockup-aligned), not a full-bleed bar. -->
     <nav
-      v-show="!chatOverlay"
+      v-show="!chatOverlay || !pushSettled"
       class="mp-glass absolute inset-x-3 bottom-[max(env(safe-area-inset-bottom),0.75rem)] z-20 rounded-full"
       aria-label="主导航"
     >
@@ -156,7 +162,12 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       </div>
     </nav>
 
-    <Transition name="mp-mo-push">
+    <Transition
+      name="mp-mo-push"
+      @before-enter="pushSettled = false"
+      @after-enter="pushSettled = true"
+      @enter-cancelled="pushSettled = true"
+    >
       <ChatSessionView
         v-if="chatOverlay"
         :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
