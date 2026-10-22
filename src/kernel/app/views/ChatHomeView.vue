@@ -113,9 +113,12 @@ const onRowPointerMove = (id: string, event: PointerEvent): void => {
 
 const onRowPointerUp = (id: string): void => {
   const drag = swipeDrag.value
+  // Multi-pointer discipline (bugfix): only the row that owns the live
+  // gesture may clear it and swallow the click — with two fingers down, the
+  // first row's lift must not reset the second row's drag or eat its tap.
+  if (!drag || drag.id !== id) return
   swipeDrag.value = null
   swallowNextClick = true
-  if (!drag || drag.id !== id) return
   if (!drag.moved) {
     // Tap opens the conversation.
     if (routeView.value === 'list') openConversation(id)

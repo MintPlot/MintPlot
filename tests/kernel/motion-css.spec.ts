@@ -51,7 +51,10 @@ const transitionDeclarations = [...cssMain.matchAll(/transition:\s*([^;]+);/g)].
 describe('motion.css 红线守卫(动效批)', () => {
   it('动画只动 transform/opacity + 收编的 grid-template-rows(vivo 合成器前科;grid-rows 为规划 §2 明文允许的塌陷技巧,小 subtree 布局)', () => {
     expect(transitionDeclarations.length).toBeGreaterThanOrEqual(8)
-    const sanctioned = new Set(['transform', 'opacity', 'grid-template-rows'])
+    // visibility 收编(bugfix):手风琴关闭时 visibility 需延迟翻转——0s 时长
+    // + var 延迟,零渲染工作,只是把翻转推迟到塌陷结束;不收编则关闭动画
+    // 第 0 帧内容闪没、空盒收缩 240ms。
+    const sanctioned = new Set(['transform', 'opacity', 'grid-template-rows', 'visibility'])
     const offenders = transitionDeclarations.flatMap((declaration) =>
       transitionTargets(declaration).filter((target) => !sanctioned.has(target)),
     )
@@ -109,7 +112,12 @@ describe('动效挂点接线守卫', () => {
 
   it('App.vue:聊天页推栈 Transition 在位 + tab stage 裁剪(右入 16px 悬出曾触发横向滚动条=不对称卡顿)', () => {
     const app = readSrc('App.vue')
-    expect(app).toContain('<Transition name="mp-mo-push">')
+    expect(app).toContain('name="mp-mo-push"')
+    // Tab-bar choreography (bugfix): the bar hides only after the push
+    // settles — the enter hooks must stay wired or the bar snaps away at
+    // frame 0 and exposes a barless strip beside the entering page.
+    expect(app).toContain('@before-enter="pushSettled = false"')
+    expect(app).toContain('@after-enter="pushSettled = true"')
     expect(app).not.toContain('mp-mo-stage')
     expect(app).toContain('min-h-0 flex-1 overflow-hidden')
   })

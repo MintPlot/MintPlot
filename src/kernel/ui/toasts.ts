@@ -39,11 +39,16 @@ function push(owner: string, message: string, tone: MpToast['tone'], durationMs:
 
 export const uiService: UiService = {
   toast(owner, message, options) {
-    push(owner, message, options?.tone ?? 'info', options?.durationMs ?? 1000)
+    const tone = options?.tone ?? 'info'
+    // Snappy 1s default is the motion batch's info-toast call; errors carry
+    // dynamic detail (network/parse messages) that cannot be read in 1s —
+    // give them a 4s floor unless the caller set an explicit duration.
+    const durationMs = options?.durationMs ?? (tone === 'error' ? 4000 : 1000)
+    push(owner, message, tone, durationMs)
     // Mirror (D6): every error toast leaves a journal trace — existing call
     // sites start recording with zero changes. Mirror records carry no code;
     // code-bearing failures record explicitly at their throw/wiring site.
-    if (options?.tone === 'error') {
+    if (tone === 'error') {
       errorHub.record({
         severity: 'error',
         category: owner === 'shell' ? 'runtime' : 'plugin',

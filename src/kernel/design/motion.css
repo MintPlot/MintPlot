@@ -205,6 +205,13 @@
 }
 .mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
   visibility: hidden;
+  /* Discrete delay (bugfix): without a deferred flip, visibility goes hidden
+   * at frame 0 and a closing accordion shows an empty box folding for the
+   * whole 240ms. The 0s duration means zero rendering work — the var delay
+   * only defers the flip until the collapse has finished. Opening restores
+   * visibility instantly (this rule stops matching the moment the open class
+   * returns). */
+  transition: visibility 0s linear var(--mp-mo-t);
 }
 
 /* Reduced-motion master gate: zero every duration in one block. The var is
@@ -226,7 +233,8 @@
   .mp-mo-row-leave-active,
   .mp-mo-cell-enter-active,
   .mp-mo-cell-leave-active,
-  .mp-mo-collapse {
+  .mp-mo-collapse,
+  .mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
     --mp-mo-t: 0.01ms;
   }
   .mp-mo-push-enter-active {

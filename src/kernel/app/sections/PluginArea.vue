@@ -234,9 +234,13 @@ async function setEnabled(plugin: PluginStateProjection, value: boolean): Promis
             </li>
           </ul>
 
+          <!-- Empty-state hint (bugfix): keyed on the group being genuinely
+               empty, independent of the mounted-latch and the collapse —
+               the old v-else-if never rendered (the latched <ul> won the
+               branch, and a closed group clips the inner to 0fr anyway). -->
           <p
-            v-else-if="key === 'extension'"
-            class="px-4 pb-3 text-xs text-ink-3"
+            v-if="key === 'extension' && plugins.length === 0"
+            class="border-t border-line px-4 py-3 text-xs text-ink-3"
           >
             外部插件(M4+)安装后出现在这里
           </p>

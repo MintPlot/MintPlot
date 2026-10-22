@@ -25,10 +25,11 @@ export interface FloorView {
 // Floor list: the message stream body — empty state, per-floor editor/bubble
 // (thinking card, panel frames, prose, variable capsule) and the action row.
 // Presentational: all behavior emits upward to the session view.
+import { ref, watch } from 'vue'
 import FloorThinkingCard from './FloorThinkingCard.vue'
 import FloorActionsRow from './FloorActionsRow.vue'
 
-defineProps<{
+const props = defineProps<{
   views: FloorView[]
   editingFloorId: string
   editDraft: string
@@ -49,6 +50,24 @@ const emit = defineEmits<{
   'speak': [message: ChatboxMessage]
   'remove': [message: ChatboxMessage]
 }>()
+
+// Initial-batch animation gate (motion-batch bugfix): history hydration
+// lands as ONE insertion batch after mount and TransitionGroup cannot tell
+// it from newly sent floors — a 100-floor conversation would bounce in
+// whole. The first non-empty snapshot is pinned to the reduced-motion
+// duration via an inline custom property; only floors added afterwards
+// ride the landing spring.
+const staticFloorIds = ref(new Set<string>())
+let sawFirstBatch = false
+watch(
+  () => props.views,
+  (views) => {
+    if (sawFirstBatch || views.length === 0) return
+    sawFirstBatch = true
+    staticFloorIds.value = new Set(views.map((view) => view.message.id))
+  },
+  { immediate: true, flush: 'sync' },
+)
 </script>
 
 <template>
@@ -67,6 +86,7 @@ const emit = defineEmits<{
       :key="view.message.id"
       class="flex flex-col"
       :class="view.message.role === 'user' ? 'items-end' : 'items-start'"
+      :style="staticFloorIds.has(view.message.id) ? { '--mp-mo-t': '0.01ms' } : undefined"
     >
       <!-- M4-c in-place editor (plan §2): saving rewrites the stored floor. -->
       <div
@@ -148,8 +168,8 @@ const emit = defineEmits<{
           ⚙ 变量 ×{{ view.capsule.total }}
         </button>
         <div
-          class="mp-mo-collapse mt-1 rounded-input"
-          :class="view.capsuleOpen ? 'mp-mo-collapse-open border border-line bg-bg/50' : ''"
+          class="mp-mo-collapse rounded-input"
+          :class="view.capsuleOpen ? 'mp-mo-collapse-open mt-1 border border-line bg-bg/50' : ''"
         >
           <div class="mp-mo-collapse-inner">
             <div class="px-2 py-1 text-[10px] text-ink-2">
