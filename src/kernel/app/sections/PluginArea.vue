@@ -235,8 +235,8 @@ async function setEnabled(plugin: PluginStateProjection, value: boolean): Promis
           </ul>
 
           <p
-            v-else-if="key === 'extension'"
-            class="px-4 pb-3 text-xs text-ink-3"
+            v-if="key === 'extension' && plugins.length === 0"
+            class="border-t border-line px-4 py-3 text-xs text-ink-3"
           >
             外部插件(M4+)安装后出现在这里
           </p>

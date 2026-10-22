@@ -46,6 +46,10 @@ function completeLeave() {
   const transition = wrapper!.findAllComponents(ControlledTransition).find(component => component.props('name') === 'mp-mo-push')!
   transition.vm.$emit('after-leave')
 }
+function completeEnter() {
+  const transition = wrapper!.findAllComponents(ControlledTransition).find(component => component.props('name') === 'mp-mo-push')!
+  transition.vm.$emit('after-enter')
+}
 afterEach(() => {
   wrapper?.unmount(); wrapper = undefined
   closeConversation()
@@ -57,6 +61,31 @@ afterEach(() => {
 })
 
 describe('stable session page host', () => {
+  it('keeps the source navigation visible but inert until the entering page covers it', async () => {
+    autoReady = false
+    const app = await setup()
+    const nav = app.get('nav')
+    openConversation('navigation'); await flushPromises()
+    expect((nav.element as HTMLElement).style.display).not.toBe('none')
+    expect(nav.attributes('inert')).toBeDefined()
+    pages[0]!.ready(); await flushPromises()
+    expect((nav.element as HTMLElement).style.display).not.toBe('none')
+    completeEnter(); await nextTick()
+    expect((nav.element as HTMLElement).style.display).toBe('none')
+    closeConversation(); await nextTick()
+    expect((nav.element as HTMLElement).style.display).not.toBe('none')
+    expect(nav.attributes('inert')).toBeUndefined()
+    completeLeave(); await flushPromises()
+  })
+  it('ignores a late enter completion after a cancelled push', async () => {
+    const app = await setup()
+    openConversation('cancelled-navigation'); await flushPromises()
+    closeConversation(); await nextTick()
+    completeEnter(); await nextTick()
+    expect(app.get('nav').isVisible()).toBe(true)
+    completeLeave(); await flushPromises()
+    expect(app.get('nav').attributes('inert')).toBeUndefined()
+  })
   it.each([null, '0', '1'])('uses one hosted entry regardless of a retired shell flag: %s', async (legacyFlag) => {
     if (legacyFlag !== null) localStorage.setItem(key, legacyFlag)
     wrapper = mount(App, { global: { stubs: { ChatSessionView: Page, transition: ControlledTransition } } })

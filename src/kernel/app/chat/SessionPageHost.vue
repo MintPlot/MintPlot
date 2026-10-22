@@ -17,9 +17,13 @@ interface HeldPage {
 }
 
 const route = useChatRoute()
+const emit = defineEmits<{ covered: [boolean] }>()
 const suppressFeedback = pendingSessionFeedbackTrialEnabled()
 const held = shallowRef<HeldPage | null>(null)
 const phase = ref<Phase>('idle')
+// The host owns transition completion; the source navigation only consumes
+// whether this page fully covers it, without another animation lifecycle.
+watch(phase, value => emit('covered', value === 'settled'), { immediate: true, flush: 'sync' })
 const shown = ref(false)
 const emptyBackground = (): SessionPageBackground => ({ cover: '', backdrop: { enabled: true, ...cardBackdropDefault.value } })
 const background = shallowRef<SessionPageBackground>(emptyBackground())

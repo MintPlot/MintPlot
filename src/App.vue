@@ -98,6 +98,7 @@ watch(activeId, (next, prev) => {
 // chatbox and card conversations alike.
 const chatRoute = useChatRoute()
 const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.value : null))
+const sessionCovered = ref(false)
 </script>
 
 <template>
@@ -136,7 +137,9 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
     <!-- Theme v3 floating chrome: the tab bar is an inset glass pill
          (mockup-aligned), not a full-bleed bar. -->
     <nav
-      v-show="!chatOverlay"
+      v-show="!chatOverlay || !sessionCovered"
+      :inert="chatOverlay ? true : undefined"
+      :aria-hidden="chatOverlay ? true : undefined"
       class="mp-glass absolute inset-x-3 bottom-[max(env(safe-area-inset-bottom),0.75rem)] z-20 rounded-full"
       aria-label="主导航"
     >
@@ -159,7 +162,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       </div>
     </nav>
 
-    <SessionPageHost />
+    <SessionPageHost @covered="sessionCovered = $event" />
 
     <ToastHost />
     <ConfirmDialogHost />

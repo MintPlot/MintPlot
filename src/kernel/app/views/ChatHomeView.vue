@@ -114,9 +114,9 @@ const onRowPointerMove = (id: string, event: PointerEvent): void => {
 
 const onRowPointerUp = (id: string): void => {
   const drag = swipeDrag.value
+  if (!drag || drag.id !== id) return
   swipeDrag.value = null
   swallowNextClick = true
-  if (!drag || drag.id !== id) return
   if (!drag.moved) {
     // Tap opens the conversation.
     if (routeView.value === 'list') openConversation(id)
@@ -125,6 +125,10 @@ const onRowPointerUp = (id: string): void => {
   const finalOffset = Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx))
   if (finalOffset > SWIPE_FIRE_THRESHOLD) void togglePin(id)
   else if (finalOffset < -SWIPE_FIRE_THRESHOLD) void deleteConversation(id)
+}
+
+const onRowPointerCancel = (id: string): void => {
+  if (swipeDrag.value?.id === id) swipeDrag.value = null
 }
 
 const onRowClick = (id: string): void => {
@@ -272,7 +276,7 @@ const timeLabel = (updatedAt: number): string => {
             @pointerdown="onRowPointerDown(conversation.id, $event)"
             @pointermove="onRowPointerMove(conversation.id, $event)"
             @pointerup="onRowPointerUp(conversation.id)"
-            @pointercancel="swipeDrag = null"
+            @pointercancel="onRowPointerCancel(conversation.id)"
             @click="onRowClick(conversation.id)"
           >
             <span class="min-w-0 flex-1">

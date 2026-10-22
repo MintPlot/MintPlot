@@ -51,11 +51,26 @@ const transitionDeclarations = [...cssMain.matchAll(/transition:\s*([^;]+);/g)].
 describe('motion.css 红线守卫(动效批)', () => {
   it('动画只动 transform/opacity + 收编的 grid-template-rows(vivo 合成器前科;grid-rows 为规划 §2 明文允许的塌陷技巧,小 subtree 布局)', () => {
     expect(transitionDeclarations.length).toBeGreaterThanOrEqual(8)
-    const sanctioned = new Set(['transform', 'opacity', 'grid-template-rows'])
+    const sanctioned = new Set(['transform', 'opacity', 'grid-template-rows', 'visibility'])
     const offenders = transitionDeclarations.flatMap((declaration) =>
       transitionTargets(declaration).filter((target) => !sanctioned.has(target)),
     )
     expect(offenders, `offending animated properties: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('keeps closing content visible until collapse ends using only a zero-duration visibility flip', () => {
+    const visibility = transitionDeclarations.filter(declaration => transitionTargets(declaration).includes('visibility'))
+    expect(visibility).toEqual(['visibility 0s linear var(--mp-mo-t)'])
+    expect(cssReduce).toContain('.mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner')
+  })
+
+  it('disables toast movement and fades when reduced motion is requested', () => {
+    const toast = readSrc('kernel', 'ui', 'ToastHost.vue')
+    const reduced = toast.slice(toast.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('.mp-toast-enter-active')
+    expect(reduced).toContain('.mp-toast-leave-active')
+    expect(reduced).toContain('.mp-toast-move')
+    expect(reduced).toContain('transition: none')
   })
 
   it('transition/animation 声明零 blur/filter 族目标(注释与非动画声明不计——去卡顿用的 visibility 停用规则是合法的)', () => {
@@ -109,7 +124,7 @@ describe('动效挂点接线守卫', () => {
 
   it('App.vue:聊天页推栈 Transition 在位 + tab stage 裁剪(右入 16px 悬出曾触发横向滚动条=不对称卡顿)', () => {
     const app = readSrc('App.vue')
-    expect(app).toContain('<SessionPageHost />')
+    expect(app).toContain('<SessionPageHost @covered="sessionCovered = $event" />')
     expect(app).not.toContain('<ChatSessionView')
     expect(app).not.toContain('stableSessionShell')
     expect(readSrc('kernel', 'app', 'chat', 'SessionPageHost.vue')).toContain('name="mp-mo-push"')

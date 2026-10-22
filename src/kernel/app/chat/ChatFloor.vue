@@ -123,8 +123,8 @@ watch(() => view.value.isHtmlFrame || view.value.panels.top.length > 0 || view.v
         ⚙ 变量 ×{{ view.capsule.total }}
       </button>
       <div
-        class="mp-mo-collapse mt-1 rounded-input"
-        :class="view.capsuleOpen ? 'mp-mo-collapse-open border border-line bg-bg/50' : ''"
+        class="mp-mo-collapse rounded-input"
+        :class="view.capsuleOpen ? 'mp-mo-collapse-open mt-1 border border-line bg-bg/50' : ''"
       >
         <div class="mp-mo-collapse-inner">
           <div class="px-2 py-1 text-[10px] text-ink-2">

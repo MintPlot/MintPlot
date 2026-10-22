@@ -214,6 +214,24 @@ describe('ChatHomeView swipe-to-delete', () => {
     toastSpy.mockRestore()
   })
 
+  it.each(['pointerup', 'pointercancel'])('keeps the active row drag when another row receives %s', async (event) => {
+    const wrapper = await mountView()
+    const first = rowOf(wrapper, '第一个对话')
+    const second = rowOf(wrapper, '第二个对话')
+    firePointer(first.element, 'pointerdown', 300, 400)
+    firePointer(second.element, 'pointerdown', 300, 500)
+    firePointer(second.element, 'pointermove', 340, 500)
+    firePointer(first.element, event, 300, 400)
+    await nextTick()
+    expect(second.attributes('style')).toContain('translateX(40px)')
+    firePointer(second.element, 'pointerup', 340, 500)
+    await flushPromises()
+    const entries = await chatboxStore.list()
+    expect(entries.find(entry => entry.title === '第二个对话')?.pinned).toBe(true)
+    expect(entries.find(entry => entry.title === '第一个对话')?.pinned).toBeFalsy()
+    wrapper.unmount()
+  })
+
   it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才跟行滑出', async () => {
     const wrapper = await mountView()
     const row = rowOf(wrapper, '第一个对话')

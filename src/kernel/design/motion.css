@@ -185,6 +185,9 @@
 }
 .mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
   visibility: hidden;
+  /* Keep the content painted while its grid track closes. Opening removes
+   * this rule, restoring visibility immediately, including reversals. */
+  transition: visibility 0s linear var(--mp-mo-t);
 }
 
 /* Reduced-motion master gate: zero every duration in one block. The var is
@@ -206,7 +209,8 @@
   .mp-mo-row-leave-active,
   .mp-mo-cell-enter-active,
   .mp-mo-cell-leave-active,
-  .mp-mo-collapse {
+  .mp-mo-collapse,
+  .mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
     --mp-mo-t: 0.01ms;
   }
 }
