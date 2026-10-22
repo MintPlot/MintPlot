@@ -83,6 +83,15 @@ const rows = computed(() => {
   }))
 })
 const totalSize = computed(() => virtualizer.value.getTotalSize())
+// A measured row can grow before Vue commits the new sizer. The browser
+// clamps the core's compensation against the old scroll range (including
+// composer padding). Complete the adapter's update after that DOM commit so
+// the core can retry its recorded adjustment. This issues no new end command.
+watch(totalSize, () => {
+  void nextTick(() => {
+    if (props.followingOutput && host.value?.isConnected) virtualizer.value._willUpdate()
+  })
+}, { flush: 'post' })
 let cleanupQueued = false
 const measure = (element: Element | ComponentPublicInstance | null): void => {
   if (element === null && !cleanupQueued) {
@@ -108,6 +117,7 @@ const updateViewport = (): void => {
   if (changed) emit('viewport-resize')
 }
 let resize: ResizeObserver | undefined
+// Deferred lists can mount after their scroll element already exists.
 watch(() => props.scrollElement, (element) => {
   resize?.disconnect()
   updateViewport()
@@ -115,7 +125,7 @@ watch(() => props.scrollElement, (element) => {
     resize = new ResizeObserver(updateViewport)
     resize.observe(element)
   }
-}, { flush: 'post' })
+}, { flush: 'post', immediate: true })
 const messageIdAt = (node: Node | null): string => {
   const element = node instanceof Element ? node : node?.parentElement
   const row = element?.closest<HTMLElement>('[data-message-id]')

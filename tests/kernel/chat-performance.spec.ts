@@ -120,7 +120,7 @@ describe('chat update boundaries', () => {
     f.callbacks().onDelta?.('regenerated text')
     await nextTick()
     expect(f.wrapper.findAll('.markdown-body').at(-1)!.text()).toBe('regenerated text')
-    await stream.trigger('wheel')
+    await stream.trigger('wheel', { deltaY: -100 })
     expect(f.wrapper.text()).toContain('回到最新')
     f.finish()({ content: 'done', usage: null })
     await flushPromises()
@@ -131,7 +131,7 @@ describe('chat update boundaries', () => {
     const element = f.wrapper.get('.mp-overlay-flow-top')
     Object.defineProperties(element.element, { scrollHeight: { value: 1000 }, clientHeight: { value: 500 } })
     element.element.scrollTop = 500
-    await element.trigger('wheel')
+    await element.trigger('wheel', { deltaY: -100 })
     await element.trigger('scroll')
     expect(f.wrapper.text()).toContain('回到最新')
     element.element.scrollTop = 100

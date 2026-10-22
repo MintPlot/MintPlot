@@ -8,7 +8,7 @@ import { registerTab, useTabProjection } from '@/kernel/app/view-registry'
 import { registerSettingsSection } from '@/kernel/app/settings-registry'
 import { useChatRoute } from '@/kernel/app/chat-router'
 import ChatHomeView from '@/kernel/app/views/ChatHomeView.vue'
-import ChatSessionView from '@/kernel/app/views/ChatSessionView.vue'
+import SessionPageHost from '@/kernel/app/chat/SessionPageHost.vue'
 import CharactersView from '@/kernel/app/views/CharactersView.vue'
 import ToolsView from '@/kernel/app/views/ToolsView.vue'
 import SettingsView from '@/kernel/app/views/SettingsView.vue'
@@ -111,7 +111,10 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
          (visible in desktop browsers) and a full relayout = the asymmetric
          tab-switch jank on device. Clip at the stage; both directions go
          smooth and no scrollbar. -->
-    <div class="relative z-10 min-h-0 flex-1 overflow-hidden">
+    <div
+      class="relative z-10 min-h-0 flex-1 overflow-hidden"
+      :inert="chatOverlay ? true : undefined"
+    >
       <Transition
         mode="out-in"
         :name="tabDirection"
@@ -156,14 +159,7 @@ const chatOverlay = computed(() => (chatRoute.value.view === 'chat' ? chatRoute.
       </div>
     </nav>
 
-    <Transition name="mp-mo-push">
-      <ChatSessionView
-        v-if="chatOverlay"
-        :key="`${chatOverlay.kind}:${chatOverlay.conversationId}`"
-        :domain="chatOverlay.kind"
-        :conversation-id="chatOverlay.conversationId"
-      />
-    </Transition>
+    <SessionPageHost />
 
     <ToastHost />
     <ConfirmDialogHost />

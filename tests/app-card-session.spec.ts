@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { hasCardTool, openCardTool } from './helpers/card-tools'
+import { ControlledTransition, completeSessionLeave } from './helpers/controlled-transition'
 import App from '../src/App.vue'
 import {
   CARD_SESSION_STORE_KEY,
@@ -65,6 +66,10 @@ const CARD: Omit<CharacterCard, 'id' | 'importedAt'> = {
 /** A provider that answers instantly — the seam is what the page streams
  *  through; requests are captured and the reply text is settable per test. */
 const streamCalls: Array<readonly LlmChatMessage[]> = []
+const mountedApps: VueWrapper[] = []
+afterEach(() => {
+  for (const wrapper of mountedApps.splice(0)) if (!wrapper.vm.$.isUnmounted) wrapper.unmount()
+})
 let nextReply = '（测试回复）'
 
 const fakeProvider: LlmProvider = {
@@ -138,6 +143,7 @@ async function mountApp(options: { runtime?: ReturnType<typeof createPluginRunti
 
   const wrapper = mount(App, {
     global: {
+      stubs: { transition: ControlledTransition },
       provide: {
         [CHATBOX_STORE_KEY as symbol]: chatboxStore,
         [CARD_SESSION_STORE_KEY as symbol]: cardSessionStore,
@@ -155,6 +161,7 @@ async function mountApp(options: { runtime?: ReturnType<typeof createPluginRunti
       },
     },
   })
+  mountedApps.push(wrapper)
   return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, worldbookStore, presetStore, projection, usageCalls, seams, settings }
 }
 
@@ -809,6 +816,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await worldbookStore.setDisabled(stored.id, new Set([0]))
     await wrapper.find('button[aria-label="返回对话列表"]').trigger('click')
     await flushPromises()
+    completeSessionLeave(wrapper)
     await nextTick()
     await flushPromises()
     await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')

@@ -147,12 +147,15 @@ let hostStarted = false
 
 /** Slash-trigger bridge (M3-t): the chat view registers a handler so a card
  *  panel button (`window.triggerSlash` / `data-slash`) can send a user turn.
- *  Auth is unchanged — only frames attached to this document are served. */
+ *  Window identity authenticates the frame; an optional page owner further
+ *  restricts commands while two session pages overlap during navigation. */
 type SlashTriggerHandler = (command: string) => void
 let slashHandler: SlashTriggerHandler | null = null
+let slashFrameOwner: ((frame: HTMLIFrameElement) => boolean) | undefined
 
-export function setExecutableFrameSlashHandler(handler: SlashTriggerHandler | null): void {
+export function setExecutableFrameSlashHandler(handler: SlashTriggerHandler | null, ownsFrame?: (frame: HTMLIFrameElement) => boolean): void {
   slashHandler = handler
+  slashFrameOwner = handler ? ownsFrame : undefined
 }
 
 /** Test/inspection seam: the handler the active chat view registered. */
@@ -204,7 +207,7 @@ export function startExecutableFrameHost(): void {
         })
         return
       }
-      slashHandler?.(data.command)
+      if (!slashFrameOwner || slashFrameOwner(frame)) slashHandler?.(data.command)
     }
   })
 }

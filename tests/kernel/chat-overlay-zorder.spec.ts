@@ -37,11 +37,15 @@ describe('覆盖层层序守卫(负 z 合成器坑 + Tailwind 静默缺规则坑
 
   it('聊天覆盖层分层在位:极光 z-0 < 卡图 z-[1] < 楼层流 z-[2],chrome z-10', () => {
     const view = readFileSync(src('kernel', 'app', 'views', 'ChatSessionView.vue'), 'utf8')
-    expect(view).toContain('absolute inset-0 z-0"') // aurora — full-bleed, no env gymnastics
-    expect(view).toContain('absolute inset-0 z-[1] overflow-hidden"') // card backdrop
+    const header = readFileSync(src('kernel', 'app', 'chat', 'ChatSessionHeader.vue'), 'utf8')
+    const backdrop = readFileSync(src('kernel', 'app', 'chat', 'SessionBackdrop.vue'), 'utf8')
+    expect(view).toContain('<SessionBackdrop')
+    expect(backdrop).toContain('absolute inset-0 z-0"') // aurora — full-bleed, no env gymnastics
+    expect(backdrop).toContain('absolute inset-0 z-[1] overflow-hidden"') // card backdrop
     expect(view).toContain('absolute inset-0 z-[2] overflow-y-auto') // floor stream
     expect(view).toContain('relative z-[2] flex flex-1') // load-error state above the backdrop
-    expect(view).toContain('mp-overlay-header-top') // safe-area-aware header top (base.css)
+    expect(view).toContain('<ChatSessionHeader')
+    expect(header).toContain('mp-overlay-header-top') // safe-area-aware header top (base.css)
     expect(view).toContain('mp-overlay-flow-top') // safe-area-aware stream padding (base.css)
   })
 

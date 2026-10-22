@@ -8,6 +8,7 @@ import { openConversation } from '@/kernel/app/chat-router'
 import { CharacterCardError, isPngBytes, parseCharacterCardFile } from '@/kernel/characters/character-card'
 import type { CharacterCardSummary } from '@/kernel/characters/character-store'
 import { uiService } from '@/kernel/ui/toasts'
+import { waitForSessionWriteHandoff } from '@/kernel/app/chat/session-write-handoff'
 
 const store = inject(CHARACTER_STORE_KEY, null)
 const cardSessions = inject(CARD_SESSION_STORE_KEY, null)
@@ -84,6 +85,11 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
     confirmLabel: '删除',
   })
   if (!confirmed) return
+  if (cardSessions) {
+    try { await waitForSessionWriteHandoff(cardSessions, card.id) } catch {
+      uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+    }
+  }
   await store.remove(card.id)
   // Cascade: the card's session dies with it (no orphan card sessions).
   await cardSessions?.remove(card.id)

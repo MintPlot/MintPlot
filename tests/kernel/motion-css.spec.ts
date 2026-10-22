@@ -109,7 +109,10 @@ describe('动效挂点接线守卫', () => {
 
   it('App.vue:聊天页推栈 Transition 在位 + tab stage 裁剪(右入 16px 悬出曾触发横向滚动条=不对称卡顿)', () => {
     const app = readSrc('App.vue')
-    expect(app).toContain('<Transition name="mp-mo-push">')
+    expect(app).toContain('<SessionPageHost />')
+    expect(app).not.toContain('<ChatSessionView')
+    expect(app).not.toContain('stableSessionShell')
+    expect(readSrc('kernel', 'app', 'chat', 'SessionPageHost.vue')).toContain('name="mp-mo-push"')
     expect(app).not.toContain('mp-mo-stage')
     expect(app).toContain('min-h-0 flex-1 overflow-hidden')
   })

@@ -13,32 +13,12 @@
 /* Push stack — the full-screen chat page slides over the tab stage.
  * Enter 300ms, leave 260ms.
  *
- * Device de-jank (2026-10-17 vivo report): the freshly mounted overlay
- * rasterizes four 55px blob blurs and lays out its floors at frame zero —
- * the flight stuttered. Two counters: the enter transition starts 60ms
- * late (mount cost is paid while the page still sits off-screen at
- * translateX(100%)), and the aurora blobs bloom THROUGH the flight (an
- * opacity animation starting at the slide) instead of popping in at rest —
- * round 2's visibility-hidden version read as a white flash before the
- * color arrived (device report round 3). The leave flight keeps them
- * (cached textures move cheap). */
+ * Session data and local cover decoding complete before the page root
+ * appears. The prepared background travels with the page from frame zero;
+ * no independent bloom or fixed mount-time delay changes its colors. */
 .mp-mo-push-enter-active {
   --mp-mo-t: 300ms;
-  --mp-mo-d: 60ms;
   transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
-  transition-delay: var(--mp-mo-d, 0ms);
-}
-.mp-mo-push-enter-active .mp-aurora-blob {
-  animation: mp-mo-blob-in var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1) var(--mp-mo-d, 0ms) both;
-}
-
-@keyframes mp-mo-blob-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 .mp-mo-push-leave-active {
   --mp-mo-t: 260ms;
@@ -228,11 +208,5 @@
   .mp-mo-cell-leave-active,
   .mp-mo-collapse {
     --mp-mo-t: 0.01ms;
-  }
-  .mp-mo-push-enter-active {
-    --mp-mo-d: 0.01ms;
-  }
-  .mp-mo-push-enter-active .mp-aurora-blob {
-    animation: none;
   }
 }

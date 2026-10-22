@@ -15,9 +15,49 @@ vi.mock('@tanstack/vue-virtual', async (importOriginal) => {
   } }
 })
 
-afterEach(() => { harness.instances.length = 0; document.body.replaceChildren(); vi.restoreAllMocks() })
+afterEach(() => { harness.instances.length = 0; document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('virtual floor measurement lifecycle', () => {
+  it.each([true, false])('reports viewport changes with an initially available element: %s', async (initial) => {
+    const observers: TestResizeObserver[] = []
+    class TestResizeObserver {
+      targets = new Set<Element>()
+      constructor(readonly callback: ResizeObserverCallback) { observers.push(this) }
+      observe(target: Element) { this.targets.add(target) }
+      unobserve(target: Element) { this.targets.delete(target) }
+      disconnect() { this.targets.clear() }
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+    const viewport = document.createElement('div')
+    let height = 600
+    Object.defineProperties(viewport, {
+      clientHeight: { get: () => height }, offsetHeight: { get: () => height },
+      clientWidth: { value: 360 }, offsetWidth: { value: 360 },
+    })
+    viewport.scrollTo = vi.fn()
+    document.body.append(viewport)
+    const wrapper = mount(ChatFloorList, { attachTo: viewport, props: {
+      messages: [], scrollElement: initial ? viewport : null, followingOutput: true,
+      project: () => { throw Error('No floor should be projected') },
+      editingFloorId: '', editDraft: '', streaming: false, ttsActive: false,
+    } })
+    if (!initial) await wrapper.setProps({ scrollElement: viewport })
+    await flushPromises()
+    expect(wrapper.emitted('viewport-resize')).toBeUndefined()
+    height = 420
+    for (const observer of observers.filter(observer => observer.targets.has(viewport))) {
+      const size = [{ inlineSize: 360, blockSize: height }]
+      observer.callback([{
+        target: viewport, contentRect: viewport.getBoundingClientRect(),
+        borderBoxSize: size, contentBoxSize: size, devicePixelContentBoxSize: size,
+      }], observer as unknown as ResizeObserver)
+    }
+    await flushPromises()
+    expect(wrapper.emitted('viewport-resize')).toHaveLength(1)
+    wrapper.unmount()
+    expect(observers.every(observer => observer.targets.size === 0)).toBe(true)
+  })
+
   it('unobserves and drops detached rows after Vue removes function refs', async () => {
     const viewport = document.createElement('div')
     Object.defineProperties(viewport, {

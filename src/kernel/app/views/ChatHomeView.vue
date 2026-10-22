@@ -11,6 +11,7 @@ import { CHATBOX_STORE_KEY } from '@/kernel/app/chat-keys'
 import { openConversation, useChatRoute } from '@/kernel/app/chat-router'
 import { uiService } from '@/kernel/ui/toasts'
 import type { ChatboxConversationSummary } from '@/kernel/sessions/chatbox-store'
+import { waitForSessionWriteHandoff } from '@/kernel/app/chat/session-write-handoff'
 
 const store = inject(CHATBOX_STORE_KEY, null)
 const route = useChatRoute()
@@ -136,6 +137,9 @@ const onRowClick = (id: string): void => {
 
 const togglePin = async (id: string): Promise<void> => {
   if (!store) return
+  try { await waitForSessionWriteHandoff(store, id) } catch {
+    uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+  }
   const conversation = conversations.value.find((entry) => entry.id === id)
   const pinned = !(conversation?.pinned ?? false)
   await store.setPinned(id, pinned)
@@ -153,6 +157,9 @@ const deleteConversation = async (id: string): Promise<void> => {
     cancelLabel: '取消',
   })
   if (!confirmed) return
+  try { await waitForSessionWriteHandoff(store, id) } catch {
+    uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+  }
   await store.remove(id)
   await refresh()
 }

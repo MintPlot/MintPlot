@@ -21,7 +21,6 @@ import {
   applyTemplateUpdates,
   matchTemplateUpdates,
   parseTemplateUpdatePayload,
-  readCardVariableDefaults,
   replayVariableState,
   type ParsedTemplateUpdate,
 } from '@/kernel/variables/variable-engine'
@@ -39,8 +38,10 @@ import { resolveApiConfig } from '@/kernel/llm/api-profiles'
 import type { CardUiTemplate, CharacterCard } from '@/kernel/characters/character-card'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { UsageRecorder } from '@/kernel/app/chat-keys'
+import { buildCardVariableDefaults } from './card-variable-defaults'
+import type { SessionLocalWorkOptions } from './session-local-work'
 
-export interface CardLedgerOptions {
+export interface CardLedgerOptions extends SessionLocalWorkOptions {
   settingsState: SettingsState | null
   variableStore: VariableStore | null
   worldbookStore: WorldbookStore | null
@@ -159,13 +160,7 @@ export function useCardLedger(options: CardLedgerOptions) {
    *  (M3-s fix: reset previously dropped the template trees). */
   const buildVariableDefaults = (): Array<{ name: string; value: VariableState['value'] }> => {
     if (!card()) return []
-    return [
-      ...readCardVariableDefaults(card()!.extensions),
-      ...activeTemplates.value.map((entry) => ({
-        name: entry.id,
-        value: JSON.parse(JSON.stringify(entry.initialVariableState)) as VariableState['value'],
-      })),
-    ]
+    return buildCardVariableDefaults(card()!, variablesActive.value && isCardDomain())
   }
 
   // Historical panels query a derived ledger index. The floor cache uses the
@@ -287,9 +282,11 @@ export function useCardLedger(options: CardLedgerOptions) {
     parsed: ParsedTemplateUpdate[],
     messageId: string,
     candidateIndex?: number,
+    signal: AbortSignal | null | undefined = options.sessionSignal?.(),
   ): Promise<number> => {
     let matched = 0
     for (const { template, updates: templateUpdates } of matchTemplateUpdates(parsed, activeTemplates.value)) {
+      if (signal?.aborted) break
       matched += 1
       const result = applyTemplateUpdates(templateStateOf(template), templateUpdates, {
         initial: template.initialVariableState,
@@ -299,11 +296,13 @@ export function useCardLedger(options: CardLedgerOptions) {
         console.warn(`[variables] template "${template.name}" rejected undefined keys:`, result.rejectedKeys)
       }
       if (result.changedKeys.length === 0) continue
-      const snapshot = await variableStore?.apply(card()!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
+      const write = variableStore?.apply(card()!.id, [{ name: template.id, raw: result.nextState as VariableState['value'] }], {
         source: 'ai',
         messageId,
         ...(candidateIndex !== undefined ? { candidateIndex } : {}),
       })
+      const snapshot = write ? await (options.trackLocalWrite?.(write) ?? write) : undefined
+      if (signal?.aborted) break
       if (snapshot) {
         absorbVariableSnapshot(snapshot)
       }
@@ -316,7 +315,8 @@ export function useCardLedger(options: CardLedgerOptions) {
   // own schema and a decoupled token budget ride the same OpenAI-compatible
   // endpoint; parsing/routing/application reuse the block path above.
   const runTemplateAnalysisPipeline = async (targetFloor: ChatboxMessage, force = false): Promise<void> => {
-    if (!card() || !settingsState) return
+    const signal = options.sessionSignal?.()
+    if (!card() || !settingsState || signal?.aborted) return
     const settings = readTemplateAnalysisSettings(settingsState)
     if (!settings.analysisModel) {
       analysisStatus.value = '未配置分析模型'
@@ -358,12 +358,14 @@ export function useCardLedger(options: CardLedgerOptions) {
         userInfo: userInfoLine(),
         batch: useBatchAnalysis(settings, analysisTemplates.length),
         force,
+        signal,
         onUsage: (usage, meta) => {
           if (usage) recordUsage?.(usage, meta)
         },
       })
       let changed = 0
       for (const reply of outcome.replies) {
+        if (signal?.aborted) return
         try {
           changed += await applyMatchedTemplateUpdates(parseTemplateUpdatePayload(reply.content), targetFloor.id)
         } catch {
@@ -376,7 +378,7 @@ export function useCardLedger(options: CardLedgerOptions) {
           ? `更新 ${changed} 项`
           : '无变化'
     } catch (error) {
-      analysisStatus.value = `分析失败：${(error as Error)?.message || '未知错误'}`
+      if (!signal?.aborted) analysisStatus.value = `分析失败：${(error as Error)?.message || '未知错误'}`
     }
   }
 
