@@ -1,17 +1,13 @@
+<script setup lang="ts">
+// 设置标签图标 — 故事风星晶齿轮（用户提供的裁切图，圆形徽章位图）
+import settingsIcon from './story-settings.png'
+</script>
+
 <template>
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    aria-hidden="true"
+  <img
+    :src="settingsIcon"
+    alt=""
+    class="rounded-full select-none"
+    draggable="false"
   >
-    <g
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-    >
-      <path d="M4 7h16" />
-      <path d="M4 12h16" />
-      <path d="M4 17h16" />
-    </g>
-  </svg>
 </template>
