@@ -17,6 +17,7 @@ import { createWorldbookStore } from '@/kernel/worldinfo/worldbook-store'
 import { createRegexStore } from '@/kernel/regex/regex-store'
 import { createPresetStore } from '@/kernel/presets/preset-store'
 import { createMemoryStore } from '@/kernel/memory/memory-store'
+import { createNstyleStore } from '@/kernel/nstyle/nstyle-store'
 import { createOpenAiCompatibleProvider } from '@/kernel/llm/llm-provider'
 import { createPlatformSecretChannel } from '@/kernel/secrets/platform-secret-channel'
 import { attachErrorHubPersistence, errorHub, hydrateErrorHub } from '@/kernel/diagnostics/error-hub'
@@ -42,6 +43,7 @@ import {
   REGEX_STORE_KEY,
   PRESET_STORE_KEY,
   MEMORY_STORE_KEY,
+  NSTYLE_STORE_KEY,
 } from '@/kernel/app/chat-keys'
 import UpdateCheckerPlugin from '@/plugins/update-checker'
 import UsageStatsPlugin from '@/plugins/usage-stats'
@@ -53,6 +55,7 @@ import RegexPlugin from '@/plugins/regex'
 import PresetsPlugin from '@/plugins/presets'
 import MemoryPlugin from '@/plugins/memory'
 import CotPlugin from '@/plugins/cot'
+import NstylePlugin from '@/plugins/nstyle'
 
 initMpTheme()
 initMpColorFamily()
@@ -118,6 +121,9 @@ const presetStore = createPresetStore(createStorageRepository(createDefaultEngin
 // Rolling-summary memory ledger (M4-e, `memory:<kind>:<id>` reserved key)
 // — card domain first; the plugin is the tools-area toggle surface.
 const memoryStore = createMemoryStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
+// 叙事风格配置器 (M4-nstyle) — 自定义风格 CRUD、全局与故事级配置；会话临时
+// 配置是内存 ref（不落盘）。请求路径读同步镜像。
+const nstyleStore = createNstyleStore(createStorageRepository(createDefaultEngine(), createPlatformSecretChannel()))
 
 // Usage write side: the composition root bridges the kernel pipeline's
 // records into the usage-stats organ when it is active.
@@ -142,6 +148,9 @@ kernel.runtime.load(MemoryPlugin)
 // Thinking layer (M4-f): same serviceless shape — parser/builder/preset-sync
 // stay kernel-side; the plugin is the tools-area toggle surface.
 kernel.runtime.load(CotPlugin)
+// 叙事风格配置器 (M4-nstyle): same serviceless shape — prompt builder, scope
+// resolution and storage stay kernel-side; the plugin is the toggle.
+kernel.runtime.load(NstylePlugin)
 
 // Boot policy: every loaded plugin starts enabled unless the user disabled it
 // (the plugin manager persists the preference under 'plugin-states').
@@ -193,6 +202,7 @@ app.provide(WORLDBOOK_STORE_KEY, worldbookStore)
 app.provide(REGEX_STORE_KEY, regexStore)
 app.provide(PRESET_STORE_KEY, presetStore)
 app.provide(MEMORY_STORE_KEY, memoryStore)
+app.provide(NSTYLE_STORE_KEY, nstyleStore)
 app.provide(SESSION_PROJECTION_KEY, kernel.services.session)
 app.provide(SEAM_REGISTRY_KEY, kernel.services.seams)
 app.provide(SETTINGS_STATE_KEY, kernel.services.settings)

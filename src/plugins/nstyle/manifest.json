@@ -1,0 +1,11 @@
+{
+  "id": "nstyle",
+  "version": "1.0.0",
+  "entry": "./index.ts",
+  "activation": "lazy",
+  "display": {
+    "name": "叙事风格",
+    "description": "对话密度、描写侧重、节奏、视角与文风等叙事参数配置，真实影响 AI 生成的叙事方式"
+  },
+  "permissions": []
+}
