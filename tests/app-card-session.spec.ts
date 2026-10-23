@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { hasCardTool, openCardTool } from './helpers/card-tools'
+import { ControlledTransition, completeSessionLeave } from './helpers/controlled-transition'
 import App from '../src/App.vue'
 import {
   CARD_SESSION_STORE_KEY,
@@ -64,6 +66,10 @@ const CARD: Omit<CharacterCard, 'id' | 'importedAt'> = {
 /** A provider that answers instantly — the seam is what the page streams
  *  through; requests are captured and the reply text is settable per test. */
 const streamCalls: Array<readonly LlmChatMessage[]> = []
+const mountedApps: VueWrapper[] = []
+afterEach(() => {
+  for (const wrapper of mountedApps.splice(0)) if (!wrapper.vm.$.isUnmounted) wrapper.unmount()
+})
 let nextReply = '（测试回复）'
 
 const fakeProvider: LlmProvider = {
@@ -137,6 +143,7 @@ async function mountApp(options: { runtime?: ReturnType<typeof createPluginRunti
 
   const wrapper = mount(App, {
     global: {
+      stubs: { transition: ControlledTransition },
       provide: {
         [CHATBOX_STORE_KEY as symbol]: chatboxStore,
         [CARD_SESSION_STORE_KEY as symbol]: cardSessionStore,
@@ -154,6 +161,7 @@ async function mountApp(options: { runtime?: ReturnType<typeof createPluginRunti
       },
     },
   })
+  mountedApps.push(wrapper)
   return { wrapper, chatboxStore, cardSessionStore, characterStore, variableStore, worldbookStore, presetStore, projection, usageCalls, seams, settings }
 }
 
@@ -370,7 +378,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
 
     // 先开面板再对话:打开期间 AI setvars 落账。
-    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await openCardTool(wrapper, '变量')
     await flushPromises()
     expect(wrapper.find('input[placeholder="10"]').exists()).toBe(true)
 
@@ -389,6 +397,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
     await wrapper.find('button[aria-label="新建对话"]').trigger('click')
     await flushPromises()
+    expect(wrapper.find('button[aria-label="卡片工具"]').exists()).toBe(false)
 
     await wrapper.find('textarea').setValue('{{getvar::金币}}')
     await wrapper.findAll('button').find((button) => button.attributes('aria-label') === '发送')!.trigger('click')
@@ -479,7 +488,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
 
     // 停用:顶栏无「变量」入口。
-    expect(wrapper.findAll('button').some((button) => button.text() === '变量')).toBe(false)
+    expect(await hasCardTool(wrapper, '变量')).toBe(false)
 
     // 请求侧:getvar 不展开(字面量直达),系统提示词无 [Variables] 分区。
     nextReply = '好的<setvars>{ "好感度": "+5" }</setvars>'
@@ -639,7 +648,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     // C3 (2026-10 cleanup): the VIEW-side live projection must reset too — the
     // old code wrote state only, so the pre-reset event kept showing in the
     // sheet's 变更记录 after 清空重开.
-    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await openCardTool(wrapper, '变量')
     await flushPromises()
     expect(wrapper.text()).toContain('0 条记录')
     expect(wrapper.text()).not.toContain('1 条记录')
@@ -784,7 +793,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await flushPromises()
 
     // 顶栏入口出现(有书才有)。
-    expect(wrapper.findAll('button').some((button) => button.text() === '世界书')).toBe(true)
+    expect(await hasCardTool(wrapper, '世界书')).toBe(true)
 
     nextReply = '（回复）'
     await wrapper.find('textarea').setValue('出发去中洲')
@@ -807,6 +816,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await worldbookStore.setDisabled(stored.id, new Set([0]))
     await wrapper.find('button[aria-label="返回对话列表"]').trigger('click')
     await flushPromises()
+    completeSessionLeave(wrapper)
     await nextTick()
     await flushPromises()
     await wrapper.find('button[aria-label="进入「星澜」的对话"]').trigger('click')
@@ -847,7 +857,7 @@ describe('M3-i · 角色 tab 进卡闭环', () => {
     await nextTick()
 
     // 顶栏入口出现。
-    expect(wrapper.findAll('button').some((button) => button.text() === '正则')).toBe(true)
+    expect(await hasCardTool(wrapper, '正则')).toBe(true)
 
     // 显示面:开场白是完整 HTML 文档 → 走 M3-n iframe 文档路径,美化不套;
     // 但省略开关只影响提示词,显示保持文档渲染。
@@ -1015,7 +1025,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     const switched = (await cardSessionStore.get(stored.id))!.messages.at(-1)!
     expect(switched.content).toBe('第一次回复<setvars>{ "好感度": "+1" }</setvars>')
     expect(switched.activeIndex).toBe(0)
-    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await openCardTool(wrapper, '变量')
     await flushPromises()
     expect(wrapper.find('input[placeholder="11"]').exists()).toBe(true)
     expect(wrapper.find('input[placeholder="16"]').exists()).toBe(false)
@@ -1026,7 +1036,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     await wrapper.find('button[aria-label="切换到下一候选(1/2)"]').trigger('click')
     await flushPromises()
     expect((await cardSessionStore.get(stored.id))!.messages.at(-1)!.content).toBe('第二次回复<setvars>{ "好感度": "+5" }</setvars>')
-    await wrapper.findAll('button').find((button) => button.text() === '变量')!.trigger('click')
+    await openCardTool(wrapper, '变量')
     await flushPromises()
     expect(wrapper.find('input[placeholder="16"]').exists()).toBe(true)
     wrapper.unmount()
@@ -1164,7 +1174,7 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     wrapper.unmount()
   })
 
-  it('顶栏世界书/正则入口恒显示:卡不带数据也露出入口,面板给空态', async () => {
+  it('keeps worldbook and regex empty states reachable through the card tools menu', async () => {
     const { wrapper, characterStore } = await mountApp()
     await characterStore.import(CARD)
     await flushPromises()
@@ -1176,18 +1186,50 @@ describe('M4-c · 楼层操作(浮钮行:swipe/重生成/编辑/复制/删除/�
     await nextTick()
 
     // CARD 是 v1 裸卡(无 book / 无 regex_scripts):入口仍恒显示(1.0.x 拍板)。
-    expect(wrapper.findAll('button').some((button) => button.text() === '世界书')).toBe(true)
-    expect(wrapper.findAll('button').some((button) => button.text() === '正则')).toBe(true)
+    expect(await hasCardTool(wrapper, '世界书')).toBe(true)
+    expect(await hasCardTool(wrapper, '正则')).toBe(true)
 
-    await wrapper.findAll('button').find((button) => button.text() === '世界书')!.trigger('click')
+    await openCardTool(wrapper, '世界书')
     await nextTick()
     expect(wrapper.text()).toContain('这张卡没有自带世界书')
     await wrapper.findAll('button').find((button) => button.text() === '完成')!.trigger('click')
     await nextTick()
 
-    await wrapper.findAll('button').find((button) => button.text() === '正则')!.trigger('click')
+    await openCardTool(wrapper, '正则')
     await nextTick()
     expect(wrapper.text()).toContain('这张卡没有自带正则')
+    wrapper.unmount()
+  })
+
+  it('opens the existing narrative panel from the collapsed card tools menu', async () => {
+    const { wrapper, characterStore } = await mountApp()
+    await characterStore.import(CARD)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+    expect(wrapper.findAll('header button').some((button) => button.text() === '世界书')).toBe(false)
+    expect(wrapper.find('button[aria-label="会话设置"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="清空重开"]').exists()).toBe(true)
+    await openCardTool(wrapper, '叙事预设')
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+    expect(wrapper.findAll('h2').map((heading) => heading.text())).toContain('叙事')
+    wrapper.unmount()
+  })
+
+  it('hides the card tools trigger when all card capabilities are inactive', async () => {
+    const runtime = createPluginRuntime(makeRuntimeServices())
+    const { wrapper, characterStore } = await mountApp({ runtime })
+    await characterStore.import(CARD)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('button[aria-label="进入「星澜」的对话"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('button[aria-label="卡片工具"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

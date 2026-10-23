@@ -6,7 +6,9 @@
  * (2026-10 cleanup) — pure move; newFloorId names the floor-id literal once
  * (C6, the two in-view occurrences).
  */
-import { type Ref } from 'vue'
+import { getCurrentScope, onScopeDispose, type Ref } from 'vue'
+import { createStreamPublication } from './stream-publication'
+import type { SessionLocalWorkOptions } from './session-local-work'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore, VariableSnapshot } from '@/kernel/variables/variable-store'
 import {
@@ -26,7 +28,7 @@ import type { PendingChatImage } from '@/kernel/llm/vision'
 import { errorHub } from '@/kernel/diagnostics/error-hub'
 import type { UsageRecorder } from '@/kernel/app/chat-keys'
 
-export interface ChatTurnOptions {
+export interface ChatTurnOptions extends SessionLocalWorkOptions {
   resolveProvider: () => LlmProvider | undefined
   streaming: Ref<boolean>
   sendError: Ref<string>
@@ -50,12 +52,14 @@ export interface ChatTurnOptions {
     parsed: ParsedTemplateUpdate[],
     messageId: string,
     candidateIndex?: number,
+    signal?: AbortSignal | null,
   ) => Promise<number>
   runTemplateAnalysisPipeline: (floor: ChatboxMessage) => Promise<void>
   buildRequestMessages: (floors?: ChatboxMessage[]) => LlmChatMessage[]
   syncCotPresetsIfActive: () => Promise<void>
   persistSession: () => Promise<void>
   scrollToBottom: () => Promise<void>
+  followOutput?: () => Promise<void>
   maybeRunMemoryPipeline: () => Promise<void>
   domain: () => 'chatbox' | 'card'
 }
@@ -73,13 +77,28 @@ export function useChatTurn(options: ChatTurnOptions) {
   const newFloorId = (): string => `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
   let abortController: AbortController | null = null
+  let publication: ReturnType<typeof createStreamPublication> | null = null
+  let disposed = false
+  let retired = false
+  let settleCancelledTurn: (() => void) | null = null
+  let releaseVisibility: (() => void) | null = null
   // The persisted user floor text behind the D3 error-bar retry.
   let lastUserText = ''
 
   const stopStreaming = (): void => {
+    publication?.finish()
     abortController?.abort()
     abortController = null
+    settleCancelledTurn?.()
+    releaseVisibility?.()
+    releaseVisibility = null
   }
+  // Local finalization does not wait for a provider that ignores cancellation.
+  const retire = (): void => { retired = true; stopStreaming() }
+  if (getCurrentScope()) onScopeDispose(() => {
+    retire()
+    disposed = true
+  })
 
   /** The streaming half of a turn, shared by fresh sends and M4-c floor
    *  regeneration: streams into an existing floor object, attributes usage and
@@ -88,16 +107,42 @@ export function useChatTurn(options: ChatTurnOptions) {
   const streamAssistantInto = async (
     floor: ChatboxMessage,
     requestMessages: LlmChatMessage[],
-    turnOptions: { candidateIndex?: number; isNewFloor?: boolean } = {},
+    turnOptions: { candidateIndex?: number; isNewFloor?: boolean; onCancelled?: () => void; onCompleted?: () => void } = {},
   ): Promise<boolean> => {
     const provider = resolveProvider()
-    if (!provider) return false
+    if (!provider || disposed || retired) return false
     const candidateIndex = turnOptions.candidateIndex
     streaming.value = true
     // Local alias: stopStreaming() may null the module ref while the stream's
     // rejection is still in flight — the catch must read the live signal.
     const controller = new AbortController()
+    const sessionSignal = options.sessionSignal?.()
+    const current = () => !controller.signal.aborted && !sessionSignal?.aborted && !disposed && !retired
     abortController = controller
+    // Resolve the array entry once: callers may retain the raw object that
+    // was pushed into a reactive array. Publishing through that raw reference
+    // bypassed Vue's setters and left new replies invisible until completion.
+    const target = messages().find((message) => message.id === floor.id) ?? floor
+    const output = createStreamPublication((text) => {
+      target.content = text.content
+      target.reasoning = text.reasoning
+      void (options.followOutput ?? scrollToBottom)()
+    })
+    publication = output
+    let completed = false
+    const settleCancelled = (): void => {
+      if (completed) return
+      if (turnOptions.isNewFloor && target.content === '') {
+        const index = messages().findIndex((message) => message.id === target.id)
+        if (index >= 0) messages().splice(index, 1)
+      }
+      turnOptions.onCancelled?.()
+    }
+    settleCancelledTurn = settleCancelled
+    const onVisibilityChange = (): void => { if (document.hidden) output.flush() }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    const release = () => document.removeEventListener('visibilitychange', onVisibilityChange)
+    releaseVisibility = release
     let succeeded = false
     try {
       const result = await provider.stream(requestMessages, {
@@ -105,14 +150,13 @@ export function useChatTurn(options: ChatTurnOptions) {
         // M4-g3 session-level model override (both domains; empty = global).
         model: (isCardDomain() ? cardSession()?.model : conversation()?.model) || undefined,
         onDelta: (delta) => {
-          floor.content += delta
-          void scrollToBottom()
+          if (!controller.signal.aborted) output.append('content', delta)
         },
         // M4-f: native reasoning streams into its own floor field — the wire
         // capture runs regardless of the plugin toggle (data is not recoverable
         // later); the display card is what the toggle gates.
         onReasoningDelta: (delta) => {
-          floor.reasoning = (floor.reasoning ?? '') + delta
+          if (!controller.signal.aborted) output.append('reasoning', delta)
         },
       })
       // A stream that settles cleanly with zero content (thinking-only local
@@ -127,9 +171,7 @@ export function useChatTurn(options: ChatTurnOptions) {
           'MP-CHAT-003',
         )
       }
-      floor.content = result.content
-      floor.reasoning = result.reasoning ?? ''
-      succeeded = true
+      output.finish({ content: result.content, reasoning: result.reasoning ?? '' })
       if (result.usage) {
         // Attribution: the record must say which session it came from — the
         // card domain types itself 'card' (labeled 角色卡 in the ledger) and
@@ -142,21 +184,31 @@ export function useChatTurn(options: ChatTurnOptions) {
             : { detail: conversation()?.title ?? '' }),
         })
       }
+      // Reported usage remains real even for a cancelled request. A stop is
+      // not a completed candidate, however, and must not apply AI-side state.
+      if (!current()) return false
+      succeeded = true
+      completed = true
+      turnOptions.onCompleted?.()
       if (isCardDomain() && card() && variablesActive() && floor.content) {
         // M3-q/M3-r: the reply's variable blocks become ledger events
         // (source=ai, floor-attributed) — flat setvars/StatData entries and
-        // template-bound ui_template_updates trees alike. Storage failures
-        // must never fail the finished floor; malformed blocks were ignored
-        // by the parsers.
+        // template-bound ui_template_updates trees alike. Keep the finished
+        // floor even if a local commit fails, but surface the failure and
+        // block further requests until authoritative storage is reread.
         let matchedTemplateCount = 0
-        try {
+        // Once provider output is accepted, complete its local ledger commit
+        // as a unit. Departure joins this work; only network analysis may be
+        // discarded. Cancelling half a commit can orphan candidate events.
+        const commit = async (): Promise<void> => {
           const { updates } = parseVariableUpdates(floor.content)
           if (updates.length > 0) {
-            const snapshot = await variableStore?.apply(card()!.id, updates, {
+            const write = variableStore?.apply(card()!.id, updates, {
               source: 'ai',
               messageId: floor.id,
               ...(candidateIndex !== undefined ? { candidateIndex } : {}),
             })
+            const snapshot = write ? await (options.trackLocalWrite?.(write) ?? write) : undefined
             if (snapshot) {
               absorbVariableSnapshot(snapshot)
             }
@@ -170,14 +222,14 @@ export function useChatTurn(options: ChatTurnOptions) {
                 return []
               }
             })
-            matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, floor.id, candidateIndex)
+            matchedTemplateCount = await applyMatchedTemplateUpdates(parsed, floor.id, candidateIndex, null)
           }
-        } catch (error) {
-          console.error('[variables] failed to record AI-side updates:', error)
         }
+        const committing = commit()
+        await (options.trackLocalWrite?.(committing) ?? committing)
         // M3-t: sub-model mode analyzes every reply; main-model mode falls
         // back only when no block was found or none routed to a template.
-        if (activeTemplates().length > 0) {
+        if (current() && activeTemplates().length > 0) {
           const analysisSettings = readTemplateAnalysisSettings(settingsState)
           if (!analysisSettings.mainModelAnalysis) {
             await runTemplateAnalysisPipeline(floor)
@@ -201,6 +253,11 @@ export function useChatTurn(options: ChatTurnOptions) {
         })
       }
     } finally {
+      output.finish()
+      release()
+      if (releaseVisibility === release) releaseVisibility = null
+      if (publication === output) publication = null
+      if (settleCancelledTurn === settleCancelled) settleCancelledTurn = null
       streaming.value = false
       if (abortController === controller) abortController = null
       if (turnOptions.isNewFloor && floor.content === '') {
@@ -209,16 +266,19 @@ export function useChatTurn(options: ChatTurnOptions) {
         const index = messages().findIndex((message) => message.id === floor.id)
         if (index >= 0) messages().splice(index, 1)
       }
-      await persistSession()
-      await scrollToBottom()
+      if (!retired) {
+        try { await persistSession() } catch { sendError.value = '会话保存失败，请返回后重试' }
+      }
+      if (!disposed && !retired) await (options.followOutput ?? scrollToBottom)()
     }
-    return succeeded
+    return succeeded && current()
   }
 
-  const runAssistantTurn = async (): Promise<void> => {
+  const runAssistantTurn = async (signal = options.sessionSignal?.()): Promise<void> => {
     const provider = resolveProvider()
-    if (!provider) return
+    if (!provider || signal?.aborted || retired || disposed || !sessionLoaded()) return
     await syncCotPresetsIfActive()
+    if (signal?.aborted || retired || disposed || !sessionLoaded()) return
     const assistantFloor: ChatboxMessage = {
       id: newFloorId(),
       role: 'assistant',
@@ -226,14 +286,15 @@ export function useChatTurn(options: ChatTurnOptions) {
       ts: Date.now(),
     }
     messages().push(assistantFloor)
-    await streamAssistantInto(assistantFloor, buildRequestMessages(), { isNewFloor: true })
+    const landed = await streamAssistantInto(assistantFloor, buildRequestMessages(), { isNewFloor: true })
     // M4-e: the patrol never blocks the next send - fire, forget, busy-gated.
-    void maybeRunMemoryPipeline()
+    if (landed && !retired && !disposed) void maybeRunMemoryPipeline()
   }
 
   const send = async (overrideText?: string): Promise<void> => {
+    const signal = options.sessionSignal?.()
     const provider = resolveProvider()
-    if (!sessionLoaded() || !provider) return
+    if (signal?.aborted || !sessionLoaded() || !provider) return
     // Panel-button triggers (M3-t bridge) pass the command directly; the normal
     // path sends the draft. Both share the streaming guard + the M4-d image
     // readiness gate (RP same: send waits until every attachment is described).
@@ -256,22 +317,26 @@ export function useChatTurn(options: ChatTurnOptions) {
     if (!isCardDomain() && conversation() && conversation()!.title === '新的对话') {
       conversation()!.title = text.slice(0, 24)
     }
-    await persistSession()
+    try { await persistSession() } catch {
+      sendError.value = '会话保存失败，请返回后重试'
+      return
+    }
+    if (signal?.aborted || retired || disposed || !sessionLoaded()) return
     if (typeof overrideText !== 'string') draft.value = ''
     sendError.value = ''
     lastUserText = text
     await scrollToBottom()
-    await runAssistantTurn()
+    await runAssistantTurn(signal)
     // D3 single-shot: consumed by exactly one send (regeneration excluded).
-    oneShotInstruction.value = ''
+    if (!signal?.aborted && !retired && !disposed) oneShotInstruction.value = ''
   }
 
   /** Retry re-streams a reply for the persisted user floor (D3 error bar). */
   const retryLastSend = async (): Promise<void> => {
-    if (streaming.value || !lastUserText) return
+    if (!sessionLoaded() || streaming.value || !lastUserText) return
     sendError.value = ''
     await runAssistantTurn()
   }
 
-  return { stopStreaming, streamAssistantInto, retryLastSend, send }
+  return { stopStreaming, retire, streamAssistantInto, retryLastSend, send }
 }

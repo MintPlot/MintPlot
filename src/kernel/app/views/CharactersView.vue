@@ -1,16 +1,14 @@
 <script setup lang="ts">
-// 角色 tab(M3-f 导卡 + M3-i 进卡开玩 + M3-m 封面网格):PNG(chara/ccv3 tEXt
-// 文本块)或 JSON 文件 → 解析归一 → character store 落库;PNG 卡文件本身就是
-// 封面画,随导入存成 data URL(`character:cover:<id>`,JSON 卡无图走占位猫)。
-// 列表 = 双列封面网格,点卡直接进入该卡的对话(D2,RP 式:无详情页无会话
-// 列表,进卡即接续);删除连带清掉该卡会话与封面。
-import { inject, onMounted, ref } from 'vue'
+// Character grid: import PNG/JSON cards, retain PNG covers and open the
+// card's conversation directly. Deletion cascades to its session and cover.
+import { inject, onActivated, onMounted, ref } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
 import { CARD_SESSION_STORE_KEY, CHARACTER_STORE_KEY } from '@/kernel/app/chat-keys'
 import { openConversation } from '@/kernel/app/chat-router'
 import { CharacterCardError, isPngBytes, parseCharacterCardFile } from '@/kernel/characters/character-card'
 import type { CharacterCardSummary } from '@/kernel/characters/character-store'
 import { uiService } from '@/kernel/ui/toasts'
+import { waitForSessionWriteHandoff } from '@/kernel/app/chat/session-write-handoff'
 
 const store = inject(CHARACTER_STORE_KEY, null)
 const cardSessions = inject(CARD_SESSION_STORE_KEY, null)
@@ -25,7 +23,8 @@ const loadCovers = async (list: CharacterCardSummary[]): Promise<void> => {
   await Promise.all(list.map(async (card) => {
     if (covers.value[card.id] !== undefined) return
     const url = await store.getCover(card.id)
-    if (url) covers.value[card.id] = url
+    // Remember missing covers too; revisiting the tab should not reread them.
+    covers.value[card.id] = url ?? ''
   }))
 }
 
@@ -39,6 +38,17 @@ const refresh = async (): Promise<void> => {
 onMounted(() => {
   if (!store) return
   loading.value = true
+  void refresh()
+})
+
+// KeepAlive invokes activated on the initial mount as well. Mounted already
+// starts that read; later activations still refresh the card list.
+let activatedOnce = false
+onActivated(() => {
+  if (!activatedOnce) {
+    activatedOnce = true
+    return
+  }
   void refresh()
 })
 
@@ -75,6 +85,11 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
     confirmLabel: '删除',
   })
   if (!confirmed) return
+  if (cardSessions) {
+    try { await waitForSessionWriteHandoff(cardSessions, card.id) } catch {
+      uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+    }
+  }
   await store.remove(card.id)
   // Cascade: the card's session dies with it (no orphan card sessions).
   await cardSessions?.remove(card.id)
@@ -123,7 +138,11 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
       v-else
       class="absolute inset-0 overflow-y-auto pt-[98px] pb-[calc(104px+env(safe-area-inset-bottom))]"
     >
-      <div class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4">
+      <TransitionGroup
+        tag="div"
+        name="mp-mo-cell"
+        class="mx-auto grid max-w-xl grid-cols-2 gap-3 px-4 py-4"
+      >
         <div
           v-for="card in cards"
           :key="card.id"
@@ -161,7 +180,7 @@ const removeCard = async (card: CharacterCardSummary): Promise<void> => {
             ✕
           </button>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
   </section>
 </template>

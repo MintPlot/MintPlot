@@ -5,12 +5,13 @@
 // 确认框,置顶就地切换 + toast,均先弹回);手势期间禁用 transform 过渡。
 // 删除/置顶钮纯视觉(不可点)。轻点开行的语义不变(拖动过的手势抑制其后的
 // click,键盘 Enter 走 click 原路保留)。
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, inject, onActivated, onMounted, ref, watch } from 'vue'
 import MintCat from '@/kernel/design/assets/MintCat.vue'
 import { CHATBOX_STORE_KEY } from '@/kernel/app/chat-keys'
 import { openConversation, useChatRoute } from '@/kernel/app/chat-router'
 import { uiService } from '@/kernel/ui/toasts'
 import type { ChatboxConversationSummary } from '@/kernel/sessions/chatbox-store'
+import { waitForSessionWriteHandoff } from '@/kernel/app/chat/session-write-handoff'
 
 const store = inject(CHATBOX_STORE_KEY, null)
 const route = useChatRoute()
@@ -29,6 +30,13 @@ const refresh = async (): Promise<void> => {
 onMounted(() => {
   if (!store) return
   loading.value = true
+  void refresh()
+})
+
+// KeepAlive revisit (App.vue caches tab pages): refresh like a remount did,
+// without the loading flash — the cached list stays visible until the read
+// lands. The route watch below still covers returning from the chat page.
+onActivated(() => {
   void refresh()
 })
 
@@ -55,7 +63,7 @@ const REVEAL_WIDTH = 72
 const SWIPE_FIRE_THRESHOLD = 36
 const DRAG_START_THRESHOLD = 6
 
-const swipeDrag = ref<{ id: string; startX: number; dx: number; moved: boolean } | null>(null)
+const swipeDrag = ref<{ id: string; startX: number; startY: number; dx: number; moved: boolean } | null>(null)
 // pointerup always precedes the click synthesised from the same gesture; the
 // click handler must swallow exactly that one (keyboard Enter has no pointer
 // up and must still open via click).
@@ -64,7 +72,9 @@ let swallowNextClick = false
 const swipeOffsetOf = (id: string): number => {
   const drag = swipeDrag.value
   if (!drag || drag.id !== id) return 0
-  return Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx))
+  // Direction lock part 2: before horizontal intent locks in, the row does
+  // not track the slop at all — a vertical scroll never nudges it sideways.
+  return drag.moved ? Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx)) : 0
 }
 
 /** Reveal pair visibility: ONLY for gestures that qualified as a drag
@@ -72,13 +82,20 @@ const swipeOffsetOf = (id: string): number => {
  *  both colored actions through the translucent row on every plain tap —
  *  the rows have no background fill, so the blocks shone through for the
  *  whole press. */
-const isRevealing = (id: string): boolean => {
-  const drag = swipeDrag.value
-  return drag !== null && drag.id === id && drag.moved
+/** Reveal-zone translate (2026-10-17 round-3 redesign): the zones ride the
+ * row's edges — glued to the trailing edge, they slide OUT together with the
+ * row (no fade), and the li's overflow-hidden clips them away at rest, so
+ * nothing can bleed through the translucent rows and scrolls (offset pinned
+ * to 0 by the direction lock) can never flash them. Press-and-hold reveals
+ * nothing (reserved for future gestures). */
+const zoneTranslate = (id: string, side: 'pin' | 'delete'): string => {
+  const offset = swipeOffsetOf(id)
+  const parked = side === 'delete' ? REVEAL_WIDTH : -REVEAL_WIDTH
+  return `translateX(${offset + parked}px)`
 }
 
 const onRowPointerDown = (id: string, event: PointerEvent): void => {
-  swipeDrag.value = { id, startX: event.clientX, dx: 0, moved: false }
+  swipeDrag.value = { id, startX: event.clientX, startY: event.clientY, dx: 0, moved: false }
   // Track the gesture outside the row's bounds; jsdom has no capture API.
   ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
 }
@@ -87,14 +104,19 @@ const onRowPointerMove = (id: string, event: PointerEvent): void => {
   const drag = swipeDrag.value
   if (!drag || drag.id !== id) return
   drag.dx = event.clientX - drag.startX
-  if (Math.abs(drag.dx) > DRAG_START_THRESHOLD) drag.moved = true
+  // Direction lock (2026-10-17 device report): a vertical scroll's opening
+  // slop can drift past the horizontal threshold and flash the reveal pair
+  // through the translucent row — only horizontal-dominant motion counts.
+  // jsdom pointer events carry no clientY; treat that as zero drift.
+  const dy = Number.isFinite(event.clientY) ? Math.abs(event.clientY - drag.startY) : 0
+  drag.moved = Math.abs(drag.dx) > DRAG_START_THRESHOLD && Math.abs(drag.dx) > dy
 }
 
 const onRowPointerUp = (id: string): void => {
   const drag = swipeDrag.value
+  if (!drag || drag.id !== id) return
   swipeDrag.value = null
   swallowNextClick = true
-  if (!drag || drag.id !== id) return
   if (!drag.moved) {
     // Tap opens the conversation.
     if (routeView.value === 'list') openConversation(id)
@@ -103,6 +125,10 @@ const onRowPointerUp = (id: string): void => {
   const finalOffset = Math.max(-REVEAL_WIDTH, Math.min(REVEAL_WIDTH, drag.dx))
   if (finalOffset > SWIPE_FIRE_THRESHOLD) void togglePin(id)
   else if (finalOffset < -SWIPE_FIRE_THRESHOLD) void deleteConversation(id)
+}
+
+const onRowPointerCancel = (id: string): void => {
+  if (swipeDrag.value?.id === id) swipeDrag.value = null
 }
 
 const onRowClick = (id: string): void => {
@@ -115,6 +141,9 @@ const onRowClick = (id: string): void => {
 
 const togglePin = async (id: string): Promise<void> => {
   if (!store) return
+  try { await waitForSessionWriteHandoff(store, id) } catch {
+    uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+  }
   const conversation = conversations.value.find((entry) => entry.id === id)
   const pinned = !(conversation?.pinned ?? false)
   await store.setPinned(id, pinned)
@@ -132,6 +161,9 @@ const deleteConversation = async (id: string): Promise<void> => {
     cancelLabel: '取消',
   })
   if (!confirmed) return
+  try { await waitForSessionWriteHandoff(store, id) } catch {
+    uiService.toast('shell', '会话保存失败，请稍后重试', { tone: 'error' }); return
+  }
   await store.remove(id)
   await refresh()
 }
@@ -176,7 +208,11 @@ const timeLabel = (updatedAt: number): string => {
       v-else
       class="absolute inset-0 overflow-y-auto pt-[98px] pb-[calc(104px+env(safe-area-inset-bottom))]"
     >
-      <ul class="mx-auto max-w-xl">
+      <TransitionGroup
+        tag="ul"
+        name="mp-mo-row"
+        class="relative mx-auto max-w-xl"
+      >
         <li
           v-for="conversation in conversations"
           :key="conversation.id"
@@ -184,13 +220,13 @@ const timeLabel = (updatedAt: number): string => {
         >
           <!-- Reveal actions: purely visual during the drag — release past the
                threshold fires the action (confirm dialog for delete, instant
-               toggle for pin), so these are never tappable. Rows are
-               translucent over the aurora, so the reveal pair must exist only
-               while its row is actually being swiped (rest state would bleed
-               them through the row). -->
+               toggle for pin), so these are never tappable. Always mounted,
+               glued to the row's edges: they slide out WITH the row (pure
+               transform; the li clips them away at rest). -->
           <div
-            v-show="isRevealing(conversation.id)"
-            class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary"
+            class="absolute inset-y-0 left-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-primary text-on-primary transition-transform"
+            :class="swipeDrag?.id === conversation.id ? 'duration-0' : 'duration-150'"
+            :style="{ transform: zoneTranslate(conversation.id, 'pin') }"
             aria-hidden="true"
           >
             <svg
@@ -209,8 +245,9 @@ const timeLabel = (updatedAt: number): string => {
             <span class="text-[11px]">{{ conversation.pinned ? '取消置顶' : '置顶' }}</span>
           </div>
           <div
-            v-show="isRevealing(conversation.id)"
-            class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary"
+            class="absolute inset-y-0 right-0 flex w-[72px] flex-col items-center justify-center gap-1 bg-danger text-on-primary transition-transform"
+            :class="swipeDrag?.id === conversation.id ? 'duration-0' : 'duration-150'"
+            :style="{ transform: zoneTranslate(conversation.id, 'delete') }"
             aria-hidden="true"
           >
             <svg
@@ -239,7 +276,7 @@ const timeLabel = (updatedAt: number): string => {
             @pointerdown="onRowPointerDown(conversation.id, $event)"
             @pointermove="onRowPointerMove(conversation.id, $event)"
             @pointerup="onRowPointerUp(conversation.id)"
-            @pointercancel="swipeDrag = null"
+            @pointercancel="onRowPointerCancel(conversation.id)"
             @click="onRowClick(conversation.id)"
           >
             <span class="min-w-0 flex-1">
@@ -265,7 +302,7 @@ const timeLabel = (updatedAt: number): string => {
             <time class="flex-shrink-0 pt-0.5 text-xs text-ink-3">{{ timeLabel(conversation.updatedAt) }}</time>
           </button>
         </li>
-      </ul>
+      </TransitionGroup>
     </div>
   </section>
 </template>

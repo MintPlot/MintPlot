@@ -20,7 +20,6 @@
 import type { SessionKind } from '@contracts'
 import type { KvEngine } from '@/kernel/store/kv-store'
 import {
-  cloneJson,
   createMemorySecretChannel,
   extractSecrets,
   isSecretBearingKey,
@@ -92,13 +91,23 @@ export function createStorageRepository(engine: KvEngine, secretChannel: SecretC
         // error instead of a misleading backend message (ported).
         throw new Error(`[mp-storage] set("${key}") rejected: value is undefined`)
       }
-      let storedValue: unknown = cloneJson(value)
+      let storedValue: unknown = value
       if (isSecretBearingKey(key)) {
-        const extracted = extractSecrets(storedValue)
+        // Extraction already snapshots JSON before separating secrets.
+        let extracted: ReturnType<typeof extractSecrets>
+        try {
+          extracted = extractSecrets(value)
+        } catch {
+          // Do not reserialize secrets merely to validate them, or expose
+          // input fragments from JSON parsing errors in diagnostics.
+          throw new Error(`[mp-storage] set("${key}") rejected: value is not JSON serializable`)
+        }
         storedValue = extracted.publicValue
         await secretChannel.setSecret(`config:${key}`, JSON.stringify(extracted.secrets))
       }
-      await engine.set(key, JSON.stringify(storedValue))
+      const json = JSON.stringify(storedValue)
+      if (json === undefined) throw new Error(`[mp-storage] set("${key}") rejected: value is not JSON serializable`)
+      await engine.set(key, json)
     },
 
     async remove(key): Promise<void> {
@@ -120,6 +129,8 @@ export function createStorageRepository(engine: KvEngine, secretChannel: SecretC
     },
 
     async applyChatChanges<M>(scope: SessionScope, upserts: ChatRowUpsert<M>[], deletes: string[]): Promise<void> {
+      // Metadata-only saves must not hydrate and rewrite the entire chat.
+      if (upserts.length === 0 && deletes.length === 0) return
       const key = chatStorageKey(scope)
       const current = parseJsonGuarded(await engine.get(key), [], key) as M[]
       const byId = new Map(current.map((message, position) => [(message as { id: string }).id, { message, position }]))
@@ -132,7 +143,8 @@ export function createStorageRepository(engine: KvEngine, secretChannel: SecretC
     },
 
     async replaceChat<M>(scope: SessionScope, messages: M[]): Promise<void> {
-      await engine.set(chatStorageKey(scope), JSON.stringify(cloneJson(messages ?? [])))
+      // Serialization snapshots the value before yielding to the engine.
+      await engine.set(chatStorageKey(scope), JSON.stringify(messages ?? []))
     },
 
     async deleteChat(scope: SessionScope): Promise<void> {

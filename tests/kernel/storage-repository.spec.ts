@@ -89,6 +89,52 @@ describe('mp-storage · secret extraction (ported)', () => {
     )
   })
 
+  it('snapshots JSON before yielding and preserves JSON normalization', async () => {
+    const { repository, kv } = makeHarness()
+    const value = { nested: { n: 1 }, optional: undefined, number: Number.NaN, date: new Date('2026-01-01T00:00:00Z') }
+    const saving = repository.set('mp_other', value)
+    value.nested.n = 2
+    await saving
+    expect(JSON.parse(kv.get('mp_other')!)).toEqual({ nested: { n: 1 }, number: null, date: '2026-01-01T00:00:00.000Z' })
+    const messages = [{ id: 'm', content: 'snapshot' }]
+    const replacing = repository.replaceChat({ kind: 'card', id: 'snapshot' }, messages)
+    messages[0]!.content = 'later'
+    await replacing
+    expect(await repository.loadChat({ kind: 'card', id: 'snapshot' })).toEqual([{ id: 'm', content: 'snapshot' }])
+  })
+
+  it('rejects values without a JSON representation before calling the engine', async () => {
+    const { repository, kv } = makeHarness()
+    for (const value of [() => {}, Symbol('synthetic'), { toJSON: () => undefined }]) {
+      await expect(repository.set('mp_other', value)).rejects.toThrow()
+      expect(kv.has('mp_other')).toBe(false)
+    }
+  })
+
+  it('extracts a nested secret snapshot without mutating caller data', async () => {
+    const { repository } = makeHarness()
+    const value = { nested: { apiKey: 'synthetic-one', model: 'before' } }
+    const saving = repository.set('mp_settings', value)
+    value.nested.apiKey = 'synthetic-two'
+    value.nested.model = 'after'
+    await saving
+    expect(await repository.get('mp_settings')).toEqual({ nested: { apiKey: 'synthetic-one', model: 'before' } })
+    expect(value.nested.apiKey).toBe('synthetic-two')
+  })
+
+  it('rejects invalid secret-bearing values before either persistence channel changes', async () => {
+    const { repository, kv, secrets } = makeHarness()
+    for (const key of ['mp_settings', 'mp_active_tools']) {
+      await repository.set(key, { model: 'synthetic', apiKey: 'synthetic-value' })
+      const beforeKv = new Map(kv), beforeSecrets = new Map(secrets)
+      for (const value of [() => {}, Symbol('synthetic'), { toJSON: () => undefined }]) {
+        await expect(repository.set(key, value)).rejects.toThrow(`set("${key}") rejected: value is not JSON serializable`)
+        expect(kv).toEqual(beforeKv)
+        expect(secrets).toEqual(beforeSecrets)
+      }
+    }
+  })
+
   it('corrupt JSON degrades loudly instead of silently wiping (ported lesson)', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const corruptRead = createStorageRepository({

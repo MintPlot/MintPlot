@@ -14,6 +14,12 @@ const ApiStub = { template: '<p>api-body</p>' }
 const bodyOf = (wrapper: ReturnType<typeof mount>, id: string) =>
   (wrapper.element as HTMLElement).querySelector(`[id="${id}-body"]`) as HTMLElement
 
+/** Motion batch (2026-10-17): the body moved from v-show to the grid-rows
+ * collapse — jsdom runs no CSS, so open/closed is asserted through the
+ * collapse-open class instead of computed display. */
+const isOpen = (wrapper: ReturnType<typeof mount>, id: string): boolean =>
+  bodyOf(wrapper, id).classList.contains('mp-mo-collapse-open')
+
 describe('SettingsView · 折叠手风琴', () => {
   let disposers: Array<() => void>
 
@@ -41,8 +47,8 @@ describe('SettingsView · 折叠手风琴', () => {
     expect(headers).toHaveLength(2)
     expect(headers[0]!.attributes('aria-expanded')).toBe('true')
     expect(headers[1]!.attributes('aria-expanded')).toBe('false')
-    expect(bodyOf(wrapper, 'kernel:persona').style.display).not.toBe('none')
-    expect(bodyOf(wrapper, 'kernel:api').style.display).toBe('none')
+    expect(isOpen(wrapper, 'kernel:persona')).toBe(true)
+    expect(isOpen(wrapper, 'kernel:api')).toBe(false)
     disposeAll()
   })
 
@@ -63,7 +69,7 @@ describe('SettingsView · 折叠手风琴', () => {
     const wrapper = await mountView()
     expect(wrapper.findAll('button[aria-expanded]')[0]!.attributes('aria-expanded')).toBe('false')
     expect(wrapper.findAll('button[aria-expanded]')[1]!.attributes('aria-expanded')).toBe('true')
-    expect(bodyOf(wrapper, 'kernel:api').style.display).not.toBe('none')
+    expect(isOpen(wrapper, 'kernel:api')).toBe(true)
     disposeAll()
   })
 

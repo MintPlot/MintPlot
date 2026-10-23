@@ -17,6 +17,7 @@ import type { LlmChatMessage } from '@/kernel/llm/chat-completions'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 import { uiService } from '@/kernel/ui/toasts'
 import { copyText } from '@/kernel/app/ui/clipboard'
+import type { SessionLocalWorkOptions } from './session-local-work'
 
 /** C2: the active-or-degraded gate shape, once. NOTE (known asymmetry,
  * deliberately unchanged in the cleanup batch): the view's six mount-time
@@ -29,7 +30,7 @@ export function pluginActive(runtime: PluginRuntime | null, id: string): boolean
   return state === 'active' || state === 'degraded'
 }
 
-export interface FloorActionsOptions {
+export interface FloorActionsOptions extends SessionLocalWorkOptions {
   resolveProvider: () => LlmProvider | undefined
   runtime: PluginRuntime | null
   variableStore: VariableStore | null
@@ -46,12 +47,13 @@ export interface FloorActionsOptions {
   streamAssistantInto: (
     floor: ChatboxMessage,
     requestMessages: LlmChatMessage[],
-    options?: { candidateIndex?: number; isNewFloor?: boolean },
+    options?: { candidateIndex?: number; isNewFloor?: boolean; onCancelled?: () => void; onCompleted?: () => void },
   ) => Promise<boolean>
   syncCotPresetsIfActive: () => Promise<void>
   persistSession: () => Promise<void>
   stripCotText: (text: string) => string
   domain: () => 'chatbox' | 'card'
+  scrollToBottom?: () => Promise<void>
 }
 
 export function useFloorActions(options: FloorActionsOptions) {
@@ -82,13 +84,20 @@ export function useFloorActions(options: FloorActionsOptions) {
    *  per-candidate replay stays disjoint. Abort/failure restores the previous
    *  candidate untouched. */
   const regenerateLast = async (floor: ChatboxMessage): Promise<void> => {
+    const signal = options.sessionSignal?.()
+    const current = () => !signal?.aborted && sessionLoaded()
     if (isStreaming() || !isLastAssistantFloor(floor)) return
     const provider = resolveProvider()
     if (!provider || !sessionLoaded()) return
+    await options.scrollToBottom?.()
+    if (!current()) return
     await syncCotPresetsIfActive()
+    if (!current()) return
     if (isCardDomain() && card() && variablesActive()) {
-      await variableStore?.retagUntaggedEvents(card()!.id, floor.id, floor.activeIndex ?? 0)
+      const write = variableStore?.retagUntaggedEvents(card()!.id, floor.id, floor.activeIndex ?? 0)
+      if (write) await (options.trackLocalWrite?.(write) ?? write)
     }
+    if (!current()) return
     if (!floor.candidates) {
       floor.candidates = [floor.content]
       floor.activeIndex = 0
@@ -107,6 +116,7 @@ export function useFloorActions(options: FloorActionsOptions) {
     // The request sees the ledger AS OF before this floor (variables partition,
     // worldbook scan, macros) — the floor itself is being rewritten.
     const snapshot = isCardDomain() && card() ? await variableStore?.get(card()!.id) : null
+    if (!current()) return
     if (snapshot) {
       const preFloorEvents = eventsBeforeFloor(snapshot.events, floor.id)
       absorbVariableSnapshot({ ...snapshot, events: preFloorEvents })
@@ -115,22 +125,33 @@ export function useFloorActions(options: FloorActionsOptions) {
     floor.candidates.push('')
     floor.candidateReasoning!.push('')
     floor.reasoning = ''
-    const ok = await streamAssistantInto(
-      floor,
-      buildRequestMessages(messages().slice(0, -1)),
-      { candidateIndex: newIndex },
-    )
-    if (ok) {
-      floor.candidates[newIndex] = floor.content
+    let restored = false
+    let committed = false
+    const commitCandidate = (): void => {
+      committed = true
+      floor.candidates![newIndex] = floor.content
       floor.candidateReasoning![newIndex] = floor.reasoning ?? ''
       floor.activeIndex = newIndex
-    } else {
-      // Aborted or failed: drop the placeholder candidate, restore the previous.
-      floor.candidates.pop()
-      floor.candidateReasoning!.pop()
+    }
+    const restoreCandidate = (): void => {
+      if (restored || committed) return
+      restored = true
+      floor.candidates!.splice(newIndex)
+      floor.candidateReasoning!.splice(newIndex)
       floor.activeIndex = prevIndex
       floor.content = prevContent
       floor.reasoning = prevReasoning
+    }
+    const ok = await streamAssistantInto(
+      floor,
+      buildRequestMessages(messages().slice(0, -1)),
+      { candidateIndex: newIndex, onCancelled: restoreCandidate, onCompleted: commitCandidate },
+    )
+    if (ok || committed) {
+      commitCandidate()
+    } else {
+      // Aborted or failed: drop the placeholder candidate, restore the previous.
+      restoreCandidate()
       await refreshLedger()
     }
     await persistSession()
@@ -153,6 +174,7 @@ export function useFloorActions(options: FloorActionsOptions) {
   /** Delete (D4): a floor and EVERYTHING after it leaves the conversation;
    *  their ledger events roll back with them (confirm modal states the count). */
   const deleteFloorFrom = async (floor: ChatboxMessage): Promise<void> => {
+    const signal = options.sessionSignal?.()
     if (isStreaming()) return
     const index = messages().findIndex((message) => message.id === floor.id)
     if (index < 0) return
@@ -162,13 +184,17 @@ export function useFloorActions(options: FloorActionsOptions) {
       message: count > 1 ? `将删除此楼及其后 ${count} 楼,不可恢复。` : '将删除此楼,不可恢复。',
       confirmLabel: '删除',
     })
-    if (!confirmed) return
-    if (isCardDomain() && card() && variablesActive()) {
-      await variableStore?.rollbackFloors(card()!.id, messages().slice(index).map((message) => message.id))
+    if (!confirmed || signal?.aborted || !sessionLoaded()) return
+    const remove = async (): Promise<void> => {
+      if (isCardDomain() && card() && variablesActive()) {
+        await variableStore?.rollbackFloors(card()!.id, messages().slice(index).map((message) => message.id))
+      }
+      messages().splice(index)
+      await persistSession()
+      await refreshLedger()
     }
-    messages().splice(index)
-    await persistSession()
-    await refreshLedger()
+    const removing = remove()
+    await (options.trackLocalWrite?.(removing) ?? removing)
   }
 
   // In-place editor (plan §2): the bubble becomes a textarea; saving rewrites

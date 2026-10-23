@@ -1,35 +1,19 @@
-<script lang="ts">
-import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
-import type { FloorThinkingItem } from './FloorThinkingCard.vue'
-
-/** C1 per-floor view model: the parent computes every derived value ONCE per
- * render (the old template re-invoked each function 3-6 times per floor). */
-export interface FloorView {
-  message: ChatboxMessage
-  index: number
-  html: string
-  thinking: FloorThinkingItem[]
-  thinkingOpen: boolean
-  thinkingLive: boolean
-  panels: { top: Array<{ id: string; html: string }>; bottom: Array<{ id: string; html: string }> }
-  capsule: { flat: Array<{ name: string; value: string }>; templateLines: string[]; total: number }
-  capsuleOpen: boolean
-  isHtmlFrame: boolean
-  wide: boolean
-  isStreaming: boolean
-  isLastAssistant: boolean
-}
-</script>
-
 <script setup lang="ts">
-// Floor list: the message stream body — empty state, per-floor editor/bubble
-// (thinking card, panel frames, prose, variable capsule) and the action row.
-// Presentational: all behavior emits upward to the session view.
-import FloorThinkingCard from './FloorThinkingCard.vue'
-import FloorActionsRow from './FloorActionsRow.vue'
+// Window coordinates are separate from complete session history. Stable keys
+// preserve DOM identity, while a small retained range protects recent frames.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/vue-virtual'
+import { CHAT_SCROLL_END_THRESHOLD, limits } from '@/kernel/runtime/runtime-policy'
+import ChatFloor from './ChatFloor.vue'
+import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
+import type { FloorView } from './floor-view'
 
-defineProps<{
-  views: FloorView[]
+const props = defineProps<{
+  messages: ChatboxMessage[]
+  scrollElement: HTMLElement | null
+  followingOutput: boolean
+  project: (message: ChatboxMessage, index: number) => FloorView
   editingFloorId: string
   editDraft: string
   streaming: boolean
@@ -48,162 +32,179 @@ const emit = defineEmits<{
   'copy': [message: ChatboxMessage]
   'speak': [message: ChatboxMessage]
   'remove': [message: ChatboxMessage]
+  'viewport-resize': []
 }>()
+const host = ref<HTMLElement | null>(null)
+const retainedFrames = shallowRef<string[]>([])
+const selectionIds = shallowRef<string[]>([])
+const focusId = ref('')
+const scrollMargin = ref(0)
+const viewportHeight = ref(0)
+let viewportWidth = 0
+const indices = computed(() => new Map(props.messages.map((message, index) => [message.id, index])))
+const retainFrame = (id: string): void => {
+  if (retainedFrames.value.includes(id)) return
+  retainedFrames.value = [...retainedFrames.value.filter((key) => indices.value.has(key)), id].slice(-limits.activeIframes)
+}
+const virtualizer = useVirtualizer(computed(() => {
+  const pinned = [...retainedFrames.value, ...selectionIds.value, focusId.value, props.editingFloorId]
+    .map((id) => indices.value.get(id)).filter((index): index is number => index !== undefined)
+  return {
+    count: props.messages.length,
+    getScrollElement: () => props.scrollElement,
+    getItemKey: (index: number) => props.messages[index]!.id,
+    estimateSize: () => 160,
+    overscan: 5,
+    gap: 12,
+    scrollMargin: scrollMargin.value,
+    scrollPaddingStart: scrollMargin.value,
+    anchorTo: props.followingOutput ? 'end' as const : 'start' as const,
+    // Append and measured growth share one owner. Per-delta imperative
+    // scrollToEnd commands would compete with resize compensation.
+    followOnAppend: props.followingOutput,
+    scrollEndThreshold: CHAT_SCROLL_END_THRESHOLD,
+    rangeExtractor: (range: Parameters<typeof defaultRangeExtractor>[0]) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
+    useAnimationFrameWithResizeObserver: true,
+  }
+}))
+// The floating header occludes the top of the scroll viewport. Size changes
+// wholly behind it should preserve the first readable row, not an obscured
+// row at scrollTop. Changes below that anchor must remain in normal flow.
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+  item.end <= (instance.scrollOffset ?? 0) + scrollMargin.value
+const rows = computed(() => {
+  const measured = virtualizer.value.getVirtualItems()
+  if (measured.length && viewportHeight.value > 0) return measured
+  // Before a measurable viewport (including non-layout renderers), render a
+  // bounded tail. Never mount the complete history as an initial fallback.
+  const start = Math.max(0, props.messages.length - limits.chatInitial)
+  return props.messages.slice(start).map((message, offset) => ({
+    index: start + offset, key: message.id, start: (start + offset) * 172 + scrollMargin.value,
+  }))
+})
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+// A measured row can grow before Vue commits the new sizer. The browser
+// clamps the core's compensation against the old scroll range (including
+// composer padding). Complete the adapter's update after that DOM commit so
+// the core can retry its recorded adjustment. This issues no new end command.
+watch(totalSize, () => {
+  void nextTick(() => {
+    if (props.followingOutput && host.value?.isConnected) virtualizer.value._willUpdate()
+  })
+}, { flush: 'post' })
+let cleanupQueued = false
+const measure = (element: Element | ComponentPublicInstance | null): void => {
+  if (element === null && !cleanupQueued) {
+    // Vue clears refs before removing DOM. Coalesce cleanup after the patch,
+    // when TanStack can actually see disconnected nodes and unobserve them.
+    cleanupQueued = true
+    void nextTick(() => {
+      cleanupQueued = false
+      virtualizer.value.measureElement(null)
+    })
+  }
+  if (element instanceof HTMLElement && viewportHeight.value > 0) virtualizer.value.measureElement(element)
+}
+const updateViewport = (): void => {
+  const element = props.scrollElement
+  if (!element) return
+  const changed = viewportHeight.value > 0 && (viewportHeight.value !== element.clientHeight || viewportWidth !== element.clientWidth)
+  viewportHeight.value = element.clientHeight
+  viewportWidth = element.clientWidth
+  // The stream is padded below the floating header; coordinates are local
+  // to the content host, not the scroll container's padded origin.
+  scrollMargin.value = parseFloat(getComputedStyle(element).paddingTop) || 0
+  if (changed) emit('viewport-resize')
+}
+let resize: ResizeObserver | undefined
+// Deferred lists can mount after their scroll element already exists.
+watch(() => props.scrollElement, (element) => {
+  resize?.disconnect()
+  updateViewport()
+  if (element && typeof ResizeObserver !== 'undefined') {
+    resize = new ResizeObserver(updateViewport)
+    resize.observe(element)
+  }
+}, { flush: 'post', immediate: true })
+const messageIdAt = (node: Node | null): string => {
+  const element = node instanceof Element ? node : node?.parentElement
+  const row = element?.closest<HTMLElement>('[data-message-id]')
+  return row && host.value?.contains(row) ? row.dataset.messageId ?? '' : ''
+}
+const updateSelection = (): void => {
+  const selection = document.getSelection()
+  const ids = selection && !selection.isCollapsed
+    ? [...new Set([messageIdAt(selection.anchorNode), messageIdAt(selection.focusNode)].filter(Boolean))] : []
+  if (ids.join('|') !== selectionIds.value.join('|')) selectionIds.value = ids
+}
+const updateFocus = (): void => { focusId.value = messageIdAt(document.activeElement) }
+onMounted(() => {
+  updateViewport()
+  document.addEventListener('selectionchange', updateSelection)
+})
+onBeforeUnmount(() => {
+  resize?.disconnect()
+  document.removeEventListener('selectionchange', updateSelection)
+})
+const scrollToEnd = async (): Promise<boolean> => {
+  await nextTick()
+  if (!props.followingOutput) return true
+  updateViewport()
+  if (viewportHeight.value <= 0) return false
+  virtualizer.value.scrollToEnd()
+  return true
+}
+const cancelScroll = (): void => { virtualizer.value.cancelScroll() }
+defineExpose({ scrollToEnd, cancelScroll })
 </script>
 
 <template>
   <p
-    v-if="views.length === 0"
+    v-if="messages.length === 0"
     class="py-12 text-center text-xs text-chat-accent"
   >
     发送第一条消息开始对话
   </p>
+  <!-- Virtual mounts are not new messages and must not play landing/move
+       animations. Each measured row keeps a stable message identity. -->
   <div
-    v-for="view in views"
-    :key="view.message.id"
-    class="flex flex-col"
-    :class="view.message.role === 'user' ? 'items-end' : 'items-start'"
+    ref="host"
+    class="relative w-full"
+    :style="{ height: `${totalSize}px`, overflowAnchor: 'none' }"
+    @focusin="updateFocus"
+    @focusout="nextTick(updateFocus)"
   >
-    <!-- M4-c in-place editor (plan §2): saving rewrites the stored floor. -->
     <div
-      v-if="editingFloorId === view.message.id"
-      class="w-full max-w-[85%] rounded-bubble-ai border border-primary bg-card p-2"
+      v-for="row in rows"
+      :key="String(row.key)"
+      :ref="measure"
+      :data-index="row.index"
+      :data-message-id="messages[row.index]!.id"
+      class="absolute left-0 top-0 w-full"
+      :style="{ transform: `translateY(${row.start - scrollMargin}px)` }"
     >
-      <textarea
-        :value="editDraft"
-        rows="3"
-        class="w-full resize-y rounded-input border border-line bg-bg px-2 py-1.5 text-sm leading-relaxed text-ink outline-none focus:border-primary"
-        @input="emit('update:editDraft', ($event.target as HTMLTextAreaElement).value)"
-      />
-      <div class="mt-1 flex justify-end gap-2">
-        <button
-          type="button"
-          class="rounded-input border border-line px-2 py-1 text-xs text-ink-2"
-          @click="emit('cancel-edit')"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          class="rounded-input bg-primary px-2 py-1 text-xs font-bold text-on-primary"
-          @click="emit('save-edit')"
-        >
-          保存
-        </button>
-      </div>
-    </div>
-    <div
-      v-else
-      class="break-words rounded-bubble-ai px-3.5 py-2.5 text-sm leading-relaxed"
-      :class="[
-        view.message.role === 'user'
-          ? 'mp-accent-fill rounded-bubble-user text-chat-on-bubble-user'
-          : 'mp-bubble text-chat-on-bubble-ai',
-        view.wide ? 'w-full max-w-none' : 'max-w-[85%]',
-      ]"
-    >
-      <!-- eslint-disable vue/no-v-html -- content is macro-replaced, DOMPurify-whitelisted or sandboxed-iframe (M3-n pipeline); panels are replay-interpolated card templates in the same sandbox -->
-      <!-- M4-d attached-image thumbnails (user floors): tap to view. -->
-      <div
-        v-if="view.message.imageAttachments?.length"
-        class="mb-1 grid gap-1"
-        :class="view.message.imageAttachments.length === 1 ? 'w-40' : 'grid-cols-2'"
-      >
-        <img
-          v-for="(image, imageIndex) in view.message.imageAttachments"
-          :key="imageIndex"
-          :src="image.dataUrl"
-          :alt="`附件图片 ${imageIndex + 1}`"
-          class="w-full cursor-zoom-in rounded-input border border-line object-cover"
-          @click="emit('view-image', image.dataUrl)"
-        >
-      </div>
-      <FloorThinkingCard
-        v-if="view.thinking.length > 0"
-        :sections="view.thinking"
-        :open="view.thinkingOpen"
-        :live="view.thinkingLive"
-        @toggle="emit('toggle-cot', view.message)"
-      />
-      <div
-        v-for="frame in view.panels.top"
-        :key="`top-${frame.id}`"
-        class="mp-panel-frame"
-        v-html="frame.html"
-      />
-      <div
-        class="markdown-body"
-        v-html="view.html"
-      />
-      <button
-        v-if="view.capsule.total > 0"
-        type="button"
-        class="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-bg/50 px-2 py-0.5 text-[10px] text-ink-2"
-        @click="emit('toggle-capsule', view.message.id)"
-      >
-        ⚙ 变量 ×{{ view.capsule.total }}
-      </button>
-      <div
-        v-if="view.capsuleOpen"
-        class="mt-1 rounded-input border border-line bg-bg/50 px-2 py-1 text-[10px] text-ink-2"
-      >
-        <div
-          v-for="update in view.capsule.flat"
-          :key="update.name"
-        >
-          {{ update.name }} → {{ update.value }}
-        </div>
-        <div
-          v-for="line in view.capsule.templateLines"
-          :key="line"
-        >
-          面板·{{ line }}
-        </div>
-      </div>
-      <div
-        v-for="frame in view.panels.bottom"
-        :key="`bottom-${frame.id}`"
-        class="mp-panel-frame"
-        v-html="frame.html"
-      />
-      <!-- eslint-enable vue/no-v-html -->
-      <span
-        v-if="view.isStreaming"
-        class="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-ink-3 align-middle"
+      <ChatFloor
+        :message="messages[row.index]!"
+        :index="row.index"
+        :project="project"
+        :editing-floor-id="editingFloorId"
+        :edit-draft="editDraft"
+        :streaming="streaming"
+        :tts-active="ttsActive"
+        @update:edit-draft="emit('update:editDraft', $event)"
+        @cancel-edit="emit('cancel-edit')"
+        @save-edit="emit('save-edit')"
+        @view-image="emit('view-image', $event)"
+        @toggle-cot="emit('toggle-cot', $event)"
+        @toggle-capsule="emit('toggle-capsule', $event)"
+        @switch="(floor, direction) => emit('switch', floor, direction)"
+        @regenerate="emit('regenerate', $event)"
+        @edit="emit('edit', $event)"
+        @copy="emit('copy', $event)"
+        @speak="emit('speak', $event)"
+        @remove="emit('remove', $event)"
+        @frame-row="retainFrame"
       />
     </div>
-    <FloorActionsRow
-      v-if="!streaming && editingFloorId !== view.message.id"
-      :message="view.message"
-      :floor-index="view.index"
-      :is-last="view.isLastAssistant"
-      :tts-active="ttsActive"
-      @switch="(direction) => emit('switch', view.message, direction)"
-      @regenerate="emit('regenerate', view.message)"
-      @edit="emit('edit', view.message)"
-      @copy="emit('copy', view.message)"
-      @speak="emit('speak', view.message)"
-      @remove="emit('remove', view.message)"
-    />
   </div>
 </template>
-
-<style scoped>
-@import './markdown-body.css';
-
-/* M3-s panel frames: full-width slots above/below the floor text; the inner
- * iframe is created via v-html so it needs a deep rule (v-html content is
- * outside scoped-data attributes). */
-.mp-panel-frame {
-  width: 100%;
-  margin-top: 0.5rem;
-}
-.mp-panel-frame:first-child {
-  margin-top: 0;
-}
-.mp-panel-frame :deep(iframe.executable-html-frame) {
-  width: 100%;
-  display: block;
-  border: 0;
-}
-</style>

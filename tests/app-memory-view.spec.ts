@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { hasCardTool, openCardTool } from './helpers/card-tools'
 import App from '../src/App.vue'
 import {
   CARD_SESSION_STORE_KEY,
@@ -180,7 +181,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
     await openCardChat(wrapper)
 
     // Top-bar entry hidden while the plugin is registered-only.
-    expect(wrapper.findAll('button').some((button) => button.text() === '记忆')).toBe(false)
+    expect(await hasCardTool(wrapper, '记忆')).toBe(false)
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('现在如何?')
@@ -240,7 +241,7 @@ describe('M4-e · 记忆系统视图接线(仅卡域)', () => {
     await flushPromises()
     await openCardChat(wrapper)
 
-    await wrapper.findAll('button').find((button) => button.text() === '记忆')!.trigger('click')
+    await openCardTool(wrapper, '记忆')
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '立即总结')!.trigger('click')
     await flushPromises()

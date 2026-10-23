@@ -1,0 +1,216 @@
+/*
+ * Motion batch (documents/planning/motion-batch-plan.md): large-surface
+ * transitions as pure CSS — transform/opacity only, compositor-thread safe.
+ * Red lines, guarded by tests/kernel/motion-css.spec.ts:
+ * - animated properties are restricted to transform and opacity (nothing
+ *   from the backdrop-sampling family anywhere in this file — vivo
+ *   compositor leak history);
+ * - every duration rides the --mp-mo-t variable so the reduced-motion block
+ *   zeroes the whole sheet in one place (descendant rules inherit it);
+ * - every class lives under the mp-mo- namespace.
+ */
+
+/* Push stack — the full-screen chat page slides over the tab stage.
+ * Enter 300ms, leave 260ms.
+ *
+ * Session data and local cover decoding complete before the page root
+ * appears. The prepared background travels with the page from frame zero;
+ * no independent bloom or fixed mount-time delay changes its colors. */
+.mp-mo-push-enter-active {
+  --mp-mo-t: 300ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+}
+.mp-mo-push-leave-active {
+  --mp-mo-t: 260ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.3, 0, 0.2, 1);
+}
+.mp-mo-push-enter-from,
+.mp-mo-push-leave-to {
+  transform: translateX(100%);
+}
+
+/* Bottom sheets — root opacity serves the scrim fade (the scrim is the root
+ * background); the panel child rises 24px. Enter 240ms, leave 160ms.
+ * (The planning sketch split scrim 220ms / panel 240ms; the durations are
+ * unified per phase so one variable covers the reduced-motion gate.) */
+.mp-mo-sheet-enter-active {
+  --mp-mo-t: 240ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-enter-active .mp-mo-sheet-panel {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-enter-from,
+.mp-mo-sheet-leave-to {
+  opacity: 0;
+}
+.mp-mo-sheet-enter-from .mp-mo-sheet-panel,
+.mp-mo-sheet-leave-to .mp-mo-sheet-panel {
+  transform: translateY(24px);
+}
+.mp-mo-sheet-leave-active {
+  --mp-mo-t: 160ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-sheet-leave-active .mp-mo-sheet-panel {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Centered modals (confirm / fatal / image viewer) — root fades, the card
+ * child scales 0.96 → 1. Enter 200ms, leave 150ms. */
+.mp-mo-center-enter-active {
+  --mp-mo-t: 200ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-enter-active .mp-mo-center-card {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-enter-from,
+.mp-mo-center-leave-to {
+  opacity: 0;
+}
+.mp-mo-center-enter-from .mp-mo-center-card,
+.mp-mo-center-leave-to .mp-mo-center-card {
+  transform: scale(0.96);
+}
+.mp-mo-center-leave-active {
+  --mp-mo-t: 150ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-center-leave-active .mp-mo-center-card {
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Tab switch (quiet A, shared-axis): out 120ms pure fade; in 180ms fade plus
+ * a 16px slide whose side follows the registry order. Two names = direction. */
+.mp-mo-tab-next-enter-active,
+.mp-mo-tab-back-enter-active {
+  --mp-mo-t: 180ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-tab-next-leave-active,
+.mp-mo-tab-back-leave-active {
+  --mp-mo-t: 120ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-tab-next-enter-from,
+.mp-mo-tab-back-enter-from,
+.mp-mo-tab-next-leave-to,
+.mp-mo-tab-back-leave-to {
+  opacity: 0;
+}
+.mp-mo-tab-next-enter-from {
+  transform: translateX(16px);
+}
+.mp-mo-tab-back-enter-from {
+  transform: translateX(-16px);
+}
+
+/* Floor landing (batch 3, the single spring accent): enter only — streaming
+ * floors update in place without re-keying, so there are no leave rules.
+ * The spring read comes from the overshooting bezier, not extra keyframes. */
+.mp-mo-floor-enter-active {
+  --mp-mo-t: 320ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mp-mo-floor-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.92);
+}
+
+/* List removal (batch 3, quiet A). Chat rows: fade + slide left; the
+ * absolute trick during leave lets the rows below collapse through the FLIP
+ * move class (the ul carries the positioning context). Grid cells keep
+ * their slot while fading — the reflow snap after unmount is the accepted
+ * plan option (an absolute cell's width is not recoverable inside a 2-col
+ * grid in pure transform/opacity terms). */
+.mp-mo-row-move {
+  --mp-mo-t: 240ms;
+  transition: transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-enter-active,
+.mp-mo-cell-enter-active {
+  --mp-mo-t: 180ms;
+  transition: opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-enter-from,
+.mp-mo-cell-enter-from {
+  opacity: 0;
+}
+.mp-mo-row-leave-active {
+  --mp-mo-t: 280ms;
+  position: absolute;
+  width: 100%;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-cell-leave-active {
+  --mp-mo-t: 320ms;
+  transition:
+    opacity var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1),
+    transform var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-row-leave-to {
+  opacity: 0;
+  transform: translateX(-24px);
+}
+.mp-mo-cell-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
+/* Accordion collapse (settings sections, tools areas): the grid-rows
+ * 0fr→1fr trick — the ONE sanctioned non-transform/opacity animation (plan
+ * §2 explicitly allows a grid-rows collapse; it relayouts a small subtree
+ * only). The inner carries visibility so closed content leaves the tab
+ * order and the a11y tree, matching the old v-show semantics. */
+.mp-mo-collapse {
+  --mp-mo-t: 240ms;
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows var(--mp-mo-t) cubic-bezier(0.2, 0, 0, 1);
+}
+.mp-mo-collapse-open {
+  grid-template-rows: 1fr;
+}
+.mp-mo-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
+  visibility: hidden;
+  /* Keep the content painted while its grid track closes. Opening removes
+   * this rule, restoring visibility immediately, including reversals. */
+  transition: visibility 0s linear var(--mp-mo-t);
+}
+
+/* Reduced-motion master gate: zero every duration in one block. The var is
+ * set on the phase roots; descendant rules inherit it. */
+@media (prefers-reduced-motion: reduce) {
+  .mp-mo-push-enter-active,
+  .mp-mo-push-leave-active,
+  .mp-mo-sheet-enter-active,
+  .mp-mo-sheet-leave-active,
+  .mp-mo-center-enter-active,
+  .mp-mo-center-leave-active,
+  .mp-mo-tab-next-enter-active,
+  .mp-mo-tab-back-enter-active,
+  .mp-mo-tab-next-leave-active,
+  .mp-mo-tab-back-leave-active,
+  .mp-mo-floor-enter-active,
+  .mp-mo-row-move,
+  .mp-mo-row-enter-active,
+  .mp-mo-row-leave-active,
+  .mp-mo-cell-enter-active,
+  .mp-mo-cell-leave-active,
+  .mp-mo-collapse,
+  .mp-mo-collapse:not(.mp-mo-collapse-open) .mp-mo-collapse-inner {
+    --mp-mo-t: 0.01ms;
+  }
+}

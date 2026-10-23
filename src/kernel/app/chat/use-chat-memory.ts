@@ -14,8 +14,9 @@ import { uiService } from '@/kernel/ui/toasts'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import type { ChatboxMessage } from '@/kernel/sessions/chatbox-store'
 import type { UsageRecorder } from '@/kernel/app/chat-keys'
+import type { SessionLocalWorkOptions } from './session-local-work'
 
-export interface ChatMemoryOptions {
+export interface ChatMemoryOptions extends SessionLocalWorkOptions {
   settingsState: SettingsState | null
   memoryStore: MemoryStore | null
   recordUsage: UsageRecorder | null
@@ -35,6 +36,7 @@ export function useChatMemory(options: ChatMemoryOptions) {
   const memoryStatus = ref('')
   const memoryBusy = ref(false)
   const showMemory = ref(false)
+  let patrolGeneration = 0
 
   // Fire-and-forget patrol: after a turn fully lands, cover the backlog
   // (window = total − keepFloors) in rewrite batches. Busy-gated; failures
@@ -42,7 +44,8 @@ export function useChatMemory(options: ChatMemoryOptions) {
   // floors needs no rollback here (D7): the anchor is a COUNT, the window
   // recomputes over the remaining floors, done batches never re-run.
   const maybeRunMemoryPipeline = async (force = false): Promise<void> => {
-    if (!memoryActive.value || !isCardDomain() || !card() || !memoryStore || memoryBusy.value) return
+    const signal = options.sessionSignal?.()
+    if (signal?.aborted || !memoryActive.value || !isCardDomain() || !card() || !memoryStore || memoryBusy.value) return
     const settings = readMemorySummarySettings(settingsState)
     const state = memoryState.value ?? createEmptyMemoryState()
     if (!force) {
@@ -56,6 +59,10 @@ export function useChatMemory(options: ChatMemoryOptions) {
       return
     }
     memoryBusy.value = true
+    const generation = ++patrolGeneration
+    const current = () => !signal?.aborted && generation === patrolGeneration
+    const cancelled = () => { if (generation === patrolGeneration) memoryBusy.value = false }
+    signal?.addEventListener('abort', cancelled, { once: true })
     memoryStatus.value = '整理中…'
     try {
       const floors: SummaryFloor[] = messages().map((message) => ({
@@ -69,13 +76,17 @@ export function useChatMemory(options: ChatMemoryOptions) {
         config: { baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey, model },
         floors,
         state,
+        signal,
         settings: { keepFloors: settings.keepFloors, batchSize: settings.batchSize, maxOutputTokens: settings.maxOutputTokens },
         onUsage: (usage, meta) => {
           if (usage) recordUsage?.(usage, meta)
         },
       })
+      if (!current()) return
       memoryState.value = result.state
-      await memoryStore.save({ kind: 'card', id: card()!.id }, result.state)
+      const write = memoryStore.save({ kind: 'card', id: card()!.id }, result.state)
+      await (options.trackLocalWrite?.(write) ?? write)
+      if (!current()) return
       if (result.error) {
         memoryStatus.value = `整理失败:${result.error.slice(0, 80)}`
         errorHub.record({
@@ -89,21 +100,24 @@ export function useChatMemory(options: ChatMemoryOptions) {
         memoryStatus.value = result.batches > 0 ? `已整理 ${result.batches} 批` : '记忆已是最新'
       }
     } catch (error) {
-      memoryStatus.value = `整理失败:${(error as Error)?.message || '未知错误'}`
+      if (current()) memoryStatus.value = `整理失败:${(error as Error)?.message || '未知错误'}`
     } finally {
-      memoryBusy.value = false
+      signal?.removeEventListener('abort', cancelled)
+      if (generation === patrolGeneration) memoryBusy.value = false
     }
   }
 
   const rebuildMemory = async (): Promise<void> => {
+    const signal = options.sessionSignal?.()
     if (!isCardDomain() || !card() || !memoryStore) return
     const confirmed = await uiService.confirm('shell', {
       title: '清空重建记忆',
       message: `将删除与「${card()!.name}」的摘要与档案,之后从原文重新整理。楼层本身不受影响。`,
       confirmLabel: '清空重建',
     })
-    if (!confirmed) return
-    await memoryStore.reset({ kind: 'card', id: card()!.id })
+    if (!confirmed || signal?.aborted) return
+    const write = memoryStore.reset({ kind: 'card', id: card()!.id })
+    await (options.trackLocalWrite?.(write) ?? write)
     memoryState.value = createEmptyMemoryState()
     memoryStatus.value = '已清空,整理后重新积累'
   }

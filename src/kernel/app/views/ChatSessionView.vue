@@ -1,11 +1,7 @@
 <script setup lang="ts">
-// 全屏聊天页(M3):顶栏(返回/标题) + 消息流 + 输入坞,chatbox 与 card 两域共用
-// 同一骨架(M3-i),域由 props.domain 决定 —— chatbox 走会话仓自带 system prompt;
-// card 走角色卡库,每次发送现组装提示词(card-prompt,RP 最小式:名字+性格(+对话
-// 示例)+末尾 [User Info]),开场白种为首楼、顶栏「清空重开」为卡域专属。发送 =
-// 内核 llm.provider seam 流式(可中止);楼层经各自 store 增量持久化
-// (chat-persistence 器官);用量回调经注入(usage-stats 写侧,组合根接线)。
-import { computed, inject, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+// Full-screen chat shared by card and chatbox sessions. Display projections
+// remain independent from the complete request and persistence history.
+import { computed, inject, nextTick, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import {
   CARD_SESSION_STORE_KEY,
   CHATBOX_STORE_KEY,
@@ -26,21 +22,27 @@ import { useChatMemory } from '@/kernel/app/chat/use-chat-memory'
 import { useCardLedger } from '@/kernel/app/chat/use-card-ledger'
 import { createRequestAssembler } from '@/kernel/app/chat/request-assembly'
 import { pluginActive, useFloorActions } from '@/kernel/app/chat/use-floor-actions'
+import { useSessionEntry } from '@/kernel/app/chat/use-session-entry'
+import { beginSessionWriteHandoff } from '@/kernel/app/chat/session-write-handoff'
+import { createSessionLocalWork } from '@/kernel/app/chat/session-local-work'
+import { activateSessionViewHost } from '@/kernel/app/chat/session-view-host'
+import SessionBackdrop from '@/kernel/app/chat/SessionBackdrop.vue'
+import type { SessionPageBackground } from '@/kernel/app/chat/session-shell-prototype'
 import { useChatTurn } from '@/kernel/app/chat/use-chat-turn'
+import { useChatScroll } from '@/kernel/app/chat/use-chat-scroll'
 import ChatFloorList from '@/kernel/app/chat/ChatFloorList.vue'
-import type { FloorView } from '@/kernel/app/chat/ChatFloorList.vue'
 import ChatComposer from '@/kernel/app/chat/ChatComposer.vue'
+import ChatSessionHeader from '@/kernel/app/chat/ChatSessionHeader.vue'
+import { createFloorProjection } from '@/kernel/app/chat/floor-projection'
+import type { CardToolId, CardToolItem } from '@/kernel/app/chat/CardToolsMenu.vue'
 import ImageViewer from '@/kernel/app/chat/ImageViewer.vue'
-import { closeConversation } from '@/kernel/app/chat-router'
+import { closeConversation, useChatRoute } from '@/kernel/app/chat-router'
 import type { CharacterCard } from '@/kernel/characters/character-card'
 import type { LlmProvider } from '@/kernel/llm/llm-provider'
 // M3-n rich render: floors go through macro substitution + markdown/DOMPurify
 // (full HTML documents run in sandboxed executable frames); the lifecycle
 // module is a side-effect import (≤3 active frames red line).
 import '@/kernel/render/html-frame-lifecycle'
-import { contentUsesHtmlFrame, renderMessageHtml } from '@/kernel/render/message-render'
-import { applyRegexPipeline } from '@/kernel/regex/regex-engine'
-import { setExecutableFrameSlashHandler, startExecutableFrameHost } from '@/kernel/render/html-frame'
 import type { CardBackdrop, CardSession } from '@/kernel/sessions/card-session-store'
 import { cardBackdropDefault } from '@/kernel/app/card-backdrop-default'
 import type { ChatboxConversation, ChatboxMessage } from '@/kernel/sessions/chatbox-store'
@@ -48,11 +50,9 @@ import { uiService } from '@/kernel/ui/toasts'
 // M3-q variables: tag-block parsing/ledger on the card domain only — the
 // request path expands {{getvar}} + appends the [Variables] section, the
 // display path strips blocks into the floor capsule.
-import { stripVariableBlocks } from '@/kernel/variables/variable-engine'
 import type { PresetSnapshot } from '@/kernel/presets/preset-store'
 // M4-f CoT layer: tag parsing + native reasoning display; the COT preset
 // content syncs into the preset store as a managed entry. Plugin = the toggle.
-import { parseCot } from '@/kernel/cot/cot-parser'
 import VariablesSheet from '@/kernel/variables/VariablesSheet.vue'
 import WorldbookSheet from '@/kernel/worldinfo/WorldbookSheet.vue'
 import RegexSheet from '@/kernel/regex/RegexSheet.vue'
@@ -61,13 +61,22 @@ import RegexSheet from '@/kernel/regex/RegexSheet.vue'
 import { createEmptyMemoryState } from '@/kernel/memory/memory-engine'
 import MemorySheet from '@/kernel/memory/MemorySheet.vue'
 import SessionSettingsSheet from '@/kernel/app/sections/SessionSettingsSheet.vue'
-import AuroraLayer from '@/kernel/design/AuroraLayer.vue'
 // 叙事风格维度系统(S3):卡域顶栏「风格」面板;选择落 CardSession.style,
 // 请求装配经 cardStyle dep 读三态取材(全局/本卡覆盖)。chatbox 域无入口(D14)。
 import StyleSheet from '@/kernel/app/sections/StyleSheet.vue'
 import type { CardStyleSelection } from '@/kernel/presets/style-assembly'
 
-const props = withDefaults(defineProps<{ conversationId: string; domain?: 'chatbox' | 'card' }>(), { domain: 'chatbox' })
+const props = withDefaults(defineProps<{
+  conversationId: string; domain?: 'chatbox' | 'card'; hosted?: boolean; presented?: boolean
+}>(), { domain: 'chatbox', hosted: false, presented: true })
+const emit = defineEmits<{ ready: [key: string]; backdrop: [value: SessionPageBackground] }>()
+const route = useChatRoute()
+const entryRoute = route.value
+const linkedToRoute = entryRoute.view === 'chat' && entryRoute.kind === props.domain && entryRoute.conversationId === props.conversationId
+const entryActive = computed(() => !linkedToRoute || route.value === entryRoute)
+const localWork = createSessionLocalWork(() => {
+  uiService.toast('shell', '会话保存失败，请返回后重试', { tone: 'error' })
+})
 
 const store = inject(CHATBOX_STORE_KEY, null)
 const cardSessions = inject(CARD_SESSION_STORE_KEY, null)
@@ -107,13 +116,6 @@ const effectiveBackdrop = computed<CardBackdrop>(() => ({
   ...(cardSession.value?.bg ?? {}),
   ...(backdropPreview.value ?? {}),
 }))
-const backdropImgStyle = computed(() => ({
-  filter: `blur(${effectiveBackdrop.value.blur}px)`,
-  transform: 'scale(1.1)',
-}))
-const backdropDimStyle = computed(() => ({
-  backgroundColor: `rgba(0, 0, 0, ${effectiveBackdrop.value.dim / 100})`,
-}))
 const closeSessionSettings = (): void => {
   showSessionSettings.value = false
   backdropPreview.value = null
@@ -132,10 +134,13 @@ const onBackdropReset = (): void => {
 const draft = ref('')
 const streaming = ref(false)
 const loadError = ref('')
+const resettingSession = ref(false)
 // D3: request failures never write a message floor — they surface as a
 // transient error bar above the composer and vanish on remount/retry/success.
 const sendError = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+const sessionRoot = ref<HTMLElement | null>(null)
+const floorList = ref<InstanceType<typeof ChatFloorList> | null>(null)
 // Card artifact layers (variables ledger / worldbook / regex states, the
 // per-floor panel pipeline, floor capsule and template analysis) live in
 // use-card-ledger (2026-10 cleanup); onMounted writes the plugin gates onto
@@ -155,6 +160,20 @@ const cotActive = ref(true)
 const showSessionSettings = ref(false)
 const showVariables = ref(false)
 const showStyle = ref(false)
+const cardTools = computed<CardToolItem[]>(() => [
+  ...(variablesActive.value ? [{ id: 'variables' as const, label: '变量', description: '状态与模板' }] : []),
+  ...(worldbookActive.value ? [{ id: 'worldbook' as const, label: '世界书', description: '设定与触发条目' }] : []),
+  ...(regexActive.value ? [{ id: 'regex' as const, label: '正则', description: '显示与提示词规则' }] : []),
+  ...(memoryActive.value ? [{ id: 'memory' as const, label: '记忆', description: '摘要与人物档案' }] : []),
+  ...(presetsActive.value ? [{ id: 'presets' as const, label: '叙事预设', description: '本卡叙事搭配' }] : []),
+])
+const openCardTool = (id: CardToolId): void => {
+  if (id === 'variables') showVariables.value = true
+  else if (id === 'worldbook') showWorldbook.value = true
+  else if (id === 'regex') showRegex.value = true
+  else if (id === 'memory') showMemory.value = true
+  else showStyle.value = true
+}
 /** S3: per-card style override → the assembler's cardStyle dep. Absent =
  *  follow global (the resolver treats null as follow). */
 const cardStyle = computed<CardStyleSelection | null>(() => cardSession.value?.style ?? null)
@@ -182,7 +201,8 @@ const messages = computed<ChatboxMessage[]>(() =>
   (isCardDomain.value ? cardSession.value?.messages : conversation.value?.messages) ?? [])
 const title = computed(() =>
   (isCardDomain.value ? card.value?.name : conversation.value?.title) ?? (isCardDomain.value ? '角色' : '对话'))
-const sessionLoaded = computed(() => (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
+const pageInteractive = computed(() => entryActive.value && entryReady.value && (!props.hosted || props.presented))
+const sessionLoaded = computed(() => pageInteractive.value && !resettingSession.value && !localWork.failed() && (isCardDomain.value ? cardSession.value !== null : conversation.value !== null))
 
 // Prose projection shared by the memory/ledger pipelines — delegates to the
 // assembler's proseOf (C9: the strip chain is defined once, in one place).
@@ -198,6 +218,8 @@ const {
   maybeRunMemoryPipeline,
   rebuildMemory,
 } = useChatMemory({
+  sessionSignal: localWork.signal,
+  trackLocalWrite: localWork.track,
   settingsState,
   memoryStore,
   recordUsage,
@@ -208,84 +230,63 @@ const {
   userName: () => readUserInfo().name,
 })
 
-const scrollToBottom = async (): Promise<void> => {
-  await nextTick()
-  // Optional call: environments without element scrolling (jsdom) stay safe.
-  messagesEl.value?.scrollTo?.({ top: messagesEl.value.scrollHeight })
-}
+const {
+  followingOutput, scrollToBottom, followOutput, onMessageScroll, disposeScroll,
+  onReaderPointerDown, onReaderPointerMove, clearReaderPointer, onReaderWheel, onReaderKeyDown,
+} = useChatScroll(() => messagesEl.value, () => floorList.value)
 
-onMounted(async () => {
-  // Card-reported frame heights arrive via postMessage (idempotent install);
-  // panel buttons ride the same channel (M3-t): a trigger sends a user turn —
-  // rejected while a reply is streaming (RP same discipline).
-  startExecutableFrameHost()
-  setExecutableFrameSlashHandler((command) => {
-    if (!streaming.value) void send(command)
-  })
-  if (isCardDomain.value) {
-    if (!cardSessions || !characterStore) {
-      loadError.value = '会话存储未接入'
-      return
-    }
-    card.value = await characterStore.get(props.conversationId)
-    if (!card.value) {
-      loadError.value = '角色卡不存在'
-      return
-    }
-    cardCover.value = (await characterStore.getCover(props.conversationId)) ?? ''
-    // 进卡即接续:D3 每卡一会话,无历史则当场种下开场白首楼。
-    cardSession.value = (await cardSessions.get(props.conversationId)) ?? (await cardSessions.create(card.value))
-    // 卡域投影真实化(TTS 零改动生效):挂载即报卡名与实时楼层。
-    projection?.setActiveCardSession({ cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages })
-    // M3-q:变量建档(首触播种 extensions.mp_variables 卡默认值)——插件停用时
-    // 整体休眠:不播种、不解析、不展开、不注入、面板入口隐藏;账本数据不动。
-    variablesActive.value = pluginActive(runtime, 'variables')
-    // M3-u: the worldbook layer gates on its own plugin the same way.
-    worldbookActive.value = pluginActive(runtime, 'worldinfo')
-    if (worldbookActive.value) {
-      worldbookDisabledUids.value = (await worldbookStore?.getDisabled(card.value.id)) ?? new Set()
-    }
-    // M3-v: regex layer gates on its own plugin the same way.
-    regexActive.value = pluginActive(runtime, 'regex')
-    if (regexActive.value) {
-      regexDisabledUids.value = (await regexStore?.getDisabled(card.value.id)) ?? new Set()
-    }
-    // M4-e: the memory layer gates on its own plugin the same way.
-    memoryActive.value = pluginActive(runtime, 'memory')
-    if (memoryActive.value) {
-      memoryState.value = (await memoryStore?.ensure({ kind: 'card', id: card.value.id })) ?? null
-    }
-    // M3-w: presets are app-level — gate + load once per view mount.
-    presetsActive.value = pluginActive(runtime, 'presets')
-    if (presetsActive.value) {
-      presetSnapshot.value = (await presetStore?.ensure()) ?? null
-    }
-    // M4-f: the CoT layer gates on its own plugin the same way.
-    cotActive.value = pluginActive(runtime, 'cot')
-    if (variablesActive.value) {
-      // Seed = flat card defaults (mp_variables) + each template's initial
-      // tree under its id (M3-r). First touch only; later ensures keep the
-      // running ledger.
-      const variableSnapshot = await variableStore?.ensure(card.value.id, buildVariableDefaults())
-      if (variableSnapshot) {
-        absorbVariableSnapshot(variableSnapshot)
-      }
-    }
-  } else {
-    if (!store) {
-      loadError.value = '会话存储未接入'
-      return
-    }
-    conversation.value = await store.get(props.conversationId)
-    if (!conversation.value) loadError.value = '会话不存在'
+let releaseHost = () => {}
+onScopeDispose(() => releaseHost())
+// A CSS leave keeps the component alive. Revoke its interactive host ownership
+// at route departure, while allowing an aborted stream's existing final save.
+watch(entryActive, (active) => { if (!active) depart() }, { flush: 'sync' })
+const { entryReady } = useSessionEntry({
+  id: () => props.conversationId,
+  isCard: () => isCardDomain.value,
+  active: () => entryActive.value,
+  store, cardSessions, characters: characterStore, variables: variableStore,
+  worldbook: worldbookStore, regex: regexStore, memory: memoryStore, presets: presetStore,
+  featureActive: (feature) => pluginActive(runtime, feature),
+  publish: (snapshot) => {
+    conversation.value = snapshot.conversation
+    card.value = snapshot.card
+    cardSession.value = snapshot.session
+    cardCover.value = snapshot.cover
+    variablesActive.value = snapshot.gates.variables
+    worldbookActive.value = snapshot.gates.worldinfo
+    regexActive.value = snapshot.gates.regex
+    memoryActive.value = snapshot.gates.memory
+    presetsActive.value = snapshot.gates.presets
+    cotActive.value = snapshot.gates.cot
+    worldbookDisabledUids.value = snapshot.worldbookDisabled
+    regexDisabledUids.value = snapshot.regexDisabled
+    memoryState.value = snapshot.memory
+    presetSnapshot.value = snapshot.presets
+    if (snapshot.variables) absorbVariableSnapshot(snapshot.variables)
+  },
+  failed: (message) => { loadError.value = message },
+  ready: () => {
+    publishBackdrop()
+    emit('ready', `${props.domain}:${props.conversationId}`)
+  },
+  presented: () => { if (!props.hosted) return scrollToBottom() },
+})
+const publishBackdrop = (): void => emit('backdrop', {
+  cover: isCardDomain.value ? cardCover.value : '', backdrop: { ...effectiveBackdrop.value },
+})
+watch([cardCover, effectiveBackdrop], () => {
+  if (props.hosted && entryReady.value && entryActive.value) publishBackdrop()
+}, { flush: 'post' })
+watch(pageInteractive, (active) => {
+  releaseHost()
+  if (active && !loadError.value) {
+    releaseHost = activateSessionViewHost(projection, card.value && cardSession.value
+      ? { cardId: card.value.id, cardName: card.value.name, messages: cardSession.value.messages } : null,
+    (command) => { if (sessionLoaded.value && !streaming.value) void send(command) },
+    (frame) => sessionRoot.value?.contains(frame) === true)
+    if (props.hosted) void scrollToBottom()
   }
-  await scrollToBottom()
-})
-
-onUnmounted(() => {
-  setExecutableFrameSlashHandler(null)
-  projection?.setActiveCardSession(null)
-})
+}, { flush: 'sync' })
 
 const readUserInfo = (): { name: string; persona: string } => {
   const scope = settingsState?.scope(['userName', 'userPersona'])
@@ -304,84 +305,36 @@ const macroContext = computed(() => ({
 const isStreamingFloor = (message: ChatboxMessage): boolean =>
   streaming.value && message.role === 'assistant' && message === messages.value[messages.value.length - 1]
 
-/** v-html render for one floor; streaming floors bypass the LRU (content
- *  changes every flush). The card domain strips variable tag blocks first —
- *  a display projection only, the stored floor keeps them verbatim (review
- *  Q1 落库纪律). M3-v: card regexes rewrite the display projection of AI
- *  floors (depth always 0; promptOnly scripts skip display). User floors
- *  stay UNstyled (user feedback 2026-10-02): beautification wrappers make
- *  user bubbles look oversized — card regexes are authored for prose.
- *  The prompt surface is untouched: placement-[1] promptOnly scripts still
- *  rewrite user input in the request. */
-const renderFloor = (message: ChatboxMessage): string => {
-  let content = message.content
-  // M4-f: thinking tags leave the display projection first (stored floor keeps
-  // them verbatim — 落库纪律). HTML-frame floors render whole in the sandbox
-  // iframe; tag surgery there could corrupt the document, so they skip CoT.
-  if (cotActive.value && !contentUsesHtmlFrame(content)) {
-    content = parseCot(content, !isStreamingFloor(message)).main
-  }
-  if (isCardDomain.value && variablesActive.value) content = stripVariableBlocks(content)
-  const assistantFloor = message.role === 'assistant'
-  if (isCardDomain.value && regexActive.value && assistantFloor && cardRegexScripts.value.length > 0) {
-    content = applyRegexPipeline(content, {
-      scripts: cardRegexScripts.value,
-      surface: 'display',
-      role: 'assistant',
-      depth: 0,
-      disabledUids: regexDisabledUids.value,
-    })
-  }
-  return renderMessageHtml(content, macroContext.value, !isStreamingFloor(message))
-}
-
-/** M4-f thinking card: native reasoning (wire field) plus tag-based
- *  <think>/<cot> parsed from stored content, as two independent sections —
- *  providers deliver either or both (RP timeline collapsed to its thinking
- *  steps; tool-call steps have no MP counterpart). `live` = still receiving
- *  that section. */
-interface FloorThinkingSection {
-  id: string
-  title: string
-  text: string
-  chars: number
-  live: boolean
-}
-
-const floorThinkingSections = (message: ChatboxMessage): FloorThinkingSection[] => {
-  if (message.role !== 'assistant' || !cotActive.value || contentUsesHtmlFrame(message.content)) return []
-  const streamingFloor = isStreamingFloor(message)
-  const sections: FloorThinkingSection[] = []
-  const reasoning = String(message.reasoning ?? '').trim()
-  if (reasoning) {
-    sections.push({ id: 'native', title: '原生思考', text: reasoning, chars: reasoning.length, live: streamingFloor && !message.content })
-  }
-  const info = parseCot(message.content, !streamingFloor)
-  if (info.cot) {
-    sections.push({ id: 'cot', title: '分析过程', text: info.cot, chars: info.cot.length, live: streamingFloor && !info.isFinished })
-  }
-  return sections
-}
-
-/** Default open while the streaming floor finishes, collapsed once finished; a
- *  user toggle persists per floor (RP isSummaryOpen semantics). `sections`
- *  accepts the precomputed list so the view-model pass parses each floor once. */
-const isCotCardOpen = (message: ChatboxMessage, sections: FloorThinkingSection[] = floorThinkingSections(message)): boolean =>
-  message.cotOpen !== undefined ? message.cotOpen : isStreamingFloor(message) && sections.length > 0
-
-const toggleCotCard = (message: ChatboxMessage): void => {
-  message.cotOpen = !isCotCardOpen(message)
-  void persistSession()
-}
-
-const renderThinkingText = (text: string): string => renderMessageHtml(text, macroContext.value, true)
-
-const floorUsesHtmlFrame = (message: ChatboxMessage): boolean => contentUsesHtmlFrame(message.content)
-
-const persistSession = async (): Promise<void> => {
+let departed = false
+const writeSession = async (): Promise<void> => {
+  // An aborted turn can settle while reset is awaiting I/O, before the view
+  // replaces its old session reference. Its final save must not queue after reset.
+  if (resettingSession.value) return
   if (isCardDomain.value && cardSession.value) await cardSessions?.save(cardSession.value)
   else if (conversation.value) await store?.save(conversation.value)
 }
+const persistSession = async (): Promise<void> => {
+  if (!departed) await localWork.track(writeSession())
+}
+const depart = (): void => {
+  if (departed) return
+  departed = true
+  releaseHost()
+  disposeScroll()
+  localWork.retire()
+  retire()
+  const owner = isCardDomain.value ? cardSessions : store
+  if (!owner || (!cardSession.value && !conversation.value)) return
+  const pendingLocalWork = localWork.hasPending()
+  void beginSessionWriteHandoff(owner, props.conversationId, async () => {
+    const results = await Promise.allSettled([writeSession(), localWork.drain()])
+    if (results.some(result => result.status === 'rejected')) throw new Error('session_handoff_failed')
+    if (pendingLocalWork) await writeSession()
+  }).catch(() => {
+    uiService.toast('shell', '会话保存失败，请返回后重试', { tone: 'error' })
+  })
+}
+onScopeDispose(depart)
 
 const buildUserInfoLine = (): string => {
   const { name, persona } = readUserInfo()
@@ -416,6 +369,8 @@ const {
   applyMatchedTemplateUpdates,
   runTemplateAnalysisPipeline,
 } = useCardLedger({
+  sessionSignal: localWork.signal,
+  trackLocalWrite: localWork.track,
   settingsState,
   variableStore,
   worldbookStore,
@@ -473,10 +428,13 @@ const {
 // a turn plus send/retry; abort state and the retry's lastUserText live there.
 const {
   stopStreaming,
+  retire,
   streamAssistantInto,
   retryLastSend,
   send,
 } = useChatTurn({
+  sessionSignal: localWork.signal,
+  trackLocalWrite: localWork.track,
   resolveProvider,
   streaming,
   sendError,
@@ -502,6 +460,9 @@ const {
   syncCotPresetsIfActive,
   persistSession,
   scrollToBottom,
+  // The virtual list follows append/height changes itself. Await only the
+  // DOM publication here; do not issue another scroll command per flush.
+  followOutput: async () => { await nextTick() },
   maybeRunMemoryPipeline,
   domain: () => props.domain,
 })
@@ -523,6 +484,8 @@ const {
   toggleSpeakFloor,
   onSessionSettingsSaved,
 } = useFloorActions({
+  sessionSignal: localWork.signal,
+  trackLocalWrite: localWork.track,
   resolveProvider,
   runtime,
   variableStore,
@@ -540,238 +503,89 @@ const {
   syncCotPresetsIfActive,
   persistSession,
   stripCotText,
+  scrollToBottom,
   domain: () => props.domain,
 })
 
-// C1: the per-floor view model — every derived value is computed ONCE per
-// render pass (the old template re-invoked these functions 3-6 times per
-// floor; floorVariableSummary alone re-scanned the whole event list ×4).
-const floorViews = computed<FloorView[]>(() =>
-  messages.value.map((message, index) => {
-    const thinking = floorThinkingSections(message).map((section) => ({ ...section, html: renderThinkingText(section.text) }))
-    const panels = floorPanels(message)
-    const isHtmlFrame = floorUsesHtmlFrame(message)
-    return {
-      message,
-      index,
-      html: renderFloor(message),
-      thinking,
-      thinkingOpen: isCotCardOpen(message, thinking),
-      thinkingLive: thinking.some((section) => section.live),
-      panels,
-      capsule: floorVariableSummary(message),
-      capsuleOpen: capsuleOpenId.value === message.id,
-      isHtmlFrame,
-      wide: isHtmlFrame || panels.top.length > 0 || panels.bottom.length > 0,
-      isStreaming: isStreamingFloor(message),
-      isLastAssistant: isLastAssistantFloor(message),
-    }
-  }))
+const { projectFloor, toggleCotCard } = createFloorProjection({
+  isStreamingFloor,
+  cotActive: () => cotActive.value,
+  isCardDomain: () => isCardDomain.value,
+  variablesActive: () => variablesActive.value,
+  regexActive: () => regexActive.value,
+  cardRegexScripts: () => cardRegexScripts.value,
+  regexDisabledUids: () => regexDisabledUids.value,
+  macroContext: () => macroContext.value,
+  persistSession, floorPanels, floorVariableSummary,
+  capsuleOpenId: () => capsuleOpenId.value,
+  isLastAssistantFloor,
+})
 
 const restartSession = async (): Promise<void> => {
-  if (!isCardDomain.value || !card.value || !cardSessions) return
+  if (!isCardDomain.value || !card.value || !cardSessions || resettingSession.value) return
+  const resetCard = card.value
   const confirmed = await uiService.confirm('shell', {
     title: '清空重开',
     message: `清空与「${card.value.name}」的全部楼层,重新开始这段对话?`,
     confirmLabel: '清空重开',
   })
-  if (!confirmed) return
+  if (!confirmed || resettingSession.value || !sessionLoaded.value) return
+  resettingSession.value = true
+  localWork.cancel()
   stopStreaming()
-  cardSession.value = await cardSessions.reset(card.value)
-  // M3-q/M3-s: 清空重开 resets the ledger to a fresh full seed — flat card
-  // defaults AND the template trees (previously only the flat rows were
-  // re-seeded and template panels fell back to card initial state).
-  // C3: absorb the WHOLE snapshot (events included) — writing state only left
-  // the pre-reset events visible in the sheet and feeding panel replay.
-  if (variablesActive.value) {
-    const variableSnapshot = await variableStore?.reset(card.value.id, buildVariableDefaults())
-    if (variableSnapshot) absorbVariableSnapshot(variableSnapshot)
+  const previousWrites = localWork.drain()
+  const reset = async (): Promise<void> => {
+    try {
+      await previousWrites
+      cardSession.value = await cardSessions.reset(resetCard)
+      // Reset all local state before a new page may read this session.
+      if (variablesActive.value) {
+        const variableSnapshot = await variableStore?.reset(resetCard.id, buildVariableDefaults())
+        if (variableSnapshot) absorbVariableSnapshot(variableSnapshot)
+      }
+      if (memoryActive.value) {
+        await memoryStore?.reset({ kind: 'card', id: resetCard.id })
+        memoryState.value = createEmptyMemoryState()
+        memoryStatus.value = ''
+      }
+      sendError.value = ''
+      await scrollToBottom()
+    } finally {
+      resettingSession.value = false
+    }
   }
-  // M4-e: clear-and-restart clears the memory ledger with everything else
-  // - the summary describes the CLEARED story, keeping it would be wrong.
-  if (memoryActive.value) {
-    await memoryStore?.reset({ kind: 'card', id: card.value.id })
-    memoryState.value = createEmptyMemoryState()
-    memoryStatus.value = ''
+  try { await localWork.track(reset()) } catch {
+    sendError.value = '会话重开失败，请返回后重试'
   }
-  await scrollToBottom()
 }
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 flex flex-col pt-[env(safe-area-inset-top)]">
-    <!-- Theme v3: the page is a fixed overlay — its own aurora instance gives
-         the opaque base (gradient) plus the real blob field, hiding the list
-         behind. Layering is all-positive z (aurora z-0 < cover z-[1] < stream
-         z-[2] < chrome z-10): negative z children of a fixed context are
-         composited below the sibling tab pages on some chromium compositors.
-         inset-0 covers the FULL screen including under the status bar — abspos
-         children ignore the root's padding, and Tailwind v4 silently skips
-         negative-arbitrary top candidates with env() inside (the missing rule
-         collapsed this layer to height 0 once — see base.css note; guarded by
-         the chat-overlay-zorder spec). -->
-    <AuroraLayer
-      class="absolute inset-0 z-0"
+  <div
+    v-if="entryReady && (!hosted || presented)"
+    ref="sessionRoot"
+    class="inset-0 z-40 flex flex-col pt-[env(safe-area-inset-top)]"
+    :class="hosted ? 'absolute' : 'fixed'"
+  >
+    <SessionBackdrop
+      v-if="!hosted"
+      :cover="isCardDomain ? cardCover : ''"
+      :backdrop="effectiveBackdrop"
     />
-    <!-- Card-domain backdrop (1.0.x, M3-o 挂账清偿): the card cover, blurred
-         and dimmed behind the whole page. Tuning rides the card session
-         envelope (SessionSettingsSheet); absent = enabled/40px/45%.
-         z-[1] sits above the aurora, below the floor stream (z-[2]). -->
-    <div
-      v-if="isCardDomain && cardCover && effectiveBackdrop.enabled"
-      class="pointer-events-none absolute inset-0 z-[1] overflow-hidden"
-      aria-hidden="true"
-    >
-      <img
-        :src="cardCover"
-        alt=""
-        class="h-full w-full object-cover"
-        :style="backdropImgStyle"
-      >
-      <div
-        class="absolute inset-0"
-        :style="backdropDimStyle"
-      />
-    </div>
     <!-- mp-overlay-header-top: safe-area-aware top (base.css real class — the
          overlay is a fixed child of the app root, so the root's pt-[env] does
          NOT push this abspos header; a bare top-3 tucks it under the status
          bar on edge-to-edge devices). -->
-    <header class="mp-glass mp-overlay-header-top absolute inset-x-3 z-10 flex items-center gap-2 rounded-panel px-1.5 py-1">
-      <button
-        type="button"
-        class="flex h-11 w-11 items-center justify-center rounded-input text-ink-2"
-        aria-label="返回对话列表"
-        @click="stopStreaming(); closeConversation()"
-      >
-        <svg
-          class="h-5 w-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M15 19l-7-7 7-7"
-          />
-        </svg>
-      </button>
-      <img
-        v-if="isCardDomain && cardCover"
-        :src="cardCover"
-        alt=""
-        class="h-8 w-8 flex-shrink-0 rounded-full object-cover"
-      >
-      <span
-        v-else-if="isCardDomain"
-        class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-bg text-sm text-ink-2"
-      >
-        {{ title.slice(0, 1) }}
-      </span>
-      <h1 class="min-w-0 flex-1 truncate py-3 text-base">
-        {{ title }}
-      </h1>
-      <button
-        v-if="isCardDomain && variablesActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showVariables = true"
-      >
-        变量
-      </button>
-      <button
-        v-if="isCardDomain && worldbookActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showWorldbook = true"
-      >
-        世界书
-      </button>
-      <button
-        v-if="isCardDomain && regexActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showRegex = true"
-      >
-        正则
-      </button>
-      <button
-        v-if="isCardDomain && memoryActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showMemory = true"
-      >
-        记忆
-      </button>
-      <button
-        v-if="isCardDomain && presetsActive"
-        type="button"
-        class="flex-shrink-0 rounded-input px-2 py-1 text-xs text-ink-2"
-        @click="showStyle = true"
-      >
-        叙事
-      </button>
-      <button
-        type="button"
-        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-primary"
-        aria-label="会话设置"
-        @click="showSessionSettings = true"
-      >
-        <svg
-          class="h-[18px] w-[18px]"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <circle
-            cx="12"
-            cy="5"
-            r="1.6"
-          />
-          <circle
-            cx="12"
-            cy="12"
-            r="1.6"
-          />
-          <circle
-            cx="12"
-            cy="19"
-            r="1.6"
-          />
-        </svg>
-      </button>
-      <button
-        v-if="isCardDomain"
-        type="button"
-        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-ink-2 active:text-danger"
-        aria-label="清空重开"
-        @click="restartSession"
-      >
-        <!-- rotate-ccw (restart): 清空重开 keeps the confirm dialog, only the
-             bar affordance went from text to an icon (2026-10-12 user pick). -->
-        <svg
-          class="h-[18px] w-[18px]"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
-          />
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M3 3v5h5"
-          />
-        </svg>
-      </button>
-    </header>
+    <ChatSessionHeader
+      :is-card-domain="isCardDomain"
+      :card-cover="cardCover"
+      :title="title"
+      :card-tools="cardTools"
+      @back="stopStreaming(); closeConversation()"
+      @tool="openCardTool"
+      @settings="showSessionSettings = true"
+      @restart="restartSession"
+    />
 
     <div
       v-if="loadError"
@@ -784,10 +598,29 @@ const restartSession = async (): Promise<void> => {
       <div
         ref="messagesEl"
         class="mp-overlay-flow-top absolute inset-0 z-[2] overflow-y-auto px-4 pb-[calc(112px+env(safe-area-inset-bottom))]"
+        @scroll.passive="onMessageScroll"
+        @pointerdown.passive="onReaderPointerDown"
+        @pointermove.passive="onReaderPointerMove"
+        @pointerup.passive="clearReaderPointer"
+        @pointercancel.passive="clearReaderPointer"
+        @wheel.passive="onReaderWheel"
+        @keydown="onReaderKeyDown"
       >
+        <button
+          v-if="!followingOutput"
+          type="button"
+          class="fixed bottom-36 right-5 z-10 rounded-full border border-line bg-card px-3 py-2 text-xs text-ink shadow-lg"
+          @click="scrollToBottom"
+        >
+          回到最新
+        </button>
         <div class="mx-auto flex max-w-xl flex-col gap-3">
           <ChatFloorList
-            :views="floorViews"
+            ref="floorList"
+            :messages="messages"
+            :scroll-element="messagesEl"
+            :following-output="followingOutput"
+            :project="projectFloor"
             :editing-floor-id="editingFloorId"
             :edit-draft="editDraft"
             :streaming="streaming"
@@ -804,6 +637,7 @@ const restartSession = async (): Promise<void> => {
             @copy="copyFloor"
             @speak="toggleSpeakFloor"
             @remove="deleteFloorFrom"
+            @viewport-resize="followOutput"
           />
         </div>
       </div>
@@ -841,7 +675,7 @@ const restartSession = async (): Promise<void> => {
           :draft="draft"
           :streaming="streaming"
           :one-shot-instruction="oneShotInstruction"
-          :send-disabled="!draft.trim() || pendingImagesNotReady"
+          :send-disabled="!sessionLoaded || !draft.trim() || pendingImagesNotReady"
           @update:draft="draft = $event"
           @update:one-shot-instruction="oneShotInstruction = $event"
           @send="send()"
@@ -852,69 +686,83 @@ const restartSession = async (): Promise<void> => {
       </div>
     </template>
 
-    <ImageViewer
-      v-if="viewerImage"
-      :src="viewerImage"
-      @close="viewerImage = ''"
-    />
+    <Transition name="mp-mo-center">
+      <ImageViewer
+        v-if="viewerImage"
+        :src="viewerImage"
+        @close="viewerImage = ''"
+      />
+    </Transition>
 
-    <VariablesSheet
-      v-if="isCardDomain && showVariables && card"
-      :card-id="card.id"
-      :templates="activeTemplates"
-      :analysis-status="analysisStatus"
-      :live="liveVariableSnapshot"
-      @changed="onVariablesChanged"
-      @close="showVariables = false"
-      @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
-    />
+    <Transition name="mp-mo-sheet">
+      <VariablesSheet
+        v-if="isCardDomain && showVariables && card"
+        :card-id="card.id"
+        :templates="activeTemplates"
+        :analysis-status="analysisStatus"
+        :live="liveVariableSnapshot"
+        @changed="onVariablesChanged"
+        @close="showVariables = false"
+        @analyze="runTemplateAnalysisPipeline(messages[messages.length - 1]!, true)"
+      />
+    </Transition>
 
-    <WorldbookSheet
-      v-if="isCardDomain && showWorldbook"
-      :entries="worldbookEntries"
-      :disabled-uids="worldbookDisabledUids"
-      :report="worldbookReport"
-      @toggle="toggleWorldbookEntry"
-      @close="showWorldbook = false"
-    />
+    <Transition name="mp-mo-sheet">
+      <WorldbookSheet
+        v-if="isCardDomain && showWorldbook"
+        :entries="worldbookEntries"
+        :disabled-uids="worldbookDisabledUids"
+        :report="worldbookReport"
+        @toggle="toggleWorldbookEntry"
+        @close="showWorldbook = false"
+      />
+    </Transition>
 
-    <RegexSheet
-      v-if="isCardDomain && showRegex"
-      :scripts="cardRegexScripts"
-      :disabled-uids="regexDisabledUids"
-      @toggle="toggleRegexScript"
-      @close="showRegex = false"
-    />
+    <Transition name="mp-mo-sheet">
+      <RegexSheet
+        v-if="isCardDomain && showRegex"
+        :scripts="cardRegexScripts"
+        :disabled-uids="regexDisabledUids"
+        @toggle="toggleRegexScript"
+        @close="showRegex = false"
+      />
+    </Transition>
 
-    <SessionSettingsSheet
-      v-if="showSessionSettings"
-      :domain="props.domain"
-      :conversation="conversation"
-      :card-session="cardSession"
-      :settings-state="settingsState"
-      :card-cover="cardCover"
-      @close="closeSessionSettings"
-      @saved="onSheetSaved"
-      @preview="backdropPreview = $event"
-      @reset-bg="onBackdropReset"
-    />
-    <StyleSheet
-      v-if="isCardDomain && showStyle && cardSession"
-      :selection="cardStyle"
-      :snapshot="presetSnapshot"
-      @save="onStyleSaved"
-      @close="showStyle = false"
-    />
-    <MemorySheet
-      v-if="isCardDomain && showMemory && card"
-      :state="memoryState"
-      :status="memoryStatus"
-      :busy="memoryBusy"
-      :floor-count="messages.length"
-      @close="showMemory = false"
-      @summarize="maybeRunMemoryPipeline(true)"
-      @rebuild="rebuildMemory"
-    />
+    <Transition name="mp-mo-sheet">
+      <SessionSettingsSheet
+        v-if="showSessionSettings"
+        :domain="props.domain"
+        :conversation="conversation"
+        :card-session="cardSession"
+        :settings-state="settingsState"
+        :card-cover="cardCover"
+        @close="closeSessionSettings"
+        @saved="onSheetSaved"
+        @preview="backdropPreview = $event"
+        @reset-bg="onBackdropReset"
+      />
+    </Transition>
+    <Transition name="mp-mo-sheet">
+      <StyleSheet
+        v-if="isCardDomain && showStyle && cardSession"
+        :selection="cardStyle"
+        :snapshot="presetSnapshot"
+        @save="onStyleSaved"
+        @close="showStyle = false"
+      />
+    </Transition>
+    <Transition name="mp-mo-sheet">
+      <MemorySheet
+        v-if="isCardDomain && showMemory && card"
+        :state="memoryState"
+        :status="memoryStatus"
+        :busy="memoryBusy"
+        :floor-count="messages.length"
+        @close="showMemory = false"
+        @summarize="maybeRunMemoryPipeline(true)"
+        @rebuild="rebuildMemory"
+      />
+    </Transition>
   </div>
 </template>
 

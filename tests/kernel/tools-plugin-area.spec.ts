@@ -80,7 +80,7 @@ describe('kernel/app · PluginArea (M3-h)', () => {
     expect(wrapper.text()).toContain('tts 的一句话简介')
     expect(wrapper.text()).toContain('名·usage-stats')
     expect(wrapper.text()).not.toContain('名·future-ext')
-    expect(wrapper.text()).toContain('外部插件(M4+)安装后出现在这里')
+    expect(wrapper.text()).not.toContain('外部插件(M4+)安装后出现在这里')
 
     // Rows never show raw ids (id lives in the expanded meta line).
     expect(wrapper.text()).not.toContain('usage-stats v1.0.0')
@@ -132,6 +132,17 @@ describe('kernel/app · PluginArea (M3-h)', () => {
     const saved = await store.get<{ groups: Record<string, boolean> }>('tools-ui-state')
     expect(saved?.groups.system).toBe(true)
     wrapper.unmount()
+  })
+
+  it('shows the installation hint when the empty extension group opens', async () => {
+    const { wrapper } = mountArea([makePlugin('tts', 'system', 'registered')])
+    try {
+      const group = wrapper.findAll('button').find(button => button.text().includes('扩展插件'))!
+      await group.trigger('click')
+      const hint = wrapper.findAll('p').find(paragraph => paragraph.text().includes('外部插件(M4+)安装后出现在这里'))
+      expect(hint).toBeDefined()
+      expect(hint!.element.closest('.mp-mo-collapse')?.classList.contains('mp-mo-collapse-open')).toBe(true)
+    } finally { wrapper.unmount() }
   })
 
   it('a degraded plugin shows the 异常 badge; healthy rows do not (M3-err3)', async () => {

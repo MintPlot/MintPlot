@@ -61,8 +61,12 @@ const templateRecordCount = (entry: CardUiTemplate): number => {
 }
 // 变更记录(展开区):该模板的事件按时间倒序 —— 时间/来源/前后值。
 const expandedTemplate = ref<string | null>(null)
+// Motion latch: the records panel animates closed, so a once-expanded
+// template keeps its record list mounted (collapsed when closed).
+const mountedRecords = ref(new Set<string>())
 const toggleTemplateRecords = (entry: CardUiTemplate): void => {
   expandedTemplate.value = expandedTemplate.value === entry.id ? null : entry.id
+  if (expandedTemplate.value === entry.id) mountedRecords.value.add(entry.id)
 }
 // 变更记录行：事件在折叠处就转成纯展示字段（递归联合的数组方法族会爆
 // TS2589，M3-r 已记录的坑——for-of + 显式行对象是已验证的绕法）。
@@ -226,7 +230,7 @@ const displayValue = (value: VariableValue): string => String(value)
     class="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
     @click.self="emit('close')"
   >
-    <div class="max-h-[75vh] overflow-y-auto rounded-t-2xl mp-glass-bar border-t border-line px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
+    <div class="mp-mo-sheet-panel max-h-[75vh] overflow-y-auto rounded-t-2xl mp-glass-bar border-t border-line px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-sm font-bold">
           变量
@@ -286,26 +290,31 @@ const displayValue = (value: VariableValue): string => String(value)
           </button>
         </div>
         <div
-          v-if="expandedTemplate === entry.id"
-          class="mt-1 rounded-input border border-line bg-card px-2 py-1.5"
+          class="mp-mo-collapse mt-1 rounded-input"
+          :class="expandedTemplate === entry.id ? 'mp-mo-collapse-open border border-line bg-card' : ''"
         >
-          <p
-            v-if="templateRecords(entry).length === 0"
-            class="py-1 text-center text-[10px] text-ink-3"
-          >
-            暂无变更记录
-          </p>
           <div
-            v-for="record in templateRecords(entry)"
-            :key="record.id"
-            class="border-b border-line/60 py-1 text-[10px] text-ink-2 last:border-b-0"
+            v-if="expandedTemplate === entry.id || mountedRecords.has(entry.id)"
+            class="mp-mo-collapse-inner px-2 py-1.5"
           >
-            <div class="flex items-center gap-2">
-              <span class="flex-shrink-0 text-ink-3">{{ new Date(record.ts).toLocaleString() }}</span>
-              <span class="flex-shrink-0 rounded-full bg-bg px-1.5 text-[9px] text-ink-3">{{ record.source }}</span>
-            </div>
-            <div class="mt-0.5 break-all font-mono text-[9px] leading-relaxed text-ink-3">
-              {{ record.before }} → {{ record.after }}
+            <p
+              v-if="templateRecords(entry).length === 0"
+              class="py-1 text-center text-[10px] text-ink-3"
+            >
+              暂无变更记录
+            </p>
+            <div
+              v-for="record in templateRecords(entry)"
+              :key="record.id"
+              class="border-b border-line/60 py-1 text-[10px] text-ink-2 last:border-b-0"
+            >
+              <div class="flex items-center gap-2">
+                <span class="flex-shrink-0 text-ink-3">{{ new Date(record.ts).toLocaleString() }}</span>
+                <span class="flex-shrink-0 rounded-full bg-bg px-1.5 text-[9px] text-ink-3">{{ record.source }}</span>
+              </div>
+              <div class="mt-0.5 break-all font-mono text-[9px] leading-relaxed text-ink-3">
+                {{ record.before }} → {{ record.after }}
+              </div>
             </div>
           </div>
         </div>

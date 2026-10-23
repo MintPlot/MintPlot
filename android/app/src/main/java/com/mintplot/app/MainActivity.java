@@ -1,7 +1,9 @@
 package com.mintplot.app;
 
 import android.os.Bundle;
+import android.view.Window;
 
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.WindowCompat;
 
 import com.getcapacitor.BridgeActivity;
@@ -9,6 +11,12 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Apply the post-splash theme before AppCompat creates the window.
+        // BridgeActivity also switches themes, but only after its super call.
+        SplashScreen.installSplashScreen(this);
+        // Platform window decor can read title attributes independently of
+        // AppCompat on vendor ROMs. Disable the feature before content exists.
+        supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
         // Theme v3: content-under-glass includes the status bar — the decor
         // must not consume top insets, or OriginOS-class skins clip the
         // WebView below a white system strip. The web layer handles the
@@ -24,5 +32,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MpFilesPlugin.class);
         registerPlugin(MpBackupPlugin.class);
         super.onCreate(savedInstanceState);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().hide();
+        }
     }
 }

@@ -263,6 +263,11 @@ export function buildMaterialVars(
   const ai = rgbaParts(material.aiBubble)
   return {
     '--mp-glass-bg': rgbaOf(surf.rgb, surfAlpha),
+    // Strong tier (2026-10-17 round 3): surfaces that sit over BUSY content
+    // (sheets, dialogs, toasts, popovers) need near-opaque frost — the chrome
+    // tier's 0.78 lets chat text clash through. Floor-anchored so even the
+    // transparency slider's most transparent end keeps them readable.
+    '--mp-glass-strong-bg': rgbaOf(surf.rgb, clamp(surfAlpha + 0.18, 0.88, 0.97)),
     '--mp-glass-border': material.hairline,
     '--mp-glass-edge': material.edge,
     '--mp-glass-shadow': material.surfShadow,
@@ -276,6 +281,7 @@ export function buildMaterialVars(
 /** Every inline material variable a family application may own. */
 export const MATERIAL_VARS = [
   '--mp-glass-bg',
+  '--mp-glass-strong-bg',
   '--mp-glass-border',
   '--mp-glass-edge',
   '--mp-glass-shadow',

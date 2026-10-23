@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isProxy, reactive } from 'vue'
 import {
   getRegisteredTab,
   registerTab,
@@ -19,6 +20,19 @@ const descriptor = (id: string, order: number) => ({
 })
 
 describe('kernel/app/view-registry(M0-d 雏形)', () => {
+  it('keeps component definitions raw while forwarding reactive props', () => {
+    const component = { render: () => null }
+    const icon = { render: () => null }
+    const props = reactive({ title: 'before' })
+    const dispose = registerTab({ id: 'raw', title: 'Raw', order: 1, component, icon, props })
+    const registered = getRegisteredTab('raw')!
+    expect(registered.component).toBe(component)
+    expect(registered.icon).toBe(icon)
+    expect(isProxy(registered.component)).toBe(false)
+    props.title = 'after'
+    expect(registered.props?.title).toBe('after')
+    dispose()
+  })
   it('投影按 order 升序;同值按注册次序(稳定)', () => {
     registerTab(descriptor('proj-a', 20))
     registerTab(descriptor('proj-b', 10))

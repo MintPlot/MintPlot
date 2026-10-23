@@ -1,16 +1,22 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 /**
- * M0-b · 白纸原则(M0 清单 §02):从零写起,不携带任何 RP 专属项。
- * applicationId / versionCode / 签名三参数见 android/app/build.gradle。
+ * Native shell identity and signing are configured in android/app/build.gradle.
  */
 const config: CapacitorConfig = {
   appId: 'com.mintplot.app',
   appName: 'MintPlot',
   webDir: 'dist',
-  // Android 15+ 强制 edge-to-edge:由 Capacitor 对 WebView 避让系统栏(仅目标 SDK 35+ 生效)
+  // Let Capacitor apply system-bar margins on Android 15+ edge-to-edge windows.
   android: {
     adjustMarginsForEdgeToEdge: 'auto',
+  },
+  // Android edge-to-edge windows need the plugin's fullscreen workaround.
+  // The `resize` option only controls iOS and leaves the Android dock covered.
+  plugins: {
+    Keyboard: {
+      resizeOnFullScreen: true,
+    },
   },
 }
 

@@ -39,7 +39,8 @@ function push(owner: string, message: string, tone: MpToast['tone'], durationMs:
 
 export const uiService: UiService = {
   toast(owner, message, options) {
-    push(owner, message, options?.tone ?? 'info', options?.durationMs ?? 3000)
+    const tone = options?.tone ?? 'info'
+    push(owner, message, tone, options?.durationMs ?? (tone === 'error' ? 4000 : 1000))
     // Mirror (D6): every error toast leaves a journal trace — existing call
     // sites start recording with zero changes. Mirror records carry no code;
     // code-bearing failures record explicitly at their throw/wiring site.

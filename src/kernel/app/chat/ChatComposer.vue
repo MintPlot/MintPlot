@@ -28,6 +28,12 @@ const emit = defineEmits<{
 // Composer-local UI state (the panel is only reachable from this dock).
 const showOneShotPanel = ref(false)
 const imageInputEl = ref<HTMLInputElement | null>(null)
+// Enter confirms the current IME candidate before it can send a draft.
+const onDraftKeydown = (event: KeyboardEvent): void => {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  emit('send')
+}
 </script>
 
 <template>
@@ -123,7 +129,10 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
               @change="emit('files', $event)"
             >
           </div>
-          <div class="relative">
+          <!-- NOTE: intentionally NOT relative — the one-shot panel anchors to
+               the composer root (nearest positioned ancestor) so it opens
+               above the WHOLE dock, not just this button. -->
+          <div>
             <button
               type="button"
               class="flex h-8 w-8 items-center justify-center rounded-full"
@@ -146,7 +155,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
             </button>
             <div
               v-if="showOneShotPanel"
-              class="mp-glass absolute left-0 top-10 z-40 w-64 rounded-bubble-ai p-2"
+              class="mp-glass-strong absolute bottom-full left-0 z-40 mb-3 w-64 rounded-card p-2"
             >
               <p class="mb-1 text-xs font-bold text-ink">
                 单次指令
@@ -184,7 +193,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
           placeholder="输入…"
           class="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3 py-2 pr-14 text-sm text-ink outline-none placeholder:text-ink-3"
           @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-          @keydown.enter.exact.prevent="emit('send')"
+          @keydown.enter.exact="onDraftKeydown"
         />
         <button
           v-if="streaming"

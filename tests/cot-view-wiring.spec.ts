@@ -189,14 +189,19 @@ describe('M4-f · CoT 视图接线', () => {
     expect(session.messages[2]).toMatchObject({ reasoning: '内心推演过程' })
 
     // 折叠卡默认收起(已完成楼层);点开后展示两节原生思考标题与内容。
+    // Motion latch: the section html stays MOUNTED through a close (grid
+    // collapse), so collapsed state is asserted on the collapse class, not
+    // on DOM text absence.
     const cardButton = app.wrapper.findAll('button').find((button) => button.text().includes('思考'))!
     expect(cardButton.exists()).toBe(true)
-    expect(app.wrapper.text()).not.toContain('内心推演过程')
+    const cardCollapse = cardButton.element.closest('div')!.querySelector('.mp-mo-collapse')!
+    expect(cardCollapse.classList.contains('mp-mo-collapse-open')).toBe(false)
     await cardButton.trigger('click')
     await flushPromises()
     await nextTick()
     expect(app.wrapper.text()).toContain('原生思考')
     expect(app.wrapper.text()).toContain('内心推演过程')
+    expect(cardCollapse.classList.contains('mp-mo-collapse-open')).toBe(true)
     expect((await cardSessionStore.get(stored.id))!.messages[2]).toMatchObject({ cotOpen: true })
   })
 

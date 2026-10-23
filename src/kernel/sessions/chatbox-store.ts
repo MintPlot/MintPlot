@@ -11,8 +11,11 @@
  */
 
 import type { SessionScope, StorageRepository } from '@/kernel/store/storage-repository'
-import { createBaseline, createChanges, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
+import { advanceBaseline, captureChatRows, createBaseline, createCapturedChanges, readCapturedChatRow, recoverInterruptedDraft } from '@/kernel/store/chat-persistence'
+import type { CapturedChatRow } from '@/kernel/store/chat-persistence'
 import type { StoredMessage } from '@/kernel/store/chat-persistence'
+import { createSessionTaskQueue } from '@/kernel/store/session-task-queue'
+import { cloneJson } from '@/kernel/secrets/secret-channel'
 
 export const INDEX_KEY = 'chatbox:index'
 
@@ -89,13 +92,36 @@ const scopeOf = (id: string): SessionScope => ({ kind: 'chatbox', id })
 
 const serialize = <M extends ChatboxMessage>(message: M): M => JSON.parse(JSON.stringify(message)) as M
 
-const previewOf = (conversation: ChatboxConversation): string => {
-  const last = conversation.messages[conversation.messages.length - 1]
-  return last ? last.content.slice(0, 60) : ''
-}
+type ChatboxSaveSnapshot = Omit<ChatboxConversation, 'messages'> & { rows: readonly CapturedChatRow[]; preview: string }
 
 export function createChatboxStore(repository: StorageRepository): ChatboxStore {
   const baselines = new Map<string, Map<string, string>>()
+  const run = createSessionTaskQueue()
+
+  const captureConversation = (conversation: ChatboxConversation): ChatboxSaveSnapshot => {
+    const { messages, ...meta } = conversation
+    const rows = captureChatRows(messages, baselines.get(conversation.id))
+    const last = rows[rows.length - 1]
+    return { ...cloneJson(meta), rows, preview: last ? readCapturedChatRow<ChatboxMessage>(last).content.slice(0, 60) : '' }
+  }
+  const saveSnapshot = async (conversation: ChatboxSaveSnapshot): Promise<void> => {
+    const previous = baselines.get(conversation.id)
+    const baseline = previous ?? new Map<string, string>()
+    const changes = createCapturedChanges<ChatboxMessage>(conversation.rows, baseline)
+    if (!previous && conversation.rows.length === 0) await repository.replaceChat(scopeOf(conversation.id), [])
+    else await repository.applyChatChanges(scopeOf(conversation.id), changes.upserts, changes.deletes)
+    baselines.set(conversation.id, advanceBaseline(baseline, changes))
+    const meta: ConversationMeta = {
+      id: conversation.id, title: conversation.title, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
+      systemPrompt: conversation.systemPrompt, model: conversation.model, preview: conversation.preview, pinned: conversation.pinned,
+    }
+    await repository.set(metaKeyOf(conversation.id), meta)
+    const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
+    if (!ids.includes(conversation.id)) {
+      ids.unshift(conversation.id)
+      await repository.set(INDEX_KEY, ids)
+    }
+  }
 
   return {
     async list(): Promise<ChatboxConversationSummary[]> {
@@ -115,20 +141,22 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
     },
 
     async get(id) {
-      const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
-      if (!meta) return null
-      const messages = await repository.loadChat<ChatboxMessage>(scopeOf(id))
-      baselines.set(id, createBaseline(messages, serialize))
-      return {
-        id: meta.id,
-        title: meta.title,
-        createdAt: meta.createdAt,
-        updatedAt: meta.updatedAt,
-        systemPrompt: meta.systemPrompt,
-        model: meta.model,
-        messages,
-        pinned: meta.pinned,
-      }
+      return run(id, async () => {
+        const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
+        if (!meta) return null
+        const messages = await repository.loadChat<ChatboxMessage>(scopeOf(id))
+        baselines.set(id, createBaseline(messages, serialize))
+        return {
+          id: meta.id,
+          title: meta.title,
+          createdAt: meta.createdAt,
+          updatedAt: meta.updatedAt,
+          systemPrompt: meta.systemPrompt,
+          model: meta.model,
+          messages,
+          pinned: meta.pinned,
+        }
+      })
     },
 
     async create(title) {
@@ -151,43 +179,26 @@ export function createChatboxStore(repository: StorageRepository): ChatboxStore 
 
     async save(conversation) {
       conversation.updatedAt = Date.now()
-      // Message rows: incremental per-row writes (ported organ semantics).
-      const baseline = baselines.get(conversation.id) ?? createBaseline([], serialize)
-      const changes = createChanges(conversation.messages, baseline, serialize)
-      await repository.applyChatChanges(scopeOf(conversation.id), changes.upserts, changes.deletes)
-      baselines.set(conversation.id, createBaseline(conversation.messages, serialize))
-
-      // Envelope: meta write + index upsert.
-      const meta: ConversationMeta = {
-        id: conversation.id,
-        title: conversation.title,
-        createdAt: conversation.createdAt,
-        updatedAt: conversation.updatedAt,
-        systemPrompt: conversation.systemPrompt,
-        model: conversation.model,
-        preview: previewOf(conversation),
-        pinned: conversation.pinned,
-      }
-      await repository.set(metaKeyOf(conversation.id), meta)
-      const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
-      if (!ids.includes(conversation.id)) {
-        ids.unshift(conversation.id)
-        await repository.set(INDEX_KEY, ids)
-      }
+      const snapshot = captureConversation(conversation)
+      await run(conversation.id, () => saveSnapshot(snapshot))
     },
 
     async remove(id) {
-      await repository.deleteChat(scopeOf(id))
-      await repository.remove(metaKeyOf(id))
-      const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
-      await repository.set(INDEX_KEY, ids.filter((entry) => entry !== id))
-      baselines.delete(id)
+      await run(id, async () => {
+        await repository.deleteChat(scopeOf(id))
+        baselines.delete(id)
+        await repository.remove(metaKeyOf(id))
+        const ids = (await repository.get<string[]>(INDEX_KEY)) ?? []
+        await repository.set(INDEX_KEY, ids.filter((entry) => entry !== id))
+      })
     },
 
     async setPinned(id, pinned) {
-      const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
-      if (!meta) return
-      await repository.set(metaKeyOf(id), { ...meta, pinned })
+      await run(id, async () => {
+        const meta = await repository.get<ConversationMeta>(metaKeyOf(id))
+        if (!meta) return
+        await repository.set(metaKeyOf(id), { ...meta, pinned })
+      })
     },
   }
 }

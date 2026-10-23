@@ -47,6 +47,7 @@ const groupOpen = (key: 'system' | 'extension'): boolean => toolsUi?.state.group
 const toggleGroup = (key: 'system' | 'extension'): void => {
   if (!toolsUi) return
   toolsUi.state.groups[key] = !groupOpen(key)
+  if (groupOpen(key)) mountedGroups.value.add(key)
   toolsUi.persist()
 }
 
@@ -54,8 +55,18 @@ const pluginOpen = (id: string): boolean => toolsUi?.state.plugins[id] ?? false
 const togglePluginOpen = (id: string): void => {
   if (!toolsUi) return
   toolsUi.state.plugins[id] = !pluginOpen(id)
+  if (pluginOpen(id)) mountedPlugins.value.add(id)
   toolsUi.persist()
 }
+
+// Motion latches: collapse animation needs the content mounted through the
+// close, so a once-opened group/entry stays mounted (collapsed when closed);
+// never-opened ones keep today's lazy v-if semantics.
+const mountedGroups = ref(new Set<string>())
+const mountedPlugins = ref(new Set<string>())
+const groupMounted = (key: 'system' | 'extension'): boolean =>
+  groupOpen(key) || mountedGroups.value.has(key)
+const pluginMounted = (id: string): boolean => pluginOpen(id) || mountedPlugins.value.has(id)
 
 const busy = ref<string | null>(null)
 const error = ref('')
@@ -136,87 +147,101 @@ async function setEnabled(plugin: PluginStateProjection, value: boolean): Promis
         <span class="text-xs text-ink-3">({{ plugins.length }})</span>
       </button>
 
-      <ul v-if="groupOpen(key as 'system' | 'extension')">
-        <li
-          v-for="plugin in plugins"
-          :key="plugin.id"
-          class="border-t border-line"
-        >
-          <div class="flex items-center gap-3 px-4 py-3">
-            <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm text-ink">{{ plugin.display.name }}</span>
-              <span class="mt-0.5 block truncate text-xs text-ink-3">{{ plugin.display.description }}</span>
-            </span>
-            <span
-              v-if="plugin.state === 'degraded'"
-              class="flex-shrink-0 rounded bg-danger-wash px-1.5 py-0.5 text-[10px] text-danger"
-              :title="lastJournalLine(plugin.id)"
-            >异常</span>
-            <button
-              v-if="hasConfig(plugin.id)"
-              type="button"
-              class="flex h-11 w-9 items-center justify-center text-ink-3"
-              :aria-label="pluginOpen(plugin.id) ? '收起配置' : '展开配置'"
-              :aria-expanded="pluginOpen(plugin.id)"
-              @click="togglePluginOpen(plugin.id)"
-            >
-              <svg
-                class="h-4 w-4 transition-transform"
-                :class="pluginOpen(plugin.id) ? 'rotate-90' : ''"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-            <ToggleSwitch
-              :model-value="enabled.has(plugin.id)"
-              :aria-label="`启用${plugin.display.name}`"
-              @update:model-value="(value) => setEnabled(plugin, value)"
-            />
-          </div>
-
-          <div
-            v-if="pluginOpen(plugin.id)"
-            class="border-t border-line bg-bg px-4 py-3"
-          >
-            <p class="mb-2 font-mono text-[10px] text-ink-3">
-              {{ plugin.id }} · v{{ plugin.version }} · {{ plugin.permissions.length }} 项权限 ·
-              {{ plugin.activation === 'eager' ? 'eager' : 'lazy' }}
-            </p>
-            <template v-if="enabled.has(plugin.id)">
-              <template
-                v-for="section in configSections.get(plugin.id) ?? []"
-                :key="section.id"
-              >
-                <p class="mb-1 text-xs font-semibold text-ink-2">
-                  {{ section.title }}
-                </p>
-                <component :is="section.component" />
-              </template>
-            </template>
-            <p
-              v-else
-              class="py-2 text-center text-xs text-ink-3"
-            >
-              插件已停用,启用后可配置
-            </p>
-          </div>
-        </li>
-      </ul>
-
-      <p
-        v-else-if="key === 'extension'"
-        class="px-4 pb-3 text-xs text-ink-3"
+      <div
+        class="mp-mo-collapse"
+        :class="groupOpen(key as 'system' | 'extension') ? 'mp-mo-collapse-open' : ''"
       >
-        外部插件(M4+)安装后出现在这里
-      </p>
+        <div class="mp-mo-collapse-inner">
+          <ul v-if="groupMounted(key as 'system' | 'extension')">
+            <li
+              v-for="plugin in plugins"
+              :key="plugin.id"
+              class="border-t border-line"
+            >
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm text-ink">{{ plugin.display.name }}</span>
+                  <span class="mt-0.5 block truncate text-xs text-ink-3">{{ plugin.display.description }}</span>
+                </span>
+                <span
+                  v-if="plugin.state === 'degraded'"
+                  class="flex-shrink-0 rounded bg-danger-wash px-1.5 py-0.5 text-[10px] text-danger"
+                  :title="lastJournalLine(plugin.id)"
+                >异常</span>
+                <button
+                  v-if="hasConfig(plugin.id)"
+                  type="button"
+                  class="flex h-11 w-9 items-center justify-center text-ink-3"
+                  :aria-label="pluginOpen(plugin.id) ? '收起配置' : '展开配置'"
+                  :aria-expanded="pluginOpen(plugin.id)"
+                  @click="togglePluginOpen(plugin.id)"
+                >
+                  <svg
+                    class="h-4 w-4 transition-transform"
+                    :class="pluginOpen(plugin.id) ? 'rotate-90' : ''"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </button>
+                <ToggleSwitch
+                  :model-value="enabled.has(plugin.id)"
+                  :aria-label="`启用${plugin.display.name}`"
+                  @update:model-value="(value) => setEnabled(plugin, value)"
+                />
+              </div>
+
+              <div
+                class="mp-mo-collapse"
+                :class="pluginOpen(plugin.id) ? 'mp-mo-collapse-open' : ''"
+              >
+                <div class="mp-mo-collapse-inner">
+                  <div
+                    v-if="pluginMounted(plugin.id)"
+                    class="border-t border-line bg-bg px-4 py-3"
+                  >
+                    <p class="mb-2 font-mono text-[10px] text-ink-3">
+                      {{ plugin.id }} · v{{ plugin.version }} · {{ plugin.permissions.length }} 项权限 ·
+                      {{ plugin.activation === 'eager' ? 'eager' : 'lazy' }}
+                    </p>
+                    <template v-if="enabled.has(plugin.id)">
+                      <template
+                        v-for="section in configSections.get(plugin.id) ?? []"
+                        :key="section.id"
+                      >
+                        <p class="mb-1 text-xs font-semibold text-ink-2">
+                          {{ section.title }}
+                        </p>
+                        <component :is="section.component" />
+                      </template>
+                    </template>
+                    <p
+                      v-else
+                      class="py-2 text-center text-xs text-ink-3"
+                    >
+                      插件已停用,启用后可配置
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </li>
+          </ul>
+
+          <p
+            v-if="key === 'extension' && plugins.length === 0"
+            class="border-t border-line px-4 py-3 text-xs text-ink-3"
+          >
+            外部插件(M4+)安装后出现在这里
+          </p>
+        </div>
+      </div>
     </div>
 
     <p

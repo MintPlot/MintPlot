@@ -31,12 +31,33 @@ describe('ChatHomeView swipe-to-delete', () => {
     return row!
   }
 
+  // Reveal zones are always-mounted siblings behind the row (inside the same
+  // li); their inline style carries the live translate (round-3 redesign:
+  // glued to the row edges, sliding OUT with the drag). Parked = clipped
+  // outside the li (+72 delete / -72 pin). Scoped to the dragged row's li —
+  // the list sorts by updatedAt, so global findAll could pick another row.
+  const revealZonesOf = (row: ReturnType<typeof rowOf>) => {
+    const zones = [...(row.element.closest('li')!.querySelectorAll('[aria-hidden="true"]'))]
+      .filter((el) => el.textContent?.includes('置顶') || el.textContent?.includes('删除'))
+      .map((el) => ({
+        pin: el.textContent?.includes('置顶') ?? false,
+        delete: el.textContent?.includes('删除') ?? false,
+        x: Number(el.getAttribute('style')?.match(/translateX\((-?[\d.]+)px\)/)?.[1] ?? NaN),
+      }))
+    expect(zones.length).toBeGreaterThan(0)
+    return {
+      pin: zones.find((zone) => zone.pin) ?? { x: NaN },
+      delete: zones.find((zone) => zone.delete) ?? { x: NaN },
+    }
+  }
+
   // jsdom has no PointerEvent constructor and MouseEvent.clientX is
   // getter-only, so coordinates ride a plain Event via defineProperty — the
-  // component only reads clientX/pointerId/currentTarget.
-  const firePointer = (element: Element, type: string, clientX: number): void => {
+  // component only reads clientX/clientY/pointerId/currentTarget.
+  const firePointer = (element: Element, type: string, clientX: number, clientY?: number): void => {
     const event = new Event(type, { bubbles: true })
     Object.defineProperty(event, 'clientX', { value: clientX })
+    if (clientY !== undefined) Object.defineProperty(event, 'clientY', { value: clientY })
     Object.defineProperty(event, 'pointerId', { value: 1 })
     element.dispatchEvent(event)
   }
@@ -97,6 +118,53 @@ describe('ChatHomeView swipe-to-delete', () => {
     expect(useChatRoute().value.view).toBe('list')
   })
 
+  it('垂直滚动的横向 slop 不闪出置顶/删除(方向锁,2026-10-17 真机回归)', async () => {
+    const wrapper = await mountView()
+    const row = rowOf(wrapper, '第一个对话')
+
+    // A vertical flick's opening slop: 12px horizontal drift, 40px down.
+    firePointer(row.element, 'pointerdown', 300, 400)
+    firePointer(row.element, 'pointermove', 288, 440)
+    await nextTick()
+
+    const zones = revealZonesOf(row)
+    expect(zones.delete.x).toBe(72)
+    expect(zones.pin.x).toBe(-72)
+    // Row stays parked — the drift never becomes a drag offset.
+    expect(row.attributes('style')).toContain('translateX(0px)')
+
+    // The browser takes over the pan (pointercancel), never a tap-open.
+    firePointer(row.element, 'pointercancel', 288, 440)
+    await nextTick()
+    expect(useChatRoute().value.view).toBe('list')
+  })
+
+  it('滑动时按钮跟行滑出:左滑删除区跟进、右滑置顶区跟进(2026-10-17 round-3)', async () => {
+    const wrapper = await mountView()
+    const row = rowOf(wrapper, '第一个对话')
+
+    // Left swipe 40px: the row slides to -40 and the delete zone rides its
+    // edge (-40 + 72 = 32 — inside the revealed gap); the pin side is
+    // pushed further out (-40 - 72 = -112).
+    firePointer(row.element, 'pointerdown', 300, 400)
+    firePointer(row.element, 'pointermove', 260, 402)
+    await nextTick()
+    const left = revealZonesOf(row)
+    expect(row.attributes('style')).toContain('translateX(-40px)')
+    expect(left.delete.x).toBe(32)
+    expect(left.pin.x).toBe(-112)
+    firePointer(row.element, 'pointercancel', 260, 402)
+
+    // Right swipe 40px: mirror — the pin zone rides into the gap.
+    firePointer(row.element, 'pointerdown', 300, 400)
+    firePointer(row.element, 'pointermove', 340, 402)
+    await nextTick()
+    const right = revealZonesOf(row)
+    expect(right.pin.x).toBe(-32)
+    expect(right.delete.x).toBe(112)
+    firePointer(row.element, 'pointercancel', 340, 402)
+  })
+
   it('轻点行开对话;拖动过的手势不触发打开(click 被抑制)', async () => {
     const wrapper = await mountView()
 
@@ -146,22 +214,43 @@ describe('ChatHomeView swipe-to-delete', () => {
     toastSpy.mockRestore()
   })
 
-  it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才露出', async () => {
+  it.each(['pointerup', 'pointercancel'])('keeps the active row drag when another row receives %s', async (event) => {
+    const wrapper = await mountView()
+    const first = rowOf(wrapper, '第一个对话')
+    const second = rowOf(wrapper, '第二个对话')
+    firePointer(first.element, 'pointerdown', 300, 400)
+    firePointer(second.element, 'pointerdown', 300, 500)
+    firePointer(second.element, 'pointermove', 340, 500)
+    firePointer(first.element, event, 300, 400)
+    await nextTick()
+    expect(second.attributes('style')).toContain('translateX(40px)')
+    firePointer(second.element, 'pointerup', 340, 500)
+    await flushPromises()
+    const entries = await chatboxStore.list()
+    expect(entries.find(entry => entry.title === '第二个对话')?.pinned).toBe(true)
+    expect(entries.find(entry => entry.title === '第一个对话')?.pinned).toBeFalsy()
+    wrapper.unmount()
+  })
+
+  it('纯按压不露置顶/删除色块(半透明行会透出);拖过起点阈值才跟行滑出', async () => {
     const wrapper = await mountView()
     const row = rowOf(wrapper, '第一个对话')
-    const revealBlocks = () =>
-      (row.element.closest('li')!).querySelectorAll<HTMLDivElement>(':scope > div')
 
-    // Press and hold without movement: both blocks stay display:none — a
-    // bare press keying them on flashed both actions through the row.
+    // Press and hold without movement: both zones stay parked outside the
+    // li (clipped) — press-and-hold is reserved for other uses.
     firePointer(row.element, 'pointerdown', 300)
     await nextTick()
-    expect([...revealBlocks()].every((block) => block.style.display === 'none')).toBe(true)
+    const pressed = revealZonesOf(row)
+    expect(pressed.pin.x).toBe(-72)
+    expect(pressed.delete.x).toBe(72)
 
-    // Move past the drag-start threshold: both reveal.
+    // Move past the drag-start threshold (leftward): the delete zone rides
+    // the row's edge into the gap.
     firePointer(row.element, 'pointermove', 300 - 12)
     await nextTick()
-    expect([...revealBlocks()].every((block) => block.style.display !== 'none')).toBe(true)
+    const dragged = revealZonesOf(row)
+    expect(dragged.delete.x).toBe(60)
+    expect(dragged.pin.x).toBe(-84)
 
     firePointer(row.element, 'pointerup', 300 - 12)
     await nextTick()

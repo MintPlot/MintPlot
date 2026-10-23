@@ -76,11 +76,16 @@ const toggleSection = (id: string): void => {
             </button>
           </h2>
           <div
-            v-show="isExpanded(section.id)"
             :id="`${section.id}-body`"
-            class="border-t border-line"
+            class="mp-mo-collapse"
+            :class="isExpanded(section.id) ? 'mp-mo-collapse-open' : ''"
           >
-            <component :is="section.component" />
+            <div
+              class="mp-mo-collapse-inner"
+              :class="isExpanded(section.id) ? 'border-t border-line' : ''"
+            >
+              <component :is="section.component" />
+            </div>
           </div>
         </section>
 
