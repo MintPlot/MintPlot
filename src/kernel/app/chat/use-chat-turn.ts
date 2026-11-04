@@ -8,6 +8,7 @@
  */
 import { getCurrentScope, onScopeDispose, type Ref } from 'vue'
 import { createStreamPublication } from './stream-publication'
+import { readTextOutputMode } from './output-mode'
 import type { SessionLocalWorkOptions } from './session-local-work'
 import type { SettingsState } from '@/kernel/settings/settings-state'
 import type { VariableStore, VariableSnapshot } from '@/kernel/variables/variable-store'
@@ -145,20 +146,32 @@ export function useChatTurn(options: ChatTurnOptions) {
     releaseVisibility = release
     let succeeded = false
     try {
-      const result = await provider.stream(requestMessages, {
-        signal: controller.signal,
-        // M4-g3 session-level model override (both domains; empty = global).
-        model: (isCardDomain() ? cardSession()?.model : conversation()?.model) || undefined,
-        onDelta: (delta) => {
-          if (!controller.signal.aborted) output.append('content', delta)
-        },
-        // M4-f: native reasoning streams into its own floor field — the wire
-        // capture runs regardless of the plugin toggle (data is not recoverable
-        // later); the display card is what the toggle gates.
-        onReasoningDelta: (delta) => {
-          if (!controller.signal.aborted) output.append('reasoning', delta)
-        },
-      })
+      // 文本输出形式 setting: read LIVE per turn so a settings toggle applies
+      // from the next reply on. 'whole' prefers a true non-stream HTTP call
+      // when the provider offers one; a provider without complete() falls
+      // back to its stream with delta appends suppressed — buffered
+      // internally, published once via output.finish below, so the UI stays
+      // one-shot either way.
+      const wholeMode = readTextOutputMode(options.settingsState) === 'whole'
+      const modelOverride = (isCardDomain() ? cardSession()?.model : conversation()?.model) || undefined
+      const result = wholeMode && provider.complete
+        ? await provider.complete(requestMessages, { signal: controller.signal, model: modelOverride })
+        : await provider.stream(requestMessages, {
+          signal: controller.signal,
+          // M4-g3 session-level model override (both domains; empty = global).
+          model: modelOverride,
+          onDelta: (delta) => {
+            if (wholeMode) return
+            if (!controller.signal.aborted) output.append('content', delta)
+          },
+          // M4-f: native reasoning streams into its own floor field — the wire
+          // capture runs regardless of the plugin toggle (data is not recoverable
+          // later); the display card is what the toggle gates.
+          onReasoningDelta: (delta) => {
+            if (wholeMode) return
+            if (!controller.signal.aborted) output.append('reasoning', delta)
+          },
+        })
       // A stream that settles cleanly with zero content (thinking-only local
       // engines, upstream error frames older builds swallowed) is a failure the
       // user must see — never a silent no-op turn (D3 would drop the floor).
